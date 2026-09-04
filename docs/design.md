@@ -1,7 +1,7 @@
 # docgrad — 專案文件綜合評估與收斂 skill 設計
 
 > **狀態**：已實作（2026-07-12 定案並完成 v0.1.0）
-> **Last updated:** 2026-07-26
+> **Last updated:** 2026-09-04
 
 ## 緣起
 
@@ -15,7 +15,7 @@
 - **不評什麼**：prose 風格（Vale 的事）、SKILL.md 本身品質（agnix/skill-audit 的事）、程式碼品質（code review 的事）。
 - **資訊落點 vs code 品質的界線**：docgrad 判「這則資訊該住哪個載體、有沒有第二份權威」（規則見 [reference/placement.md](../reference/placement.md)），為此**會讀** code 註解——但只判落點與重複，**不評**註解寫得好不好、該不該補註解。判準是「有沒有第二份權威／位置對不對」，不是「寫得好不好」；沒有這條界線，一致性維度會滑成 code review。
 - **通用性**：零 repo 假設。結構（文件夾、索引、入口檔、新鮮度慣例）全部由 `init` 偵測＋問卷確認後寫入設定檔，之後每輪讀設定檔。
-- **前提條件**：文件必須是**本地 markdown 檔案樹**，且目標 repo 根目錄可寫入 `.docgrad.yml`（Blocker #1）。git 非硬需求——無 git 時新鮮度降級為 claimed-only（`scripts/freshness.mjs › gitDate()` 取不到就只認文件自稱日期）、覆蓋漂移無法量測，其餘照跑。**不支援** wiki／Confluence 等遠端文件源：檔案不在樹上、四支腳本全依賴本地路徑、設定檔也無處可放。
+- **前提條件**：文件必須是**本地 markdown 檔案樹**，且目標 repo 根目錄可寫入 `.docgrad.yml`（Blocker #1）。git 非硬需求——無 git 時新鮮度降級為 claimed-only（`scripts/freshness.mjs › gitDate()` 取不到就只認文件自稱日期）、覆蓋漂移無法量測、`retrieval.mjs` 的 `churn_commits`／`index_hotness` 皆為 null 但不炸，其餘照跑。**不支援** wiki／Confluence 等遠端文件源：檔案不在樹上、五支腳本全依賴本地路徑、設定檔也無處可放。
 - **rubric 可獨立引用**：`reference/rubric.md` 的五維錨點本身不依賴腳本，可單獨拿去對非 repo 文件源做人工評分——但那是「借用錨點」而非 docgrad 流程：無機械訊號、不可重現，也不該落 scorecard/history。
 - **能力天花板要明說**：Blocker 禁區擋住的星等（目前：新鮮度 ★5 需 CI gate 而 loop 不碰 CI）由 `improve.md` 的設計性天花板規則明文判定，不靠當輪 model 臨場繞過——否則報告會把「設計上不可達」誤呈成「這兩輪沒修動」。
 - **使用者決策（2026-07-12 定案）**：獨立 git repo 發布（本 repo）；impeccable 式「init 一次、之後逐步收斂」；五維計星＋token 經濟只報告不計星；loop 每輪 commit、達標才停；評分＝內建機械腳本＋LLM 判斷混合。
@@ -38,9 +38,10 @@ docgrad/
 │   ├── lib.mjs           # 共用模組：YAML 子集解析/config/walker/token/markdown 解析
 │   ├── inventory.mjs     # 文件清單＋CJK-aware token 量測＋成本試算輸入
 │   ├── links.mjs         # 死鏈/anchor/孤兒（從索引＋entry 檔 transitive 可達性）
-│   ├── freshness.mjs     # 日期訊號覆蓋率＋git log 真實日期對照
-│   └── coverage.mjs      # 覆蓋漂移：code 區域 vs 提及它的 docs 的 git 時滯
-├── tests/                # node --test；fixtures/basic/ 迷你目標 repo
+│   ├── freshness.mjs     # 日期訊號覆蓋率＋git log 真實日期對照（convention 可多值）
+│   ├── coverage.mjs      # 覆蓋漂移：code 區域 vs 提及它的 docs 的 git 時滯
+│   └── retrieval.mjs     # 可回溯性＋邊際成本：scenarios/areas/index_hotness（report-only）
+├── tests/                # node --test；fixtures/basic/、fixtures/retrieval/ 迷你目標 repo
 ├── docs/
 │   ├── design.md         # 本檔
 │   └── how-to.md         # 常見開發任務（加維度/改 rubric/擴充 lib）
@@ -77,7 +78,7 @@ entry_files: [CLAUDE.md]          # always-loaded，計入固定成本
 index_file: docs/README.md        # 孤兒判定的可達性根
 exclude: [docs/archive/]          # 不計分但列入污染面報告
 freshness:
-  convention: frontmatter          # frontmatter | heading-line | none
+  convention: frontmatter          # frontmatter | heading-line | none；可逗號分隔多值（混用慣例的 repo）
   field: last_updated              # 或 "Last updated:" 行的 pattern
 targets:                           # 各維目標星等（loop 停止條件）
   completeness: 4
@@ -86,7 +87,8 @@ targets:                           # 各維目標星等（loop 停止條件）
   linkage: 4
   consistency: 4
 correctness_sample: 8              # 每次 audit 抽查的宣稱條數
-scenario: "在 <某模組> 加一個典型新功能"  # token 經濟模擬用的代表性任務
+scenario: "在 <某模組> 加一個典型新功能"  # 無 scenarios 時的 LLM 模擬 fallback
+scenarios: [src/foo/bar.ts]        # retrieval.mjs 機械模擬邊際成本＋可回溯性用（report-only）
 language: zh-TW                    # 報告與 commit 語言
 ```
 
@@ -122,7 +124,7 @@ repo 沒有 `.docgrad.yml` 時，`audit`/`improve`/`loop` 一律先導向 `init`
 
 操作流程的權威在 [reference/improve.md](../reference/improve.md)，本節為設計說明。每輪（＝`improve` 一次）：
 
-1. 跑四支腳本＋LLM 判斷維度 → scorecard。
+1. 跑五支腳本＋LLM 判斷維度 → scorecard。
 2. 挑**最低分維度**（同分取 rubric 表順序靠前者），從該維的失分點生成一批 focused 修改（一輪只修一個維度，避免全量改一半留矛盾——收斂不是重寫）。
 3. 機械修正（死鏈、日期 backfill 用 `git log -1 --format=%as` 真實日期不捏造、孤兒補入索引）直接做；語意修改（合併冗餘文件、改寫敘述為 refer-to-code、刪檔）也做，但在 commit message 明示清單。
 4. 重跑量測確認該維分數上升、其他維不降。
@@ -137,16 +139,17 @@ branch 隔離讓用戶可整批 review 再合併；每輪 commit 保證中斷可
 
 ## 畢業建議（報告固定尾節，不自動執行）
 
-達標後建議把可機械化的規則沉澱成該 repo 自己的 CI gate（死鏈/孤兒/新鮮度/入口檔預算——`docs-gate.mjs` CI 模式），並說明 docgrad 的四支 scripts 可直接搬去改造。docgrad 只評分與修內容，**不碰目標 repo 的 CI 設定**。
+達標後建議把可機械化的規則沉澱成該 repo 自己的 CI gate（死鏈/孤兒/新鮮度/入口檔預算——`docs-gate.mjs` CI 模式），並說明 docgrad 的五支 scripts 可直接搬去改造。docgrad 只評分與修內容，**不碰目標 repo 的 CI 設定**。
 
 ## scripts 契約
 
-四支皆為零依賴 Node（≥18）腳本，讀 `.docgrad.yml`，輸出 JSON 到 stdout（LLM 消費），錯誤走 stderr＋非零 exit code。共用旗標由 `scripts/lib.mjs › parseArgs()` 一處解析：`--root`（目標 repo 根）、`--config`（設定檔外置——文件源本身不能落檔時用）、`--include`（scoped audit 的範圍 glob）。以下 JSON 形狀為**說明用摘要**；欄位全集以實跑腳本輸出為權威（本檔不複述完整 schema，避免與 `scripts/` 漂移）：
+五支皆為零依賴 Node（≥18）腳本，讀 `.docgrad.yml`，輸出 JSON 到 stdout（LLM 消費），錯誤走 stderr＋非零 exit code。共用旗標由 `scripts/lib.mjs › parseArgs()` 一處解析：`--root`（目標 repo 根）、`--config`（設定檔外置——文件源本身不能落檔時用）、`--include`（scoped audit 的範圍 glob）。以下 JSON 形狀為**說明用摘要**；欄位全集以實跑腳本輸出為權威（本檔不複述完整 schema，避免與 `scripts/` 漂移）：
 
-- `inventory.mjs` → `{files: [{path, bytes, tokens_est, type}], totals, entry_cost, pollution: {excluded_tokens, ratio}}`
+- `inventory.mjs` → `{files: [{path, bytes, tokens_est, type, structure: {h2, rules}}], totals: {…, rules_total, rules_anchored_ratio}, entry_cost, pollution: {excluded_tokens, ratio}}`
 - `links.mjs` → `{dead_links: [], bad_anchors: [], orphans: [], reachable_ratio}`（可達性從 `index_file`＋`entry_files` 起算 transitive——entry 檔 always-loaded，定義上可達；`--include` 限定範圍時孤兒與可達率一律回 `null`／`[]`，可達性是全量概念）
-- `freshness.mjs` → `{coverage_ratio, stale: [{path, claimed, actual_git, age_days}], mismatches}`
+- `freshness.mjs` → `{convention, coverage_ratio, stale: [{path, claimed, actual_git, age_days}], mismatches}`（`convention` 是實際採用的慣例清單，多值時依序嘗試抽日期）
 - `coverage.mjs` → `{src_dirs, thresholds, loose_files, areas: [{area, code_files, last_code_commit, mentioned_by, last_doc_commit, commits_since_doc, drift_days, status}], undocumented, drifted}`（覆蓋漂移：code 區域 vs 提及它的 docs 的 git 時滯）
+- `retrieval.mjs` → `{scenarios: [{path, churn_commits, docs: [{doc, hits, tokens_est, depth_from_index}], fan_in, marginal_tokens, max_depth, code_pointer}], areas: [{area, code_pointer, fan_in}], code_pointer_ratio, index_hotness: {index_file, entry_files, median_commits_90d, ratio, top5} | null}`（report-only：可回溯性＋邊際成本，不吃 `--include`，理由同 `coverage.mjs`）
 
 ## 開放問題（實作時定案）
 

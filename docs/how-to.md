@@ -1,6 +1,6 @@
 # docgrad how-to — 常見開發任務
 
-> **Last updated:** 2026-07-26
+> **Last updated:** 2026-09-04
 
 ## 新增一個評分維度
 
@@ -18,10 +18,10 @@
 
 ## 擴充量測腳本（lib.mjs）
 
-- `scripts/lib.mjs` 是四支 CLI 的共用模組；函式契約以 code 為權威（refer-to-code，docs 不複述簽名）。
-- 共用旗標（`--root`／`--config`／`--include`）由 `parseArgs()` 一處解析：新增旗標改那裡，四支同時吃到；
-  未知旗標一律丟錯，不靜默忽略。scope 過濾語意見 `matchesScope()`，新腳本若不適用 scope（如 `coverage.mjs`）
-  要在輸出的 `note` 明講為什麼。
+- `scripts/lib.mjs` 是五支 CLI 的共用模組；函式契約以 code 為權威（refer-to-code，docs 不複述簽名）。
+- 共用旗標（`--root`／`--config`／`--include`）由 `parseArgs()` 一處解析：新增旗標改那裡，五支同時吃到；
+  未知旗標一律丟錯，不靜默忽略。scope 過濾語意見 `matchesScope()`，新腳本若不適用 scope（如 `coverage.mjs`、
+  `retrieval.mjs`）要在輸出的 `note` 明講為什麼。
 - YAML 解析是**兩層子集**（頂層 scalar／inline list／block list＋一層 nested map），新設定欄位不要超出這個結構。
 - 開發驗證：`node --test tests/*.test.mjs`（Node ≥18；v25 起目錄參數不可用）。
 

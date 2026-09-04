@@ -3,6 +3,34 @@
 版本權威在 [.claude-plugin/plugin.json](.claude-plugin/plugin.json) 的 `version`；本檔記錄各版變更。
 版號語意（semver，docgrad 特化）見 [docs/how-to.md](docs/how-to.md) §發版。
 
+## 0.6.0 — 2026-09-04
+
+- **新增（腳本）**：第五支量測腳本 `scripts/retrieval.mjs`——可回溯性＋邊際成本，report-only（不計星）。
+  對 `.docgrad.yml` 新欄位 `scenarios:`（代表性 code 路徑清單）逐條算 `marginal_tokens`（entry_files＋索引鏈
+  ＋錨定 doc 的 tokens，各檔只算一次）、`max_depth`（從 `index_file` BFS 到最遠一份錨定 doc 要幾跳）、
+  `fan_in`（錨定它的 doc 數）、`code_pointer`（該路徑的 code 有沒有指回任一 docs）、`churn_commits`
+  （近 90 天 commit 數，加權指出「稅最重」的 scenario）；沒有 `scenarios:` 時仍給 `areas`
+  （`src_dirs` 各一級子目錄的 `code_pointer`／`fan_in`）與 `index_hotness`（`index_file`／`entry_files`
+  近 90 天 commit 數 vs 全部 docs 中位數的 `ratio`＋`top5`）。不吃 `--include`（理由同 `coverage.mjs`，
+  可回溯性是全量索引/檢索概念）。新增純函式 `lib.mjs › extractCodeRefs()`：抽 backtick 內以 `src_dirs`
+  前綴開頭的路徑、`` `path › symbol` `` 形式、裸檔名（比 basename），供 `retrieval.mjs`／`inventory.mjs`
+  共用，不寫死任何目錄名。
+- **新增（欄位）**：`inventory.mjs` 每檔輸出 `structure: {h2: [{title, tokens_est}], rules: {count,
+  median_chars, p90_chars, anchored_ratio}}`（`rules.pattern` 新設定鍵，預設 `**MUST`，判定：清單項
+  含該字串即算規則行；`anchored`＝該行本身可用 `extractCodeRefs` 抽到座標）；`totals` 加
+  `rules_total`／`rules_anchored_ratio`（全檔彙總，非逐檔平均）。無 H2 的檔 `structure` 仍存在但為空。
+- **修正（假象）**：`freshness.mjs` 的 `freshness.convention` 改吃逗號/`+` 分隔的多值（`frontmatter,
+  heading-line`），`extractClaimedDate` 依序嘗試、第一個抽到的為準；輸出 `convention` 一律回傳實際採用
+  的清單（原本單值也是字串，此為輸出形狀變更，非量測語意變更——`coverage_ratio` 判法本身未動）。新增
+  `freshness.heading_field`（heading-line 用的行內關鍵字），只設 `field` 且 convention 含 heading-line
+  時 fallback 用 `field`（相容舊設定）。修掉「一次只認一種日期慣例，混用慣例的 repo coverage_ratio
+  顯示假性偏低、每輪要人工扣除」的量測假象（動機：kdan-workforce 實測 `docs/superpowers/specs/` 用
+  frontmatter、`docs/integrations/`+`docs/runbooks/` 用 heading-line，單值只認得到約 76%）。
+- **相容性**：本版**非 rubric 錨點變更**——★1–★5 判定門檻一字未動，歷史分數可比性不受影響
+  （Token 經濟＋新增的「可回溯性」小節皆 report-only）。`.docgrad.yml` 新欄位（`scenarios`／`rules`／
+  `freshness.heading_field`）全部可選，未設定時四支既有腳本輸出不變；`freshness.convention` 單值行為
+  不變。既有 repo 不需重跑 `/docgrad init` 即可繼續用舊設定，想用新訊號才需要補欄位。
+
 ## 0.5.0 — 2026-07-26
 
 - **新增**：`reference/placement.md` —— 資訊安置政策。三軸取捨（取用成本／漂移風險／受眾廣度）決定
