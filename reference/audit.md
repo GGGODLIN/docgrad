@@ -1,6 +1,6 @@
 # audit — 單次全量評分
 
-> **Last updated:** 2026-07-26
+> **Last updated:** 2026-09-04
 
 前置（blocker）：目標 repo 根目錄必須有 `.docgrad.yml`；沒有 → 停下，導向 `/docgrad init`。
 本流程**不修改任何檔案**、不寫任何狀態——純報告。評分前必先讀 [rubric.md](rubric.md)。
@@ -18,9 +18,10 @@ node "$SKILL_DIR/scripts/inventory.mjs" --root .
 node "$SKILL_DIR/scripts/links.mjs" --root .
 node "$SKILL_DIR/scripts/freshness.mjs" --root .
 node "$SKILL_DIR/scripts/coverage.mjs" --root .
+node "$SKILL_DIR/scripts/retrieval.mjs" --root .
 ```
 
-完整消費四份 JSON；不要用 head/grep/jq 截斷。任何一支 exit 非 0 → 停下回報 stderr。
+完整消費五份 JSON；不要用 head/grep/jq 截斷。任何一支 exit 非 0 → 停下回報 stderr。
 
 ### 2. 完整性
 
@@ -68,8 +69,17 @@ links 的 `cjk_uncertain: true` 壞錨先逐一人工確認（開檔看標題）
 
 ### 7. Token 經濟報告
 
-依 rubric.md「Token 經濟」節計算固定成本、邊際成本（用 `.docgrad.yml` 的 scenario 模擬
-必讀路徑）、污染面，附損益兩平解讀。
+依 rubric.md「Token 經濟」節計算固定成本、污染面，附損益兩平解讀。
+
+邊際成本：`.docgrad.yml` 有設 `scenarios:`（代表性 code 路徑清單）時，直接消費 `retrieval.mjs` 的
+`scenarios[]` 輸出——每條列出 `marginal_tokens`／`max_depth`／`fan_in`／`code_pointer`，並用
+`churn_commits` 排序點名「稅最重」那條。沒設 `scenarios:` 時退回舊法：用 `.docgrad.yml` 的
+`scenario`（單數）沿索引/路由規則 LLM 模擬必讀路徑。
+
+同時附「可回溯性」小節（report-only，不計星，見 rubric.md 同名節）：
+`retrieval.mjs` 的 `code_pointer_ratio`（低比例的 area 列出來，代表 code 改完找不到回 spec 的路）、
+`index_hotness`（`ratio` 明顯偏高時點名，附 `top5`）；`inventory.mjs` 各檔 `structure.rules` 裡
+`median_chars`/`p90_chars` 明顯偏長或 `anchored_ratio` 明顯偏低的檔案，建議契約層／細節層拆分。
 
 ### 8. 輸出 scorecard
 
@@ -86,9 +96,16 @@ links 的 `cjk_uncertain: true` 壞錨先逐一人工確認（開檔看標題）
 
 ## Token 經濟（不計星）
 - 固定成本：~N tokens（entry_files: …）
-- 邊際成本（scenario「…」）：~N tokens，必讀路徑：a.md → b.md → …
+- 邊際成本：有 scenarios 時逐條列（scenario「path」：~N tokens、max_depth N 跳、fan_in N、
+  code_pointer yes/no、churn_commits N——標出稅最重那條）；無 scenarios 則沿用 scenario「…」LLM
+  模擬：~N tokens，必讀路徑 a.md → b.md → …
 - 污染面：x%（exclude: …）
 - 解讀：…
+
+### 可回溯性（report-only）
+- code_pointer_ratio：x%（低於平均的 area：…）
+- index_hotness：ratio N（top5：…）
+- structure.rules 偏長／低 anchored 的檔案：…
 
 ## 建議下一步
 最低分維度＝<維度>（同分取 rubric 順序靠前者）。失分點：
@@ -121,7 +138,7 @@ links 的 `cjk_uncertain: true` 壞錨先逐一人工確認（開檔看標題）
 | 新鮮度 | 直接可用（per-file 判定，不受範圍影響）。 |
 | 連結度 | 只採計死鏈／壞錨；孤兒與可達率腳本會回 `null`——可達性是全量索引概念，範圍一縮就失真。報告寫「不適用」，**不可**因此打 ★1。 |
 | 一致性 | 跨文件比對限縮在 scope 內；矛盾的另一半落在範圍外時記為「需全量 audit 確認」。 |
-| Token 經濟 | 只報範圍內 tokens。固定成本／污染面是全量概念，scoped 值不可與全量報告對比，標明即可。 |
+| Token 經濟 | 只報範圍內 tokens。固定成本／污染面是全量概念，scoped 值不可與全量報告對比，標明即可；`retrieval.mjs` 不吃 `--include`（同 coverage.mjs 理由，見其 `note`），邊際成本／可回溯性報全量。 |
 
 **報告標頭**（取代全量 scorecard 的標題行）：
 

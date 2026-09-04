@@ -81,11 +81,15 @@ const DEFAULTS = {
   index_file: null,
   exclude: [],
   src_dirs: [],
-  freshness: { convention: 'none', field: null, stale_after_days: 60 },
+  // convention 可為單值或逗號/`+` 分隔的多值（見 parseFreshnessConventions）；
+  // heading_field 是 heading-line 用的行內關鍵字，未設時 fallback 用 field（相容舊設定）。
+  freshness: { convention: 'none', field: null, heading_field: null, stale_after_days: 60 },
   coverage: { drift_after_days: 30, min_commits: 3 },
   targets: { completeness: 4, correctness: 4, freshness: 4, linkage: 4, consistency: 4 },
   correctness_sample: 8,
   scenario: null,
+  scenarios: [], // retrieval.mjs 用：代表性 code 路徑（檔案或目錄）清單，report-only
+  rules: { pattern: '**MUST' }, // inventory.mjs structure.rules 用：規則行判定字串
   language: 'zh-TW',
 };
 
@@ -101,8 +105,12 @@ export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILEN
     freshness: { ...DEFAULTS.freshness, ...(parsed.freshness ?? {}) },
     coverage: { ...DEFAULTS.coverage, ...(parsed.coverage ?? {}) },
     targets: { ...DEFAULTS.targets, ...(parsed.targets ?? {}) },
+    rules: { ...DEFAULTS.rules, ...(parsed.rules ?? {}) },
   };
-  if (['frontmatter', 'heading-line'].includes(config.freshness.convention) && !config.freshness.field) {
+  const needsField = parseFreshnessConventions(config.freshness.convention).some(
+    (c) => c === 'frontmatter' || c === 'heading-line'
+  );
+  if (needsField && !config.freshness.field) {
     throw new Error(`freshness.convention 為 ${config.freshness.convention} 時必須設定 freshness.field`);
   }
   return config;
@@ -286,21 +294,93 @@ export function extractLinks(text) {
 
 const DATE_RE = /(\d{4}-\d{2}-\d{2})/;
 
-export function extractClaimedDate(text, freshness) {
-  if (freshness.convention === 'frontmatter') {
+// convention 接受單值或逗號/`+` 分隔的多值（"frontmatter,heading-line" 或
+// "frontmatter+heading-line"）；未設定/假值一律視為 'none'。
+export function parseFreshnessConventions(convention) {
+  if (!convention) return ['none'];
+  return String(convention)
+    .split(/[,+]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function extractClaimedDateOne(text, convention, freshness) {
+  if (convention === 'frontmatter') {
     const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!fm) return null;
     const line = fm[1].split(/\r?\n/).find((l) => l.trimStart().startsWith(`${freshness.field}:`));
     const m = line && line.match(DATE_RE);
     return m ? m[1] : null;
   }
-  if (freshness.convention === 'heading-line') {
+  if (convention === 'heading-line') {
+    // heading_field 未設時 fallback 用 field（只設 field 就想吃 heading-line 的舊設定）。
+    const field = freshness.heading_field ?? freshness.field;
+    if (!field) return null;
     for (const line of text.split(/\r?\n/).slice(0, 30)) {
-      if (line.includes(freshness.field)) {
+      if (line.includes(field)) {
         const m = line.match(DATE_RE);
         if (m) return m[1];
       }
     }
   }
   return null;
+}
+
+// 依 convention 清單依序嘗試，第一個抽到的日期為準。
+export function extractClaimedDate(text, freshness) {
+  for (const convention of parseFreshnessConventions(freshness.convention)) {
+    const date = extractClaimedDateOne(text, convention, freshness);
+    if (date) return date;
+  }
+  return null;
+}
+
+// --- code 錨點抽取（retrieval.mjs／inventory.mjs 用）------------------------------
+// docs/how-to.md §引用 code 的錨點慣例：backtick 內用 `path › symbol()`，不用行號。
+// 兩種形式都認：
+//   1. 單一 backtick 內、以任一 srcDirs 前綴開頭的路徑，可選 " › symbol"：
+//      `apps/api/src/foo/bar.ts`、`scripts/lib.mjs › DEFAULTS.targets`
+//   2. 裸檔名（無路徑前綴，靠呼叫端以實際檔案 basename 比對）：`bar.ts`，
+//      也認兩個 backtick span 中間夾 "›" 的寫法：`bar.ts` › `sym()`
+// 只在非 code fence 內抽取，避免命中範例程式碼。不寫死目錄名——srcDirs 由呼叫端傳入。
+const CODE_REF_RE = /`([^`\n]+)`/g;
+const TWO_SPAN_ARROW_RE = /`([^`\n]+)`\s*›\s*`([^`\n]+)`/g;
+
+export function extractCodeRefs(text, srcDirs = []) {
+  const prefixes = srcDirs.map((d) => d.replace(/\/+$/, '')).filter(Boolean);
+
+  const lines = [];
+  let inFence = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence) lines.push(line);
+  }
+  // 兩個 backtick span 夾 "›" 先正規化成單一 span，統一走同一套解析。
+  const body = lines.join('\n').replace(TWO_SPAN_ARROW_RE, (_, p, s) => `\`${p} › ${s}\``);
+
+  const refs = [];
+  for (const m of body.matchAll(CODE_REF_RE)) {
+    const raw = m[1].trim();
+    if (!raw) continue;
+    let pathPart = raw;
+    let symbol = null;
+    const arrowIdx = raw.indexOf('›');
+    if (arrowIdx >= 0) {
+      pathPart = raw.slice(0, arrowIdx).trim();
+      symbol = raw.slice(arrowIdx + 1).trim() || null;
+    }
+    pathPart = pathPart.replace(/^['"]|['"]$/g, '');
+    if (!pathPart || /\s/.test(pathPart)) continue; // 不是路徑形狀的 token（一般行內 code）
+    const hasPrefix = prefixes.some((p) => pathPart === p || pathPart.startsWith(`${p}/`));
+    const looksLikeFile = /\.[A-Za-z0-9]{1,10}$/.test(pathPart);
+    if (hasPrefix) {
+      refs.push({ path: pathPart, symbol, basenameOnly: false });
+    } else if (!pathPart.includes('/') && looksLikeFile) {
+      refs.push({ path: pathPart, symbol, basenameOnly: true });
+    }
+  }
+  return refs;
 }

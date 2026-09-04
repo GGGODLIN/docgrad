@@ -1,6 +1,6 @@
 # docgrad
 
-> **Last updated:** 2026-07-26
+> **Last updated:** 2026-09-04
 
 評估並收斂一個 repo 的文件體系（docs 目錄＋root 指引檔）作為 **AI agent context 來源**的品質。
 五維計星（完整性/正確性/新鮮度/連結度/一致性）＋token 經濟報告；`loop` 逐輪修 docs 直到達標。
@@ -29,7 +29,7 @@ git clone https://github.com/redtear1115/docgrad ~/.claude/skills/docgrad
 
 更新＝到該目錄 `git pull`；是否有新版自己對 [CHANGELOG.md](CHANGELOG.md)。
 
-需求：Claude Code、Node.js ≥18（四支量測腳本零依賴）。裝好後在任一 repo 以 `/docgrad` 呼叫。
+需求：Claude Code、Node.js ≥18（五支量測腳本零依賴）。裝好後在任一 repo 以 `/docgrad` 呼叫。
 
 ### 1. `init` — 設定目標 repo（一次）
 
@@ -80,7 +80,7 @@ scoped 報告一律**不寫入 `.docgrad/`**——歷輪走勢只認全量 audit
 
 ### 4. 畢業 — 達標後把規則沉澱成 CI
 
-全維達標時，收官報告會附上**畢業建議**：把可機械化的檢查（死鏈／孤兒／新鮮度／入口檔 token 預算）搬進這個 repo 自己的 docs-gate CI，讓文件品質往後由 CI 自動守住。docgrad 的四支 scripts（inventory／links／freshness／coverage）可直接搬去改造。
+全維達標時，收官報告會附上**畢業建議**：把可機械化的檢查（死鏈／孤兒／新鮮度／入口檔 token 預算）搬進這個 repo 自己的 docs-gate CI，讓文件品質往後由 CI 自動守住。docgrad 的五支 scripts（inventory／links／freshness／coverage／retrieval）可直接搬去改造。
 
 docgrad 只評分與修內容，**不代寫、不碰目標 repo 的 CI**——gate 要多嚴由團隊自己定。跑完這步，這個 repo 就從 docgrad「畢業」了。
 
@@ -99,7 +99,7 @@ docgrad 只評分與修內容，**不代寫、不碰目標 repo 的 CI**——ga
 
 ## 適用邊界
 
-docgrad 評的是**本地 markdown 檔案樹**：四支腳本都以本地路徑運作，設定檔 `.docgrad.yml` 也要能寫進目標 repo 根目錄。
+docgrad 評的是**本地 markdown 檔案樹**：五支腳本都以本地路徑運作，設定檔 `.docgrad.yml` 也要能寫進目標 repo 根目錄。
 
 - **git 不是硬需求**：沒有 git 時新鮮度只認文件自稱的日期、覆蓋漂移無法量測，其餘照跑。
 - **wiki／Confluence 等遠端文件源不支援**：檔案不在樹上、設定檔無處可放，整套流程用不上。真要評這類文件源，

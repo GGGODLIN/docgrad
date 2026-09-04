@@ -6,7 +6,7 @@ argument-hint: "[init · audit · improve · loop · report]"
 license: MIT. See NOTICE.md for attribution.
 ---
 
-> **Last updated:** 2026-07-26
+> **Last updated:** 2026-09-04
 
 評估並收斂一個 repo 的文件體系（docs 目錄＋root 指引檔）作為 **AI agent context 來源**的品質：
 五維計星＋token 經濟報告；`loop` 逐輪修到達標。不評 prose 風格、不評 code、不碰 CI。
@@ -37,15 +37,17 @@ license: MIT. See NOTICE.md for attribution.
 
 ## Scripts
 
-四支零依賴 Node（≥18）腳本，讀目標 repo 的 `.docgrad.yml`，JSON → stdout（完整消費，
+五支零依賴 Node（≥18）腳本，讀目標 repo 的 `.docgrad.yml`，JSON → stdout（完整消費，
 不要 head/grep 截斷），錯誤 → stderr＋非零 exit：
 
 ```bash
-node "$SKILL_DIR/scripts/inventory.mjs" --root .   # 清單/token/固定成本/污染面
+node "$SKILL_DIR/scripts/inventory.mjs" --root .   # 清單/token/固定成本/污染面/段落結構(structure)
 node "$SKILL_DIR/scripts/links.mjs" --root .       # 死鏈/壞錨/孤兒/可達率
-node "$SKILL_DIR/scripts/freshness.mjs" --root .   # 日期訊號覆蓋/git 對照
+node "$SKILL_DIR/scripts/freshness.mjs" --root .   # 日期訊號覆蓋/git 對照（convention 可多值）
 node "$SKILL_DIR/scripts/coverage.mjs" --root .    # 覆蓋漂移/未文件化區域
+node "$SKILL_DIR/scripts/retrieval.mjs" --root .   # 可回溯性/邊際成本(scenarios 有設時)
 ```
 
 共用旗標：`--config <file>`（設定檔不在 root 時指定）、`--include <glob>`（scoped audit 限定範圍，
-可重複或逗號分隔；`coverage.mjs` 刻意不吃此旗標）。各腳本輸出的 `scope` 欄位就是報告要標的範圍。
+可重複或逗號分隔；`coverage.mjs`／`retrieval.mjs` 刻意不吃此旗標，理由見各自輸出的 `note`）。
+各腳本輸出的 `scope` 欄位就是報告要標的範圍。

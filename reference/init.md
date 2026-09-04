@@ -1,6 +1,6 @@
 # init — 一次性設定
 
-> **Last updated:** 2026-07-26
+> **Last updated:** 2026-09-04
 
 目的：掃描目標 repo → 問卷確認 → 把 `.docgrad.yml` 寫進目標 repo 根目錄（進版控，團隊共用）。
 已有 `.docgrad.yml` 時重跑 init＝重新掃描，並以現有設定為問卷預設值。
@@ -22,11 +22,19 @@
 2. `entry_files`（多選）
 3. `index_file`（單選；無候選 → 填 `null` 並提醒：連結度會因無可達性根而受限，improve 第一輪可代建索引）
 4. `exclude`（多選；掃到的候選＋自由輸入）
-5. freshness `convention`（frontmatter / heading-line / none）＋ `field`
+5. freshness `convention`（frontmatter / heading-line / none；可多選——同一 repo 混用兩種慣例時選多個，
+   逗號分隔寫入）＋ `field`（frontmatter 用）／`heading_field`（heading-line 用；只選一種慣例且該慣例
+   已用 `field` 描述時可留空，腳本會 fallback 用 `field`）
 6. `targets`：預設全 4，問「哪些維度願意降到 3？」（多選）
-7. `scenario`：請使用者用一句話描述該 repo 的代表性開發任務（token 邊際成本模擬用）
+7. `scenario`：請使用者用一句話描述該 repo 的代表性開發任務（無 `scenarios` 時的 LLM 模擬 fallback 用）
 8. `correctness_sample`：預設 8；大型 docs 體系（>50 檔）建議 12
-9. `src_dirs`（多選，帶掃描候選；覆蓋漂移偵測用）：選空 → 完整性降級為純 LLM 對照（coverage.mjs 不量測、只輸出 note）
+9. `src_dirs`（多選，帶掃描候選；覆蓋漂移偵測與 retrieval.mjs 用）：選空 → 完整性降級為純 LLM 對照
+   （coverage.mjs 不量測、只輸出 note），retrieval.mjs 的 `areas`／`code_pointer_ratio` 同樣降級
+10. `scenarios`：請使用者給 2–4 個代表性 code 路徑（檔案或目錄，例如
+    `apps/api/src/contract/contract-approval.service.ts`、`apps/api/src/timesheet`）——retrieval.mjs
+    用它機械算邊際成本與可回溯性（見 [rubric.md](rubric.md) §Token 經濟／可回溯性）；選空則該部分
+    退回 LLM 依 `scenario` 模擬，仍會給 areas／index_hotness
+11. `rules.pattern`：規則行判定字串，預設 `**MUST`（沿用該 repo 既有的規則標記慣例即可，通常不必改）
 
 ## 3. 寫檔
 
@@ -40,8 +48,9 @@ index_file: docs/README.md
 exclude: [docs/archive/]
 src_dirs: [src/]
 freshness:
-  convention: frontmatter
+  convention: frontmatter   # 單值；混用兩種慣例時：frontmatter,heading-line
   field: last_updated
+  # heading_field: "Last updated:"   # heading-line 用的行內關鍵字；只選一種且已設 field 時可省略
 coverage:
   drift_after_days: 30   # doc 落後 code 幾天才算漂移（預設 30）
   min_commits: 3         # 期間 code commit 數達幾次才算漂移（預設 3）
@@ -52,7 +61,10 @@ targets:
   linkage: 4
   consistency: 4
 correctness_sample: 8
-scenario: "在 <某模組> 加一個典型新功能"
+scenario: "在 <某模組> 加一個典型新功能"   # 無 scenarios 時的 LLM 模擬 fallback
+scenarios: [src/foo/bar.ts, src/foo]      # retrieval.mjs 機械模擬邊際成本＋可回溯性用；可省略
+rules:
+  pattern: "**MUST"   # 規則行判定字串（inventory.mjs structure.rules 用），預設值即此
 language: zh-TW
 ```
 

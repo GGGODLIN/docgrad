@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate } from '../scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs } from '../scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -196,4 +196,68 @@ test('extractClaimedDate: frontmatter / heading-line / none', () => {
   const hl = '# T\n\n> Last updated: 2026-06-15\n';
   assert.equal(extractClaimedDate(hl, { convention: 'heading-line', field: 'Last updated:' }), '2026-06-15');
   assert.equal(extractClaimedDate(hl, { convention: 'none', field: null }), null);
+});
+
+test('parseFreshnessConventions: 單值/逗號/加號分隔/空值 → none', () => {
+  assert.deepEqual(parseFreshnessConventions('frontmatter'), ['frontmatter']);
+  assert.deepEqual(parseFreshnessConventions('frontmatter,heading-line'), ['frontmatter', 'heading-line']);
+  assert.deepEqual(parseFreshnessConventions('frontmatter+heading-line'), ['frontmatter', 'heading-line']);
+  assert.deepEqual(parseFreshnessConventions('frontmatter , heading-line'), ['frontmatter', 'heading-line']);
+  assert.deepEqual(parseFreshnessConventions(null), ['none']);
+  assert.deepEqual(parseFreshnessConventions('none'), ['none']);
+});
+
+test('extractClaimedDate: 多值依序嘗試，第一個抽到的為準', () => {
+  const fm = '---\nlast_updated: 2026-07-01\n---\n# T\n';
+  const hl = '# T\n\n> Last updated: 2026-06-15\n';
+  const freshness = { convention: 'frontmatter,heading-line', field: 'last_updated', heading_field: 'Last updated:' };
+  assert.equal(extractClaimedDate(fm, freshness), '2026-07-01'); // 只有 frontmatter 命中
+  assert.equal(extractClaimedDate(hl, freshness), '2026-06-15'); // frontmatter 找不到 → fallback heading-line
+  assert.equal(extractClaimedDate('# T\n', freshness), null); // 兩者都沒有
+});
+
+test('extractClaimedDate: heading-line 只設 field 時 fallback 當 heading_field（相容舊設定）', () => {
+  const hl = '# T\n\n> Last updated: 2026-06-15\n';
+  assert.equal(
+    extractClaimedDate(hl, { convention: 'heading-line', field: 'Last updated:', heading_field: null }),
+    '2026-06-15'
+  );
+});
+
+test('extractCodeRefs: 單一 backtick 內、以 srcDirs 前綴開頭的路徑', () => {
+  const text = '參考 `apps/api/src/contract/contract-approval.service.ts` 的實作。';
+  const refs = extractCodeRefs(text, ['apps/api/src']);
+  assert.deepEqual(refs, [
+    { path: 'apps/api/src/contract/contract-approval.service.ts', symbol: null, basenameOnly: false },
+  ]);
+});
+
+test('extractCodeRefs: `path › symbol` 單一 backtick 形式（how-to.md 慣例）', () => {
+  const text = '見 `scripts/lib.mjs › DEFAULTS.targets` 與 `scripts/lib.mjs › parseYamlSubset()`。';
+  const refs = extractCodeRefs(text, ['scripts']);
+  assert.deepEqual(refs, [
+    { path: 'scripts/lib.mjs', symbol: 'DEFAULTS.targets', basenameOnly: false },
+    { path: 'scripts/lib.mjs', symbol: 'parseYamlSubset()', basenameOnly: false },
+  ]);
+});
+
+test('extractCodeRefs: 裸檔名（無路徑前綴）比 basename，含兩個 backtick span 夾 ›', () => {
+  const text = '寫入點＝`contract-approval.service.ts` submit；另見 `contract-approval.service.ts` › `approve()`。';
+  const refs = extractCodeRefs(text, ['apps/api/src']);
+  assert.deepEqual(refs, [
+    { path: 'contract-approval.service.ts', symbol: null, basenameOnly: true },
+    { path: 'contract-approval.service.ts', symbol: 'approve()', basenameOnly: true },
+  ]);
+});
+
+test('extractCodeRefs: 目錄本身（不含檔名）也算路徑錨點，且 contractx 不誤中 contract 前綴', () => {
+  const text = '`apps/api/src/timesheet` 整個模組；`apps/api/src/contractx/foo.ts` 不該被當成 contract 前綴命中。';
+  const refs = extractCodeRefs(text, ['apps/api/src/timesheet', 'apps/api/src/contract']);
+  assert.deepEqual(refs.map((r) => r.path), ['apps/api/src/timesheet']);
+});
+
+test('extractCodeRefs: 跳過 code fence 內的 backtick、跳過非路徑形狀的行內 code', () => {
+  const text = '```\n`apps/api/src/skip.ts`\n```\n一般 `npm install` 不是路徑。';
+  const refs = extractCodeRefs(text, ['apps/api/src']);
+  assert.deepEqual(refs, []);
 });

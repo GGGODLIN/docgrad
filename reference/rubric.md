@@ -1,6 +1,6 @@
 # docgrad rubric — 五維星等錨點
 
-> **Last updated:** 2026-07-26
+> **Last updated:** 2026-09-04
 
 > 本檔是跨輪分數可比性的唯一依據。錨點寫死；任何修改都會讓歷史分數失去可比性，
 > 屬 breaking change，必須在 commit message 明示。
@@ -17,10 +17,11 @@
 
 | 腳本 | 餵給 |
 |---|---|
-| inventory.mjs | token 經濟報告（不計星）；完整性的盤點基礎 |
+| inventory.mjs | token 經濟報告（不計星）；完整性的盤點基礎；`structure.rules` 餵可回溯性 |
 | coverage.mjs | 完整性（覆蓋漂移：undocumented/drifted 區域） |
 | links.mjs | 連結度（全量機械） |
 | freshness.mjs | 新鮮度（機械為主） |
+| retrieval.mjs | token 經濟的邊際成本（`scenarios:` 有設時）＋可回溯性（不計星，report-only） |
 | （無腳本） | 正確性、一致性（LLM claim-ledger／跨文件三角驗證） |
 
 ## 完整性 completeness
@@ -97,6 +98,29 @@
 ## Token 經濟（只報告，不計星）
 
 - **固定成本**：`inventory.entry_cost.tokens_est`（entry_files 每次任務都載入）。
-- **邊際成本**：按 `.docgrad.yml` 的 `scenario` 沿索引/路由規則模擬 agent 必讀路徑，合計沿路文件的 tokens_est。
+- **邊際成本**：有 `.docgrad.yml` 的 `scenarios:`（代表性 code 路徑清單）時，由 `retrieval.mjs` 機械計算——
+  每條 scenario 報 `marginal_tokens`（entry_files＋索引鏈上經過的 doc＋所有錨定 doc 的 tokens，各檔只算
+  一次）／`max_depth`（從 `index_file` 到最遠一份錨定 doc 要幾跳）／`fan_in`（錨定它的 doc 數）／
+  `code_pointer`（該路徑的 code 有沒有指回任一 docs），並以 `churn_commits`（近 90 天 commit 數）加權指出
+  「稅最重」的那條 scenario——churn 高又 marginal_tokens 高／max_depth 深，代表 agent 常碰但檢索成本也
+  最高，優先改善。沒有 `scenarios:` 時退回舊法：LLM 依 `.docgrad.yml` 的 `scenario`（單數，敘事字串）
+  模擬必讀路徑。
 - **污染面**：`inventory.pollution.ratio`（exclude 目錄與 WIP 佔全語料比例）。
 - **解讀**：報告必附「損益兩平」說明——入口檔塞太多＝每個任務都付固定稅；全靠索引指路＝多跳檢索的邊際成本。按該 repo 的任務組成給權衡建議。
+
+### 可回溯性（report-only）
+
+新增訊號，量「從 code 檔案回到管它的 spec 有沒有路、那份 spec 好不好用」——**不影響 ★1–★5 任何錨點**，
+只是 Token 經濟報告的延伸小節。機械基礎＝`retrieval.mjs`（`code_pointer_ratio`／`index_hotness`）與
+`inventory.mjs`（`structure.rules`）。
+
+- **`code_pointer_ratio`**（retrieval.mjs `areas[].code_pointer` 彙總）：`src_dirs` 各一級子目錄底下的
+  code 有沒有任何一份指回 docs（`docs_dirs` 前綴字串或某份 doc 的 basename）。低比例＝agent 改完 code
+  找不到回 spec 的路，只能整包搜文件樹猜。
+- **`index_hotness`**（retrieval.mjs）：`index_file`／`entry_files` 近 90 天 commit 數 vs 全部 docs 的
+  中位數。`ratio` 明顯 >3 通常是索引/入口檔混進了該由子文件自己揭露的內容——索引該改成「指路」而非
+  「跟著內容一起被改」；也可能只是單純孤兒維護債，讀 `top5` 判斷。
+- **`structure.rules`**（inventory.mjs，每檔）：規則行（`rules.pattern` 判定，預設 `**MUST`）的
+  `median_chars`／`p90_chars`／`anchored_ratio`。中位數 >300 字或 `anchored_ratio` <0.5 建議把該檔拆成
+  「契約層」（規則本身，短、帶座標）＋「細節層」（背景、案例，可長）——長規則行混雜背景敘述會讓 agent
+  每次都要整段讀完才找得到那句真正的 MUST，帶座標低則代表宣稱缺乏可驗證的 code 落點。
