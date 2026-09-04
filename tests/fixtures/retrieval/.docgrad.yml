@@ -1,0 +1,8 @@
+docs_dirs: [docs/]
+entry_files: []
+index_file: docs/README.md
+exclude: []
+src_dirs: [src/]
+scenarios: [src/foo/bar.ts]
+freshness:
+  convention: none
