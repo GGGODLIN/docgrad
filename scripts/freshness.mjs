@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { loadConfig, collectFiles, parseArgs, fail, extractClaimedDate } from './lib.mjs';
+import { loadConfig, collectFiles, parseArgs, fail, extractClaimedDate, parseFreshnessConventions } from './lib.mjs';
 
 const MISMATCH_TOLERANCE_DAYS = 7;
 
@@ -42,7 +42,8 @@ try {
     `${JSON.stringify(
       {
         scope: include.length ? include : null,
-        convention: config.freshness.convention,
+        // 實際採用的慣例清單（單值也回陣列；多值時依序嘗試，見 lib.mjs › extractClaimedDate）。
+        convention: parseFreshnessConventions(config.freshness.convention),
         files_total: results.length,
         files_with_signal: withSignal.length,
         coverage_ratio: results.length ? Number((withSignal.length / results.length).toFixed(4)) : 0,
