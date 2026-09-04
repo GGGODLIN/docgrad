@@ -14,7 +14,8 @@
   近 90 天 commit 數 vs 全部 docs 中位數的 `ratio`＋`top5`）。不吃 `--include`（理由同 `coverage.mjs`，
   可回溯性是全量索引/檢索概念）。新增純函式 `lib.mjs › extractCodeRefs()`：抽 backtick 內以 `src_dirs`
   前綴開頭的路徑、`` `path › symbol` `` 形式、裸檔名（比 basename），供 `retrieval.mjs`／`inventory.mjs`
-  共用，不寫死任何目錄名。
+  共用，不寫死任何目錄名。祖先方向的命中（doc 指到 query 的上層目錄）只認**嚴格深於所屬 `src_dirs`**
+  的 ref——泛指整個 app 的提及不算「管這個檔的 doc」，否則同一份 doc 會是每條 scenario 的固定命中。
 - **新增（欄位）**：`inventory.mjs` 每檔輸出 `structure: {h2: [{title, tokens_est}], rules: {count,
   median_chars, p90_chars, anchored_ratio}}`（`rules.pattern` 新設定鍵，預設 `**MUST`，判定：清單項
   含該字串即算規則行；`anchored`＝該行本身可用 `extractCodeRefs` 抽到座標）；`totals` 加

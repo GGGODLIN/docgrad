@@ -80,9 +80,14 @@ function resolveFiles(root, relPath) {
 
 // 雙向目錄前綴比對：a 是 b 的祖先目錄、b 是 a 的祖先目錄，或完全相等。
 // 沿用 coverage.mjs 的「contractx 不誤中 contract」原則——沒有 '/' 邊界不算命中。
-function pathOverlaps(a, b) {
-  if (a === b) return true;
-  return a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+// ref 是 query 的**祖先**時另加一條：ref 必須嚴格深於它所屬的 src_dir。`apps/api/src` 這種泛指
+// 整個 app 的提及（講 gate 射程、部署單位）不是「管這個檔的規則」，放進來會讓同一份 doc 變成
+// 每條 scenario／每個 area 的固定命中（kdan-workforce 實測：WF24 對任何路徑都 6 hits）。
+function refCovers(ref, query, prefixes) {
+  if (ref === query || ref.startsWith(`${query}/`)) return true;
+  if (!query.startsWith(`${ref}/`)) return false;
+  const owner = prefixes.find((p) => ref === p || ref.startsWith(`${p}/`));
+  return owner === undefined ? ref.includes('/') : ref.length > owner.length;
 }
 
 // path 底下任一檔案的內容有沒有指向 docsDirs 或某份 doc 的 basename（code→doc 反向指針）。
@@ -100,6 +105,7 @@ function hasCodePointer(root, files, docsDirs, docBasenames) {
 try {
   const { root, configFile, include } = parseArgs();
   const config = loadConfig(root, configFile);
+  const srcPrefixes = config.src_dirs.map((d) => d.replace(/\/+$/, '')).filter(Boolean);
   const { included } = collectFiles(root, config);
   const gitOk = isGitRepo(root);
   const notes = [];
@@ -179,7 +185,7 @@ try {
       for (const ref of refs) {
         if (ref.basenameOnly) {
           if (files.some((f) => path.posix.basename(f) === ref.path)) hits += 1;
-        } else if (pathOverlaps(ref.path, scenarioPath)) {
+        } else if (refCovers(ref.path, scenarioPath, srcPrefixes)) {
           hits += 1;
         }
       }
@@ -236,7 +242,7 @@ try {
       const files = resolveFiles(root, area);
       let fan_in = 0;
       for (const { refs } of docRefs) {
-        if (refs.some((ref) => !ref.basenameOnly && pathOverlaps(ref.path, area))) fan_in += 1;
+        if (refs.some((ref) => !ref.basenameOnly && refCovers(ref.path, area, srcPrefixes))) fan_in += 1;
       }
       return { area, code_pointer: hasCodePointer(root, files, config.docs_dirs, docBasenames), fan_in };
     });

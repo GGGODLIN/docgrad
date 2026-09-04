@@ -40,7 +40,7 @@ test('retrieval: scenario 命中 docs、depth_from_index、marginal_tokens、cod
     const [scenario] = out.scenarios;
     assert.equal(scenario.path, 'src/foo/bar.ts');
     assert.equal(scenario.churn_commits, null); // 無 git
-    assert.deepEqual(scenario.docs.map((d) => d.doc), ['docs/guide.md']);
+    assert.deepEqual(scenario.docs.map((d) => d.doc), ['docs/guide.md']); // wide.md 只泛指 `src/`（＝src_dir 本身），不算命中
     assert.equal(scenario.docs[0].depth_from_index, 1); // README(0) → guide.md(1)
     assert.equal(scenario.fan_in, 1);
     assert.ok(scenario.marginal_tokens > 0);
