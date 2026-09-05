@@ -153,7 +153,7 @@ branch 隔離讓用戶可整批 review 再合併；每輪 commit 保證中斷可
 
 ## 開放問題（實作時定案）
 
-- anchor slug 演算法對 CJK 標題的近似誤差（實戰為 WARN＋人工確認，沿用）。
+- ~~anchor slug 演算法對 CJK 標題的近似誤差~~ **0.6.1 已解**：與 github-slugger 對齊（逐空白換 dash、詞內底線是字面值、顯式 `<a id>`／`<a name>` 納入 slug 集）。
 - `correctness_sample` 的抽樣策略：純隨機 vs 加權（優先抽「宣稱具體符號/路徑」的段落）——傾向後者。
 
 ## 出處致謝（NOTICE.md 詳列）

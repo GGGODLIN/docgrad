@@ -252,21 +252,38 @@ export function estimateTokens(text) {
 
 // --- markdown 解析 ------------------------------------------------------------
 
+// GitHub 的 slug 是**逐個空白**換成一個 dash，不是把連續空白收成一個。
+// 兩者只在「標點被移除後留下相鄰空白」時分歧，而中文標題最常這樣寫：
+// `## 狀態圖例 (status / sot_level legend)` → GitHub 給 `狀態圖例-status--sot_level-legend`（雙 dash）。
+// 舊實作用 `\s+` 收成單 dash，於是所有這型連結都被誤報成壞錨（2026-09-05 在 kdan-bpm 量到 18 筆 bad_anchors
+// 有 5 筆屬此類）。與 github-slugger 的行為對齊即可消除。
 export function githubSlug(heading) {
   return heading
     .trim()
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s_-]/gu, '')
-    .replace(/\s+/g, '-');
+    .replace(/\s/g, '-');
 }
+
+// 顯式錨點 `<a id="x"></a>` / `<a name="x"></a>`——標題會隨改寫而變 slug，長期連結因此
+// 常改用顯式錨。舊實作只認 `#` 標題，於是指向顯式錨的連結一律被誤報成壞錨
+// （2026-09-05 在 kdan-bpm 量到 18 筆 bad_anchors 有 13 筆屬此類）。
+const EXPLICIT_ANCHOR_RE = /<a\s[^>]*\b(?:id|name)\s*=\s*["']([^"']+)["']/gi;
 
 export function extractHeadings(text) {
   const counts = new Map();
   const slugs = new Set();
   for (const line of text.split(/\r?\n/)) {
+    for (const m of line.matchAll(EXPLICIT_ANCHOR_RE)) slugs.add(m[1].trim());
     const m = line.match(/^#{1,6}\s+(.+?)\s*#*\s*$/);
     if (!m) continue;
-    const base = githubSlug(m[1].replace(/[*_`]/g, ''));
+    // 去掉標題裡的 markdown 強調符號後才算 slug。`_` 要分兩種：GFM 的**詞內底線不是強調**
+    // （`sot_level` 是字面值，GitHub 的 slug 會保留），只有兩側非文數字的 `_` 才是分隔符。
+    // 舊實作一律移除，於是 `## 狀態圖例 (status / sot_level legend)` 被算成 `…-sotlevel-…`，
+    // 指向該節的連結全被誤報成壞錨。
+    const base = githubSlug(
+      m[1].replace(/[*`]/g, '').replace(/_(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])_/gu, '')
+    );
     const n = counts.get(base) ?? 0;
     counts.set(base, n + 1);
     slugs.add(n === 0 ? base : `${base}-${n}`);

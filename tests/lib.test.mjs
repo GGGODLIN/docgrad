@@ -176,6 +176,29 @@ test('githubSlug: 小寫、去標點、空白轉連字號、CJK 保留', () => {
   assert.equal(githubSlug('API v2.0 (beta)'), 'api-v20-beta');
 });
 
+test('githubSlug: 逐個空白各換一個 dash（標點移除後的相鄰空白產生雙 dash）', () => {
+  // GitHub 的行為：先去標點再逐空白換 dash，故 `a / b` -> `a--b`。舊實作用 \s+ 收成單 dash。
+  assert.equal(githubSlug('狀態圖例 (status / sot_level legend)'), '狀態圖例-status--sot_level-legend');
+  assert.equal(githubSlug('5. 業務動作 → 呼叫對應'), '5-業務動作--呼叫對應');
+  assert.equal(githubSlug('a  b'), 'a--b');
+});
+
+test('extractHeadings: 詞內底線是字面值，只有強調用的底線才移除', () => {
+  assert.ok(extractHeadings('## snake_case_name here\n').has('snake_case_name-here'));
+  assert.ok(extractHeadings('## _italic_ title\n').has('italic-title'));
+  assert.ok(extractHeadings('## __bold__ x\n').has('bold-x'));
+  assert.ok(extractHeadings('## `code` span\n').has('code-span'));
+  assert.ok(extractHeadings('## 狀態圖例 (status / sot_level legend)\n').has('狀態圖例-status--sot_level-legend'));
+});
+
+test('extractHeadings: 顯式錨 <a id>／<a name> 也要納入 slug 集', () => {
+  const slugs = extractHeadings('# T\n\n<a id="canonical-contracts"></a>\n## 內容\n');
+  assert.ok(slugs.has('canonical-contracts'), '<a id> 應被索引');
+  assert.ok(slugs.has('t') && slugs.has('內容'), '一般標題不受影響');
+  assert.ok(extractHeadings("<a name='legacy-anchor'></a>\n").has('legacy-anchor'), '單引號 name= 也認');
+  assert.ok(extractHeadings('<a class="x" id="with-attrs"></a>\n').has('with-attrs'), '前面有其他屬性也認');
+});
+
 test('extractHeadings: 重複標題加序號後綴', () => {
   const slugs = extractHeadings('# A\n## Setup\n## Setup\n');
   assert.ok(slugs.has('a') && slugs.has('setup') && slugs.has('setup-1'));

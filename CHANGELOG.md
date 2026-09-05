@@ -3,6 +3,23 @@
 版本權威在 [.claude-plugin/plugin.json](.claude-plugin/plugin.json) 的 `version`；本檔記錄各版變更。
 版號語意（semver，docgrad 特化）見 [docs/how-to.md](docs/how-to.md) §發版。
 
+## 0.6.1 — 2026-09-05
+
+- **修正（links／lib）**：三個一族的壞錨誤報，全部源自 slug 產生與 GitHub 不一致。在 kdan-bpm 實測
+  18 筆 `bad_anchors` 於修正後歸零（dead 0／orphans 0／reachable 1.0 不變）。
+  - `githubSlug()` 逐個空白換一個 dash（原用 `\s+` 收成單一 dash）。標點被移除後留下的相鄰空白，
+    GitHub 會產生雙 dash：`## 狀態圖例 (status / sot_level legend)` → `狀態圖例-status--sot_level-legend`。
+  - `extractHeadings()` 只移除**強調用**的底線，詞內底線是字面值（GFM 規則）。原本一律移除，
+    `sot_level` 被算成 `sotlevel`，指向該節的連結全成壞錨。
+  - `extractHeadings()` 納入顯式錨 `<a id="x">`／`<a name='x'>`（含前置其他屬性）。長期連結常改用顯式錨，
+    原本只認 `#` 標題，於是全被誤報。
+- **修正（inventory）**：`entry_cost` 對 symlink 別名去重——多個 entry 名指向同一實體檔時
+  （如 `CLAUDE.md -> AGENTS.md`）agent 只載入一份，逐名相加會讓固定成本翻倍（實測 5,792 vs 真值 2,896）。
+  `files` 仍列出全部名稱，新增 `symlink_aliases` 標出被折疊的別名。
+- **文件**：`reference/audit.md`／`reference/rubric.md` 移除「`cjk_uncertain` 壞錨先人工確認再計入」的
+  例外——該例外原是為了掩蓋上述 bug，修好後壞錨一律計入，`cjk_uncertain` 降為提示欄位。
+- **測試**：54 → 58（slug 雙 dash、詞內底線、顯式錨、symlink 去重各一）。
+
 ## 0.6.0 — 2026-09-04
 
 - **新增（腳本）**：第五支量測腳本 `scripts/retrieval.mjs`——可回溯性＋邊際成本，report-only（不計星）。
