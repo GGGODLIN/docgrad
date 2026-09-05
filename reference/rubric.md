@@ -75,7 +75,7 @@
 | ★4 | 零死鏈、孤兒 ≤5%、reachable_ratio ≥95%。 |
 | ★5 | 零死鏈＋單一頂層索引 transitive 全可達（零孤兒）＋錨點用 `path › symbol()` 抗行號漂移。 |
 
-量測：links.mjs 全量機械輸出（死鏈比例＝dead_links / total_links）。cjk_uncertain 的壞錨不直接扣星：先人工確認再算。
+量測：links.mjs 全量機械輸出（死鏈比例＝dead_links / total_links）。壞錨一律扣星（0.6.1 起 slug 與 GitHub 對齊，CJK 不再有近似誤差；`cjk_uncertain` 僅為提示欄位）。
 
 ## 一致性 consistency
 

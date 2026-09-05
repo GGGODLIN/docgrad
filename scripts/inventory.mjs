@@ -128,11 +128,36 @@ try {
           rules_total: rulesTotal,
           rules_anchored_ratio: rulesTotal ? Number((rulesAnchored / rulesTotal).toFixed(4)) : 0,
         },
-        entry_cost: {
+        entry_cost: (() => {
           // scope 限定時只計範圍內的 entry 檔——固定成本是全量概念，scoped 報告不可直接引用。
-          files: files.filter((f) => f.type === 'entry').map((f) => f.path),
-          tokens_est: files.filter((f) => f.type === 'entry').reduce((s, f) => s + f.tokens_est, 0),
-        },
+          // symlink 去重：多個 entry 名指向同一實體檔（kdan-bpm 的 `CLAUDE.md -> AGENTS.md`）時，
+          // agent 只會載入一份，逐名相加會讓固定成本翻倍（2026-09-05 量到 5,792 vs 真值 2,896）。
+          // 以 realpath 分組，同一實體只計一次；files 仍列出全部名稱，並標出被折疊的別名。
+          const entries = files.filter((f) => f.type === 'entry');
+          const seen = new Map();
+          const aliases = [];
+          for (const f of entries) {
+            let key = f.path;
+            try {
+              key = fs.realpathSync(path.join(root, f.path));
+            } catch {
+              /* 讀不到就退回路徑本身，寧可重複計也不要漏計 */
+            }
+            if (seen.has(key)) {
+              aliases.push({ path: f.path, same_file_as: seen.get(key) });
+              continue;
+            }
+            seen.set(key, f.path);
+          }
+          const counted = new Set(seen.values());
+          return {
+            files: entries.map((f) => f.path),
+            tokens_est: entries
+              .filter((f) => counted.has(f.path))
+              .reduce((s, f) => s + f.tokens_est, 0),
+            ...(aliases.length ? { symlink_aliases: aliases } : {}),
+          };
+        })(),
         pollution: {
           excluded_files: excludedFiles.map((f) => ({ path: f.path, tokens_est: f.tokens_est })),
           excluded_tokens: excludedTokens,

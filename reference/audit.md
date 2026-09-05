@@ -49,7 +49,7 @@ node "$SKILL_DIR/scripts/retrieval.mjs" --root .
 ### 4. 新鮮度 / 5. 連結度
 
 直接以 freshness.mjs / links.mjs 輸出對 rubric 錨點定星。
-links 的 `cjk_uncertain: true` 壞錨先逐一人工確認（開檔看標題）再計入。
+links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊（逐空白換 dash、詞內底線保留、顯式 `<a id>` 納入索引），CJK 標題不再有近似誤差。`cjk_uncertain` 只留作提示欄位，**不是**跳過確認的理由。
 
 ### 6. 一致性（跨文件＋跨載體）
 

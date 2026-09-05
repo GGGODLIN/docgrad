@@ -10,6 +10,26 @@ const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
 const RETRIEVAL_FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.meta.url));
 const SCRIPT = fileURLToPath(new URL('../scripts/inventory.mjs', import.meta.url));
 
+test('inventory: entry_cost 對 symlink 別名去重（同一實體只計一次）', () => {
+  // kdan-bpm 的 CLAUDE.md -> AGENTS.md：agent 只載入一份，逐名相加會讓固定成本翻倍。
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-symlink-'));
+  try {
+    fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.docgrad.yml'),
+      'docs_dirs: [docs/]\nentry_files: [AGENTS.md, CLAUDE.md]\nindex_file: docs/README.md\n');
+    fs.writeFileSync(path.join(root, 'docs', 'README.md'), '# idx\n');
+    fs.writeFileSync(path.join(root, 'AGENTS.md'), '# entry\n' + 'x '.repeat(200));
+    fs.symlinkSync('AGENTS.md', path.join(root, 'CLAUDE.md'));
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', root], { encoding: 'utf8' }));
+    const solo = out.files.find((f) => f.path === 'AGENTS.md').tokens_est;
+    assert.deepEqual(out.entry_cost.files, ['AGENTS.md', 'CLAUDE.md'], '兩個名稱都要列出');
+    assert.equal(out.entry_cost.tokens_est, solo, '只計一次，不是兩倍');
+    assert.deepEqual(out.entry_cost.symlink_aliases, [{ path: 'CLAUDE.md', same_file_as: 'AGENTS.md' }]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('inventory: 清單/型別/entry_cost/pollution', () => {
   const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
   assert.equal(out.totals.files, 4);
