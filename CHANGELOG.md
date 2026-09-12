@@ -3,6 +3,28 @@
 版本權威在 [.claude-plugin/plugin.json](.claude-plugin/plugin.json) 的 `version`；本檔記錄各版變更。
 版號語意（semver，docgrad 特化）見 [docs/how-to.md](docs/how-to.md) §發版。
 
+## 0.6.2 — 2026-09-13
+
+跨專案回顧（oikos／dream-calm-true／本 repo／kdan-bpm）＋對照 Anthropic 官方 skill authoring
+best practices 後的結構修正。**不改動任何星等錨點語意，歷史分數可比性不受影響。**
+
+- **修正（#20）文件內部不一致**：四處仍寫「四支腳本」，`retrieval.mjs` 自 0.6.0 起是第五支。
+  - `reference/rubric.md` 評分總則第 1 條、`reference/improve.md` 兩處（落點界線、畢業建議）改為五支。
+  - `reference/audit.md` §scoped audit「四支腳本加 `--include`」是雙重錯誤：只有
+    inventory／links／freshness 吃該旗標，coverage／retrieval 刻意不吃（`SKILL.md` 已明載）。改為三支並寫明。
+- **修正（#21）引用層級與長檔目錄**：官方要求 reference 檔一律自 SKILL.md 一層可達、>100 行需附 Contents。
+  - `reference/placement.md` 原本只能經 rubric.md／audit.md 到達（第二層），而它是一致性維度
+    落點／重複的判定依據。Blocker #2 新增一句直接點名，改為一層可達。
+  - `docs/design.md`（161 行）、`reference/audit.md`（151 行）、`reference/rubric.md`（126 行）補 Contents。
+- **修正（#24）rubric 正文瘦身**：版本沿革改收進檔末 `<details>` 的「版本沿革與可比性註記」，
+  正文各維量測欄留一行指路。rubric.md 是 Blocker #2 強制必讀，每次評分都要付它的 token；
+  版本沿革只在跨版本比較分數時才需要。
+  - **錨點表與量測方式一字未動**，僅移動歷史註記。新鮮度 ★5 的 graduation-only 說明屬**現行規則**
+    （improve.md 的設計性天花板依賴它）而非沿革，故留在正文，只把可比性那句移入 details。
+  - 一併補記 0.2.0（完整性改以 coverage 為機械基礎）到沿革清單。
+- **驗證**：`node --test tests/*.test.mjs` 58 pass；`links.mjs` 對本 repo dead 0／bad_anchors 0／
+  orphans 0／reachable 1.0（新增的 Contents 錨點全數通過 GitHub slug 對齊後的檢查）。
+
 ## 0.6.1 — 2026-09-05
 
 - **修正（links／lib）**：三個一族的壞錨誤報，全部源自 slug 產生與 GitHub 不一致。在 kdan-bpm 實測
