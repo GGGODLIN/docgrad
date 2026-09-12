@@ -13,7 +13,7 @@
 - [六維 rubric（錨點住 reference/rubric.md）](#六維-rubric錨點住-referencerubricmd)
 - [衝突仲裁慣例](#衝突仲裁慣例)
 - [`loop` 機制（核心需求：裝完就能一直跑到達標）](#loop-機制核心需求裝完就能一直跑到達標)
-- [畢業建議（報告固定尾節，不自動執行）](#畢業建議報告固定尾節不自動執行)
+- [畢業（報告固定尾節，產出交付物但不安裝）](#畢業報告固定尾節產出交付物但不安裝)
 - [scripts 契約](#scripts-契約)
 - [開放問題（實作時定案）](#開放問題實作時定案)
 - [出處致謝（NOTICE.md 詳列）](#出處致謝noticemd-詳列)
@@ -57,6 +57,7 @@ docgrad/
 │   ├── coverage.mjs      # 覆蓋漂移：code 區域 vs 提及它的 docs 的 git 時滯
 │   └── retrieval.mjs     # 可回溯性＋邊際成本：scenarios/areas/index_hotness（report-only）
 ├── tests/                # node --test：腳本的單元行為；fixtures/ 為迷你目標 repo
+├── templates/            # 畢業交付物範本：docs-gate.mjs／docs-gate.yml（產出不安裝）
 ├── evals/                # skill 級評測：星等的可重現性／抽樣覆蓋率／偽陽性
 │                         # （claude plugin eval；三個 case ＋ fixtures/ 三個 repo）
 ├── docs/
@@ -64,7 +65,8 @@ docgrad/
 │   └── how-to.md         # 常見開發任務（加維度/改 rubric/擴充 lib）
 ├── .docgrad.yml          # 本 repo 自己的 docgrad 設定（dogfood）
 ├── .docgrad/             # dogfood 收斂狀態：history.jsonl（歷輪分數＋版本指紋）、
-│                         # ledger.jsonl（累積 claim 驗證紀錄）、scorecard-latest.md
+│                         # ledger.jsonl（累積 claim 驗證紀錄）、scorecard-latest.md、
+│                         # out-of-scope.jsonl（職權外發現）、graduation/（收官產出）
 ├── CHANGELOG.md          # 各版變更；版號語意見 docs/how-to.md §發版
 ├── NOTICE.md             # 出處致謝（ln-21 claim-ledger、Diátaxis、HumanLayer、impeccable）
 ├── LICENSE               # MIT
@@ -171,7 +173,7 @@ repo 沒有 `.docgrad.yml` 時，`audit`/`improve`/`loop` 一律先導向 `init`
 
 branch 隔離讓用戶可整批 review 再合併；每輪 commit 保證中斷可續、可回退。
 
-## 畢業建議（報告固定尾節，不自動執行）
+## 畢業（報告固定尾節，產出交付物但不安裝）
 
 達標後建議把可機械化的規則沉澱成該 repo 自己的 CI gate（死鏈/孤兒/新鮮度/入口檔預算——`docs-gate.mjs` CI 模式），並說明 docgrad 的五支 scripts 可直接搬去改造。docgrad 只評分與修內容，**不碰目標 repo 的 CI 設定**。
 

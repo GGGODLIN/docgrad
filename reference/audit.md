@@ -85,6 +85,12 @@ node "$SKILL_DIR/scripts/retrieval.mjs" --root .
 ### 4. 新鮮度 / 5. 連結度
 
 直接以 freshness.mjs / links.mjs 輸出對 rubric 錨點定星。
+
+新鮮度另看 `date_concentration`（不影響星等，但**報告要寫**）：`max_same_day_ratio` 偏高代表
+日期訊號集中在同一天，通常是大批 backfill 的痕跡——這些檔會同步老化、同步變 stale，
+`coverage_ratio` 再高也分辨不出「哪份文件真的久未維護」。oikos 實測 0.68（28/41 檔卡在
+backfill 當天）。報告寫成「覆蓋率 95%，但 68% 的日期集中在 2026-07-13，訊號鑑別力有限」。
+注意它分不出「backfill」與「這批檔案本來就同時改」——只提示，不下判斷。
 links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊（逐空白換 dash、詞內底線保留、顯式 `<a id>` 納入索引），CJK 標題不再有近似誤差。`cjk_uncertain` 只留作提示欄位，**不是**跳過確認的理由。
 
 ### 6. 一致性（跨文件＋跨載體）
@@ -136,7 +142,7 @@ links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊
 |---|---|---|---|
 | 完整性 | ★x | ★y | … |
 | 正確性 | ★x | ★y | …（通過率 n/N、累積覆蓋 m/總數 ＝ x%） |
-| 新鮮度 | ★x | ★y | … |
+| 新鮮度 | ★x | ★y | …（日期集中度 x%，若偏高要點明） |
 | 連結度 | ★x | ★y | … |
 | 一致性 | ★x | ★y | …（失分點標 `[矛盾]`／`[重複]`／`[落點]`） |
 | 經濟性 | ★x | ★y | …（固定成本 N tokens、污染面 x%） |
@@ -153,6 +159,10 @@ links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊
 - code_pointer_ratio：x%（低於平均的 area：…）
 - index_hotness：ratio N（top5：…）
 - structure.rules 偏長／低 anchored 的檔案：…
+
+## 職權外事項（docgrad 修不了的）
+目標 repo 有 `.docgrad/out-of-scope.jsonl` 時，列出所有 `status: open` 的項目與筆數
+（見 [improve.md](improve.md) §職權外發現的出口）；沒有該檔就整節省略。
 
 ## 建議下一步
 最低分維度＝<維度>（同分取 rubric 順序靠前者）。失分點：

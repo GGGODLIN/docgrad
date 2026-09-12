@@ -25,7 +25,7 @@ license: MIT
 | `audit <scope>`／`audit --dim <維度>` | scoped audit：限定目錄／glob／主題，或只評單一維度。同樣純報告，且**絕不寫 `.docgrad/`**——見 audit.md §scoped audit |
 | `improve` | 先讀 rubric.md，再照 [reference/improve.md](reference/improve.md) 跑一輪 |
 | `loop` | 同 improve，反覆到停止條件 |
-| `report` | 讀目標 repo `.docgrad/scorecard-latest.md` 重印＋用 `.docgrad/history.jsonl` 畫歷輪分數走勢表；檔案不存在 → 提示先跑 improve/loop（audit 純報告不落檔）。**兩種可比性斷點一律畫出來**：① `rubric_hash` 與前一輪不同 → 畫斷點線註明「此處尺有變更，前後分數不可直接比較」；② 缺 `economy` 鍵的輪次屬 v1.0.0 前的五維時代 → 該維畫 `—`，斷點註明「以下為五維，達標判定與總體分數不可與新輪次相比」。缺版本欄位的舊紀錄視為 unknown，不阻擋。有 `.docgrad/ledger.jsonl` 時一併報累積覆蓋率與目前仍為 `fail`／`stale` 的宣稱 |
+| `report` | 讀目標 repo `.docgrad/scorecard-latest.md` 重印＋用 `.docgrad/history.jsonl` 畫歷輪分數走勢表；檔案不存在 → 提示先跑 improve/loop（audit 純報告不落檔）。**先查 branch 分岔**：`git rev-list --count HEAD..docgrad/converge`（該 branch 存在時）> 0 → 報告最上方警示「converge branch 領先本 branch N 個 commit，以下走勢可能不完整」；報告標頭固定標注資料來源 `<branch> @ <short-sha>`。**兩種可比性斷點一律畫出來**：① `rubric_hash` 與前一輪不同 → 畫斷點線註明「此處尺有變更，前後分數不可直接比較」；② 缺 `economy` 鍵的輪次屬 v1.0.0 前的五維時代 → 該維畫 `—`，斷點註明「以下為五維，達標判定與總體分數不可與新輪次相比」。缺版本欄位的舊紀錄視為 unknown，不阻擋。有 `.docgrad/ledger.jsonl` 時一併報累積覆蓋率與目前仍為 `fail`／`stale` 的宣稱 |
 
 ## Blockers（不可跳過）
 

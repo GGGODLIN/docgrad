@@ -9,17 +9,46 @@ import { loadConfig, collectFiles, parseArgs, fail, extractClaimedDate, parseFre
 
 const MISMATCH_TOLERANCE_DAYS = 7;
 
+// docgrad 自己的收斂 commit 不算「內容有更新」——improve/loop 的 commit message 一律是
+// `docs(docgrad): 第 N 輪收斂 …`（見 reference/improve.md 步驟 5）。
+// 不排除的話會自我污染：round 1 backfill 39 檔的 last_updated，那個 commit 本身把這些檔的
+// git 日期整批推到當天，於是 round 2 收到 38 筆假 mismatch（oikos 2026-07-13 實際發生）。
+const DOCGRAD_COMMIT_PREFIX = 'docs(docgrad):';
+
 function gitDate(root, rel) {
   try {
-    const out = execFileSync('git', ['log', '-1', '--format=%as', '--', rel], {
+    // 取最近一筆**非 docgrad** commit 的日期：一次多撈幾筆再過濾，避免逐筆呼叫 git。
+    const out = execFileSync('git', ['log', '-20', '--format=%as%x00%s', '--', rel], {
       cwd: root,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    return out || null;
+    if (!out) return null;
+    const entries = out.split('\n').map((l) => {
+      const [date, subject = ''] = l.split('\0');
+      return { date, subject };
+    });
+    const authored = entries.find((e) => !e.subject.startsWith(DOCGRAD_COMMIT_PREFIX));
+    // 全部 20 筆都是 docgrad commit（極少見）→ 退回最舊那筆，寧可偏保守也不要回 null。
+    return (authored ?? entries.at(-1)).date || null;
   } catch {
     return null;
   }
+}
+
+// 日期訊號的鑑別力：同一天佔比過高＝大批 backfill 的痕跡，這些檔會同步老化、同步變 stale，
+// coverage_ratio 再高也分辨不出「哪份文件真的久未維護」。只報告，不影響 coverage_ratio 判法。
+function dateConcentration(claimedDates) {
+  if (!claimedDates.length) return { max_same_day_ratio: 0, date: null, files: 0 };
+  const counts = new Map();
+  for (const d of claimedDates) counts.set(d, (counts.get(d) ?? 0) + 1);
+  let top = null;
+  for (const [date, n] of counts) if (!top || n > top[1] || (n === top[1] && date < top[0])) top = [date, n];
+  return {
+    max_same_day_ratio: Number((top[1] / claimedDates.length).toFixed(4)),
+    date: top[0],
+    files: top[1],
+  };
 }
 
 const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000);
@@ -47,6 +76,7 @@ try {
         files_total: results.length,
         files_with_signal: withSignal.length,
         coverage_ratio: results.length ? Number((withSignal.length / results.length).toFixed(4)) : 0,
+        date_concentration: dateConcentration(withSignal.map((r) => r.claimed)),
         stale: results.filter((r) => r.age_days !== null && r.age_days > config.freshness.stale_after_days),
         mismatches: results
           .filter((r) => r.claimed && r.actual_git && dayDiff(r.actual_git, r.claimed) > MISMATCH_TOLERANCE_DAYS)

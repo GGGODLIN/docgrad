@@ -81,6 +81,10 @@
 | ★5 | 全覆蓋＋「同 MR 隨改隨更」有機械 gate 強制＋生命週期管理（superseded 即處理）。 |
 
 量測：freshness.mjs 的 coverage_ratio / stale / mismatches；「關鍵文件」＝entry_files＋index_file＋各領域權威文件。
+git 日期比對**排除 docgrad 自己的收斂 commit**（`docs(docgrad):` 前綴），取最近一筆非 docgrad commit——
+否則 backfill 那一輪會把自己的 commit 日期算成「內容有更新」而產生假 mismatch。
+`date_concentration` 為提示欄位（**不影響星等**）：同一天佔比過高代表訊號集中於單次 backfill，
+覆蓋率數字不代表維護實況，報告要註明。
 
 > **★5 的適用範圍（graduation-only）**：★5 要求的「機械 gate 強制」得動 CI，而 improve/loop 受
 > Blocker #3 約束不碰目標 repo 的 CI —— 故 loop 內新鮮度上限為 ★4，該維會判設計性天花板
@@ -181,6 +185,10 @@ symlink 別名已去重）；**污染面**＝`inventory.pollution.ratio`。兩�
 <details>
 <summary>展開</summary>
 
+- **v1.3.0 — 新鮮度的 git 比對排除 docgrad 自己的 commit**（非錨點變更）：★1–★5 門檻未動，
+  但 mismatch 的計算基準改了——backfill 輪次不再自我污染。跨 v1.3.0 比較新鮮度分數時，
+  舊分數可能含假 mismatch 而偏低（oikos round 2 實測 38 筆）。新增提示欄位 `date_concentration`，
+  report-only。
 - **v1.1.0 — 正確性抽樣改為機械決定**（非錨點變更）：★1–★5 門檻（通過率 <50%／50–79%／≥80%／
   ≥90%／全過）一字未動，變的是**抽哪些**——從逐輪由 LLM 自由挑，改成消費 `inventory.claim_candidates`
   的穩定排序，並先重驗既有 ledger。跨 v1.1.0 比較正確性分數時要知道：舊分數的樣本不可重現，
