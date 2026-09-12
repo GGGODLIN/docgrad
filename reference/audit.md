@@ -1,9 +1,20 @@
 # audit — 單次全量評分
 
-> **Last updated:** 2026-09-04
+> **Last updated:** 2026-09-13
 
 前置（blocker）：目標 repo 根目錄必須有 `.docgrad.yml`；沒有 → 停下，導向 `/docgrad init`。
 本流程**不修改任何檔案**、不寫任何狀態——純報告。評分前必先讀 [rubric.md](rubric.md)。
+
+## Contents
+
+- [步驟 1. 跑機械腳本](#1-跑機械腳本)
+- [步驟 2. 完整性](#2-完整性)
+- [步驟 3. 正確性（claim-ledger）](#3-正確性claim-ledger)
+- [步驟 4/5. 新鮮度 / 連結度](#4-新鮮度--5-連結度)
+- [步驟 6. 一致性（跨文件＋跨載體）](#6-一致性跨文件跨載體)
+- [步驟 7. Token 經濟報告](#7-token-經濟報告)
+- [步驟 8. 輸出 scorecard](#8-輸出-scorecard)
+- [scoped audit（限定範圍／單一維度）](#scoped-audit限定範圍單一維度)
 
 使用者指定了範圍（目錄／glob／主題）或單一維度 → 先讀本檔最後的 [§scoped audit](#scoped-audit限定範圍單一維度)，再回來跑下面的步驟。
 
@@ -126,7 +137,8 @@ links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊
 `.docgrad/history.jsonl`——history 的跨輪可比性只認全量 audit，scoped 分數混進去會讓走勢失真。
 使用者要求「順便記錄一下」也照樣拒絕，改建議跑全量 `audit` 或 `improve`。
 
-**跑法**：四支腳本加 `--include <glob>`（可重複或逗號分隔）。`--dim` 時只跑該維要的腳本
+**跑法**：吃 `--include <glob>` 的三支（inventory／links／freshness）加旗標（可重複或逗號分隔）；
+`coverage.mjs`／`retrieval.mjs` 刻意不吃，一律全量跑。`--dim` 時只跑該維要的腳本
 （對照 [rubric.md](rubric.md) §機械訊號 → 維度對照），其餘略過。
 
 **各維度在 scope 下的效力**（不照做會給出誤導性星等）：

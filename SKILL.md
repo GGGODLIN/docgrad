@@ -6,7 +6,7 @@ argument-hint: "[init · audit · improve · loop · report]"
 license: MIT. See NOTICE.md for attribution.
 ---
 
-> **Last updated:** 2026-09-04
+> **Last updated:** 2026-09-13
 
 評估並收斂一個 repo 的文件體系（docs 目錄＋root 指引檔）作為 **AI agent context 來源**的品質：
 五維計星＋token 經濟報告；`loop` 逐輪修到達標。不評 prose 風格、不評 code、不碰 CI。
@@ -31,7 +31,8 @@ license: MIT. See NOTICE.md for attribution.
 ## Blockers（不可跳過）
 
 1. 目標 repo 無 `.docgrad.yml` → 除 `init` 外一律先導向 `/docgrad init`。
-2. 評分（audit/improve/loop）前必讀 reference/rubric.md；星等錨點不可自創、不可放寬。
+2. 評分（audit/improve/loop）前必讀 [reference/rubric.md](reference/rubric.md)；星等錨點不可自創、不可放寬。
+   評**一致性**前另必讀 [reference/placement.md](reference/placement.md)——落點與重複的判定規則在那裡。
 3. improve/loop 只在 `docgrad/converge` branch commit；絕不修改目標 repo 的 CI 設定
    （故新鮮度 ★5 在 loop 內不可達 → 判設計性天花板，見 [reference/improve.md](reference/improve.md)）。
 

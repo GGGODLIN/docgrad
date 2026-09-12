@@ -1,7 +1,22 @@
 # docgrad — 專案文件綜合評估與收斂 skill 設計
 
 > **狀態**：已實作（2026-07-12 定案並完成 v0.1.0）
-> **Last updated:** 2026-09-04
+> **Last updated:** 2026-09-13
+
+## Contents
+
+- [緣起](#緣起)
+- [定位與邊界](#定位與邊界)
+- [Repo 結構（impeccable 同款骨架）](#repo-結構impeccable-同款骨架)
+- [指令面](#指令面)
+- [`init` 與 `.docgrad.yml`](#init-與-docgradyml)
+- [五維 rubric（錨點住 reference/rubric.md）](#五維-rubric錨點住-referencerubricmd)
+- [衝突仲裁慣例](#衝突仲裁慣例)
+- [`loop` 機制（核心需求：裝完就能一直跑到達標）](#loop-機制核心需求裝完就能一直跑到達標)
+- [畢業建議（報告固定尾節，不自動執行）](#畢業建議報告固定尾節不自動執行)
+- [scripts 契約](#scripts-契約)
+- [開放問題（實作時定案）](#開放問題實作時定案)
+- [出處致謝（NOTICE.md 詳列）](#出處致謝noticemd-詳列)
 
 ## 緣起
 

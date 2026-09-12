@@ -1,6 +1,6 @@
 # improve / loop — 收斂輪
 
-> **Last updated:** 2026-07-26
+> **Last updated:** 2026-09-13
 
 `improve`＝跑一輪就停；`loop`＝反覆跑到停止條件。流程完全相同。
 
@@ -33,7 +33,7 @@
      refer-to-code、刪檔、補缺口文件。
    - **落點類的界線**：只動 docs 範圍內的檔案（entry file ↔ docs、docs ↔ docs 的搬移照做）。
      要把資訊搬進 code 註解或其他 source 檔的建議**一律不自動執行**——那超出「只 commit docs 變更」
-     的 branch 紀律，且四支腳本驗證不到 code 註解，改了也無從確認沒改壞。這類失分點改寫進本輪報告的
+     的 branch 紀律，且五支腳本驗證不到 code 註解，改了也無從確認沒改壞。這類失分點改寫進本輪報告的
      「建議由人處理」清單並記入 notes；若一致性因此連兩輪無進步，判**設計性天花板**而非 plateau。
 4. **驗證**：重跑腳本＋受影響維度重評。成功＝目標維上升且其他維不降。
    任何維度下降 → revert 造成下降的修改，記入 notes。
@@ -83,8 +83,8 @@ repo 的 CI —— loop 內新鮮度上限 ★4（僅在該維 target 設為 5 �
 達標後在收官報告固定附上：
 
 > 建議把可機械化的規則沉澱成本 repo 自己的 docs-gate CI（死鏈/孤兒/新鮮度/
-> 入口檔 token 預算），docgrad 的四支 scripts（inventory/links/freshness/coverage）可直接
-> 搬去改造。docgrad 只評分與修內容，不代寫 CI——由團隊自行決定 gate 的嚴格度。
+> 入口檔 token 預算），docgrad 的五支 scripts（inventory/links/freshness/coverage/retrieval）
+> 可直接搬去改造。docgrad 只評分與修內容，不代寫 CI——由團隊自行決定 gate 的嚴格度。
 
 有維度因設計性天花板封頂時，本節要點名它：該維要再上一星只能靠這道 CI
 （例：新鮮度 ★5 ＝ 「docs 與 code 同 MR 更新」的 gate），並說明目前上限星等。
