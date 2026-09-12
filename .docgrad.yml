@@ -1,7 +1,13 @@
 # .docgrad.yml — docgrad 設定（進版控，團隊共用）
+# 本 repo 是 Claude Code skill：
+#   entry = SKILL.md（技能觸發時唯一自動載入的檔；README.md 是給人看的 GitHub 落地頁，
+#           不進 agent context，故不列為 entry_file——列了會把固定成本灌水 1,807 tokens）
+#   index = README.md（人類導覽入口，連結度可達性的起點）
 docs_dirs: [docs/, reference/]
-entry_files: [README.md, SKILL.md]
+entry_files: [SKILL.md]
 index_file: README.md
+src_dirs: [scripts/]
+scenarios: [scripts/links.mjs, scripts/lib.mjs]
 exclude: []
 freshness:
   convention: heading-line

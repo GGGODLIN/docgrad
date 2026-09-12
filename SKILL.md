@@ -1,9 +1,8 @@
 ---
 name: docgrad
 description: Use when the user wants to audit, score, grade, improve, or converge a repository's documentation system as an AI-agent context source — five-dimension star rating (completeness, correctness, freshness, linkage, consistency) plus token-economy reporting, with an improvement loop that fixes docs until target ratings are met. Covers docs quality audit, documentation health check, dead-link/orphan/staleness checks, doc convergence. 中文關鍵字：文件評分、文件健檢、文件收斂、docs 評比、文件品質、死鏈檢查、文件過期。Not for prose style linting, SKILL.md auditing, or code review.
-user-invocable: true
 argument-hint: "[init · audit · improve · loop · report]"
-license: MIT. See NOTICE.md for attribution.
+license: MIT
 ---
 
 > **Last updated:** 2026-09-13
