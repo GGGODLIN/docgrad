@@ -1,0 +1,10 @@
+docs_dirs: [docs/]
+entry_files: [CLAUDE.md]
+index_file: docs/README.md
+exclude: []
+src_dirs: [src/]
+freshness:
+  convention: heading-line
+  field: "Last updated:"
+targets: {}
+language: zh-TW

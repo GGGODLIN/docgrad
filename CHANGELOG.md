@@ -3,6 +3,34 @@
 版本權威在 [.claude-plugin/plugin.json](.claude-plugin/plugin.json) 的 `version`；本檔記錄各版變更。
 版號語意（semver，docgrad 特化）見 [docs/how-to.md](docs/how-to.md) §發版。
 
+## 1.2.0 — 2026-09-13
+
+補上 Anthropic skill authoring checklist 的 Testing 三項（#19），並修掉建 eval 時才暴露出來的
+抽樣盲點。
+
+- **新增（#19）skill 級 eval suite**：`evals/`，依 `claude plugin eval` 的 `prompt.md` +
+  `graders/*.md` 佈局，三個 case 各守一種失效模式：
+  - `linkage-known` — **可重現性**：死鏈 1/12 ＝ 8.33%，依錨點只能是連結度 ★2，沒有解釋空間。
+    多次執行星等必須完全一致；出現分歧就是該處還留著自由度，當缺陷追。
+  - `planted-contradiction` — **抽樣覆蓋率**：矛盾句刻意放在錨點行的鄰句（該行本身無 code ref）。
+  - `clean-baseline` — **偽陽性**：全乾淨的 repo 不得被扣分。沒有這條，每次提高敏感度都可能悄悄
+    變成到處誤報。
+  - `evals/fixtures/` 三個迷你 repo 的機械基準值列在 `evals/README.md`，grader 的斷言建立在
+    這些實跑數字上，不是估的。
+  - **尚未執行**：`claude plugin eval` 在本機回報 early access。case 已寫好但一次都沒跑過，
+    文件不列任何分數。`case.yaml` 的欄位 schema 未公開，本 suite 刻意不寫 `case.yaml`——
+    寧可少用進階功能也不猜格式，`--runs`／`--model` 一律走 CLI 旗標。
+- **修正（lib）`extractClaimLines` 漏掉錨點行的鄰句**：這是建 `planted-contradiction` 時才發現的。
+  1.1.0 的實作只收「自己那一行帶得到 code ref」的行，但**矛盾常寫在錨點行的下一句**——
+  oikos 那條 balance 正負號正是如此，於是新機制會重演它原本要修掉的漏抽。
+  - 候選改為額外帶 `section`（所屬標題）與 `section_lines`（該段起訖行號）。
+  - `reference/audit.md` 步驟 3 明訂**驗證範圍是 `section_lines` 整段**，段內任何一句與 code
+    不符都記 `fail`，`claim_id` 指向出錯那一行。
+  - `claims_total` 的定義未變（仍是自帶 code ref 的行），累積覆蓋率的分母不受影響。
+- **發版流程**：`docs/how-to.md` §發版 加入「跑 eval」為必要步驟（取得權限後），
+  並明訂不得在報告裡填沒跑過的分數。
+- **測試**：63 → 64（section 範圍必須涵蓋鄰句、且不可越過下一個標題）。
+
 ## 1.1.0 — 2026-09-13
 
 正確性的抽樣從「每輪由 LLM 自由挑」改成機械決定並累積落檔，history 補上版本指紋。

@@ -62,7 +62,11 @@ node "$SKILL_DIR/scripts/retrieval.mjs" --root .
    > `claim_candidates` 的母體＝`totals.claims_total`（fence 外、帶得到 code 座標的非標題行）。
    > 純敘述性段落抽不到座標、本來就不該進 ledger，這與舊版「純敘述不抽」的規則一致，
    > 差別只在現在由腳本判定而非逐輪重新解讀。
-3. **逐條對 code 驗證**（Read/Grep 實查，不憑印象），記入 ledger 表：
+3. **逐條對 code 驗證**（Read/Grep 實查，不憑印象）。
+   **驗證範圍是該候選的 `section_lines` 整段，不是只有那一行**——矛盾常寫在錨點行的**鄰句**：
+   oikos 那條 balance 正負號就在「結算由 `src/balance.ts › settle()` 負責」的下一句，
+   只看錨點行會整條漏掉。段內任何一句與 code 不符都記 `fail`，`claim_id` 指向**出錯那一行**。
+   記入 ledger 表：
 
    | # | 文件:行 | 宣稱 | 驗證方式 | 結果 |
    |---|---|---|---|---|
