@@ -3,6 +3,21 @@
 版本權威在 [.claude-plugin/plugin.json](.claude-plugin/plugin.json) 的 `version`；本檔記錄各版變更。
 版號語意（semver，docgrad 特化）見 [docs/how-to.md](docs/how-to.md) §發版。
 
+## 1.3.1 — 2026-09-13
+
+發版流程與官方工具鏈對齊；純 metadata／文件，不動任何判定語意。
+
+- **`marketplace.json` 補 marketplace 層的 `description`**：原本只有 plugin entry 有描述，
+  marketplace 本身沒有，`claude plugin validate .` 會報 warning，別人瀏覽時看到的是空的。
+  補完後 validate 全綠無 warning。
+- **發版 tag 改用 `claude plugin tag --push`**：官方格式為 `docgrad--v<version>`（annotated），
+  建立前會驗 `plugin.json` 與 marketplace entry 是否一致，不再手打 tag。
+  - v0.2.0～v1.3.0 已補齊官方格式的 tag，指向與舊 tag**完全相同的 commit**（逐一核對過
+    `plugin.json` 的版號）。
+  - 舊的 `vX.Y.Z` lightweight 系列保留不刪（外部連結可能指向它們），但**新版本只打官方格式**
+    ——兩套並存只需涵蓋既有歷史，不需要繼續長。
+- **`docs/how-to.md` §發版**：步驟改寫為 7 步，新增 `claude plugin validate .` 為發版前置。
+
 ## 1.3.0 — 2026-09-13
 
 一批 P1：都來自 oikos／dream-calm-true 的實跑痕跡，不是設想出來的。

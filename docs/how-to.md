@@ -69,9 +69,26 @@ SKILL.md frontmatter 不放版號——官方規格無此欄位、無機制消�
 - **minor**：新維度、新量測訊號、新指令、`.docgrad.yml` 新欄位（向後相容）。
 - **patch**：修錯、文件修正、量測腳本 bug fix（不改判定語意）。
 
-發版步驟：`node --test tests/*.test.mjs` 全綠 → 跑 [skill 級 eval](#跑-skill-級-eval)（取得權限後為必要條件）
-→ bump `plugin.json` version → [CHANGELOG.md](../CHANGELOG.md) 補一節（日期＋變更清單，
-major 要明示 breaking 與重新起算建議）→ commit → `git tag vX.Y.Z` → push（含 tag）。
+發版步驟：
+
+1. `node --test tests/*.test.mjs` 全綠。
+2. 跑 [skill 級 eval](#跑-skill-級-eval)（取得權限後為必要條件）。
+3. `claude plugin validate .` 無 error（marketplace 與 plugin manifest 都會檢）。
+4. bump `plugin.json` 的 `version`。
+5. [CHANGELOG.md](../CHANGELOG.md) 補一節（日期＋變更清單，major 要明示 breaking 與重新起算建議）。
+6. commit → merge 進 main。
+7. 在 main 上打 tag 並推：
+
+   ```bash
+   claude plugin tag --push
+   ```
+
+   官方工具的格式是 `docgrad--v<version>`（annotated tag），會先驗 `plugin.json` 與
+   marketplace entry 是否一致才建立——**這是發版 tag 的權威格式**，不要手打。
+
+> **舊的 `vX.Y.Z` 系列**：v0.2.0～v1.3.0 每個版本都另有一個同 commit 的 lightweight tag，
+> 是 `claude plugin tag` 出現前的慣例，保留著不刪（外部連結可能指向它們）。
+> **新版本只打官方格式**，不再補舊格式——兩套並存只需要涵蓋既有歷史，不需要繼續長。
 
 ## 引用 code 的錨點慣例
 
