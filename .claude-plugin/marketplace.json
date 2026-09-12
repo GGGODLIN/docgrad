@@ -3,6 +3,7 @@
   "owner": {
     "name": "Ray Lee"
   },
+  "description": "單一 plugin 的 marketplace：docgrad —— 把 repo 的文件體系當成 AI agent 的 context 來源評分並逐輪收斂。",
   "plugins": [
     {
       "name": "docgrad",
