@@ -1,4 +1,4 @@
-# docgrad rubric — 五維星等錨點
+# docgrad rubric — 六維星等錨點
 
 > **Last updated:** 2026-09-13
 
@@ -14,7 +14,8 @@
 - [新鮮度 freshness](#新鮮度-freshness)
 - [連結度 linkage](#連結度-linkage)
 - [一致性 consistency](#一致性-consistency)
-- [Token 經濟（只報告，不計星）](#token-經濟只報告不計星)
+- [經濟性 economy](#經濟性-economy)
+- [Token 經濟報告](#token-經濟報告)
 - [版本沿革與可比性註記](#版本沿革與可比性註記)
 
 ## 評分總則
@@ -23,17 +24,19 @@
 2. LLM 判斷維度（完整性、正確性、一致性）依本檔錨點對號入座，禁止自創標準。
 3. 星等取整數 ★1–★5；取「完全滿足」的最高一級。
 4. 拿不準時往低取——保守評分讓 loop 有明確的工作方向。
-5. 維度固定順序（同分 tie-break 取靠前者）：完整性 → 正確性 → 新鮮度 → 連結度 → 一致性。
+5. 維度固定順序（同分 tie-break 取靠前者）：完整性 → 正確性 → 新鮮度 → 連結度 → 一致性 → 經濟性。
+   經濟性排最後是刻意的：它與完整性方向相反（補文件會推高固定成本），同分時先讓內容維度動，
+   避免 loop 在「補了又刪」之間來回。
 
 ## 機械訊號 → 維度對照
 
 | 腳本 | 餵給 |
 |---|---|
-| inventory.mjs | token 經濟報告（不計星）；完整性的盤點基礎；`structure.rules` 餵可回溯性 |
+| inventory.mjs | **經濟性（全量機械：`entry_cost` ＋ `pollution`）**；完整性的盤點基礎；`structure.rules` 餵可回溯性 |
 | coverage.mjs | 完整性（覆蓋漂移：undocumented/drifted 區域） |
 | links.mjs | 連結度（全量機械） |
 | freshness.mjs | 新鮮度（機械為主） |
-| retrieval.mjs | token 經濟的邊際成本（`scenarios:` 有設時）＋可回溯性（不計星，report-only） |
+| retrieval.mjs | 邊際成本（`scenarios:` 有設時）＋可回溯性——**皆 report-only，不參與經濟性定星** |
 | （無腳本） | 正確性、一致性（LLM claim-ledger／跨文件三角驗證） |
 
 ## 完整性 completeness
@@ -104,17 +107,46 @@
 只判落點與重複，不評註解品質。失分點分 `[矛盾]`／`[重複]`／`[落點]` 三類（見 [audit.md](audit.md) 步驟 6）。
 跨 v0.5.0 比較本維分數時，判定範圍已擴大（見 [§版本沿革](#版本沿革與可比性註記)）。
 
-## Token 經濟（只報告，不計星）
+## 經濟性 economy
 
-- **固定成本**：`inventory.entry_cost.tokens_est`（entry_files 每次任務都載入）。
-- **邊際成本**：有 `.docgrad.yml` 的 `scenarios:`（代表性 code 路徑清單）時，由 `retrieval.mjs` 機械計算——
+| 星 | 錨點 |
+|---|---|
+| ★1 | 固定成本 > 20,000 tokens。 |
+| ★2 | 固定成本 > 10,000 且 ≤ 20,000。 |
+| ★3 | 固定成本 > 5,000 且 ≤ 10,000。 |
+| ★4 | 固定成本 ≤ 5,000 且污染面 < 10%。 |
+| ★5 | 固定成本 ≤ 3,000、污染面 < 10%，且入口檔 token 預算有機械 gate 強制。 |
+
+量測：**固定成本**＝`inventory.entry_cost.tokens_est`（`entry_files` 每次任務都載入的稅，
+symlink 別名已去重）；**污染面**＝`inventory.pollution.ratio`。兩者皆全量機械，不經 LLM 判斷。
+
+> **污染面的降級規則**：污染面 ≥ 10% 時，無論固定成本多低，本維上限 ★3。
+> 沒有這條，「固定成本 4,000＋污染面 15%」會同時不滿足 ★3（成本太低）與 ★4（污染面太高）而無星可定。
+
+> **本維與完整性方向相反，這是設計而非缺陷**：補文件會推高固定成本。經濟性的作用就是讓 loop
+> 在「文件更多」與「agent 更貴」之間有一個機械的煞車——外部實證（多個 coding agent 在 SWE-Bench Lite
+> 與 AgentBench 上的對照）指出 context 檔變長會提高成本而未必提高成功率，故覆蓋率不能是唯一的獎勵方向。
+> 實作上靠三件事避免來回拉鋸：經濟性排維度順序最後（同分先讓內容維度動）、`entry_files` 以外的文件
+> 不計入固定成本（把內容搬出入口檔即可同時滿足兩維）、以及 improve 的「其他維不得下降」驗證。
+
+> **★5 的適用範圍（graduation-only）**：★5 要求的「機械 gate 強制」得動 CI，而 improve/loop 受
+> Blocker #3 約束不碰目標 repo 的 CI —— 故 loop 內經濟性上限為 ★4，該維會判設計性天花板
+> （見 [improve.md](improve.md)），與新鮮度 ★5 同一性質。
+
+## Token 經濟報告
+
+自 v1.0.0 起，**固定成本與污染面已計星**（見 [§經濟性](#經濟性-economy)）；本節是該維的展開說明，
+外加兩項仍為 report-only 的訊號（邊際成本、可回溯性）——它們不參與定星。
+
+- **固定成本**：`inventory.entry_cost.tokens_est`（entry_files 每次任務都載入）。**計星**。
+- **邊際成本**（report-only）：有 `.docgrad.yml` 的 `scenarios:`（代表性 code 路徑清單）時，由 `retrieval.mjs` 機械計算——
   每條 scenario 報 `marginal_tokens`（entry_files＋索引鏈上經過的 doc＋所有錨定 doc 的 tokens，各檔只算
   一次）／`max_depth`（從 `index_file` 到最遠一份錨定 doc 要幾跳）／`fan_in`（錨定它的 doc 數）／
   `code_pointer`（該路徑的 code 有沒有指回任一 docs），並以 `churn_commits`（近 90 天 commit 數）加權指出
   「稅最重」的那條 scenario——churn 高又 marginal_tokens 高／max_depth 深，代表 agent 常碰但檢索成本也
   最高，優先改善。沒有 `scenarios:` 時退回舊法：LLM 依 `.docgrad.yml` 的 `scenario`（單數，敘事字串）
   模擬必讀路徑。
-- **污染面**：`inventory.pollution.ratio`（exclude 目錄與 WIP 佔全語料比例）。
+- **污染面**：`inventory.pollution.ratio`（exclude 目錄與 WIP 佔全語料比例）。**計星**。
 - **解讀**：報告必附「損益兩平」說明——入口檔塞太多＝每個任務都付固定稅；全靠索引指路＝多跳檢索的邊際成本。按該 repo 的任務組成給權衡建議。
 
 ### 可回溯性（report-only）
@@ -136,11 +168,16 @@
 
 ## 版本沿革與可比性註記
 
-只在比較跨版本分數時需要讀；日常評分不必展開。錨點文字從未因下列任一項而改動。
+只在比較跨版本分數時需要讀；日常評分不必展開。下列任一項都**沒有改動既有維度的 ★1–★5 錨點文字**；
+唯一的 breaking 是 v1.0.0 新增一個維度（維度組成變了，各維自身的尺沒變）。
 
 <details>
 <summary>展開</summary>
 
+- **v1.0.0 — 新增第六維「經濟性」**（**breaking，rubric 結構變更**）：固定成本與污染面從
+  report-only 升格為計星維度。五維時代的 `history.jsonl` 缺 `economy` 鍵，**跨 v1.0.0 的總體分數
+  不可比**，受影響 repo 的收斂輪應從基線重新起算（舊紀錄保留，`report` 在此處畫斷點）。
+  ★1–★5 在**既有五維**上的錨點文字一字未動——不可比的是「達標與否」與維度組成，不是各維自身的尺。
 - **v0.5.0 — 一致性判定範圍擴到跨載體**（非錨點變更）：範圍從「docs 內部」擴到含 docs ↔ code 註解／spec
   的落點與重複。原本 ★5 的 repo 可能因 code 註解與 docs 各自展開同一事實而下修。★1–★5 錨點文字未動，
   但跨 v0.5.0 比較一致性分數時要在報告註明範圍已擴大——這與 0.2.0 完整性改以 coverage 為機械基礎

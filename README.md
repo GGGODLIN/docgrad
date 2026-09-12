@@ -1,9 +1,9 @@
 # docgrad
 
-> **Last updated:** 2026-09-04
+> **Last updated:** 2026-09-13
 
 評估並收斂一個 repo 的文件體系（docs 目錄＋root 指引檔）作為 **AI agent context 來源**的品質。
-五維計星（完整性/正確性/新鮮度/連結度/一致性）＋token 經濟報告；`loop` 逐輪修 docs 直到達標。
+六維計星（完整性/正確性/新鮮度/連結度/一致性/經濟性）＋token 經濟報告；`loop` 逐輪修 docs 直到達標。
 
 ## 快速上手：從安裝到畢業
 
@@ -47,7 +47,7 @@ docgrad 掃描候選結構（docs 目錄、always-loaded 入口檔、索引檔�
 /docgrad audit
 ```
 
-跑一次全量評分，產出 scorecard：五維各打 ★1–★5、標出主要失分點，附 token 經濟報告。純報告、不動任何檔案——先知道「現在幾分、差在哪」，再決定要不要收斂。
+跑一次全量評分，產出 scorecard：六維各打 ★1–★5、標出主要失分點，附 token 經濟報告。純報告、不動任何檔案——先知道「現在幾分、差在哪」，再決定要不要收斂。
 
 只想看一塊、或只關心一維時可以限定範圍：
 
@@ -103,7 +103,7 @@ docgrad 評的是**本地 markdown 檔案樹**：五支腳本都以本地路徑�
 
 - **git 不是硬需求**：沒有 git 時新鮮度只認文件自稱的日期、覆蓋漂移無法量測，其餘照跑。
 - **wiki／Confluence 等遠端文件源不支援**：檔案不在樹上、設定檔無處可放，整套流程用不上。真要評這類文件源，
-  可只借用 [reference/rubric.md](reference/rubric.md) 的五維錨點做人工評分——無機械訊號、不可重現，也不落 scorecard。
+  可只借用 [reference/rubric.md](reference/rubric.md) 的六維錨點做人工評分——無機械訊號、不可重現，也不落 scorecard。
 - **新鮮度 ★5 屬畢業後範圍**：★5 要求 CI gate 強制，而 docgrad 不碰 CI ——`loop` 內該維上限 ★4
   （預設 target 就是 ★4，不受影響；只有把 target 調到 5 才會遇到）。
 

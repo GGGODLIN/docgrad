@@ -18,6 +18,7 @@ targets:
   freshness: 4
   linkage: 4
   consistency: 4
+  economy: 4
 correctness_sample: 8
 scenario: "為 docgrad 新增一個評分維度"
 language: zh-TW

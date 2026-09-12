@@ -10,7 +10,7 @@
 - [Repo 結構（impeccable 同款骨架）](#repo-結構impeccable-同款骨架)
 - [指令面](#指令面)
 - [`init` 與 `.docgrad.yml`](#init-與-docgradyml)
-- [五維 rubric（錨點住 reference/rubric.md）](#五維-rubric錨點住-referencerubricmd)
+- [六維 rubric（錨點住 reference/rubric.md）](#六維-rubric錨點住-referencerubricmd)
 - [衝突仲裁慣例](#衝突仲裁慣例)
 - [`loop` 機制（核心需求：裝完就能一直跑到達標）](#loop-機制核心需求裝完就能一直跑到達標)
 - [畢業建議（報告固定尾節，不自動執行）](#畢業建議報告固定尾節不自動執行)
@@ -31,9 +31,9 @@
 - **資訊落點 vs code 品質的界線**：docgrad 判「這則資訊該住哪個載體、有沒有第二份權威」（規則見 [reference/placement.md](../reference/placement.md)），為此**會讀** code 註解——但只判落點與重複，**不評**註解寫得好不好、該不該補註解。判準是「有沒有第二份權威／位置對不對」，不是「寫得好不好」；沒有這條界線，一致性維度會滑成 code review。
 - **通用性**：零 repo 假設。結構（文件夾、索引、入口檔、新鮮度慣例）全部由 `init` 偵測＋問卷確認後寫入設定檔，之後每輪讀設定檔。
 - **前提條件**：文件必須是**本地 markdown 檔案樹**，且目標 repo 根目錄可寫入 `.docgrad.yml`（Blocker #1）。git 非硬需求——無 git 時新鮮度降級為 claimed-only（`scripts/freshness.mjs › gitDate()` 取不到就只認文件自稱日期）、覆蓋漂移無法量測、`retrieval.mjs` 的 `churn_commits`／`index_hotness` 皆為 null 但不炸，其餘照跑。**不支援** wiki／Confluence 等遠端文件源：檔案不在樹上、五支腳本全依賴本地路徑、設定檔也無處可放。
-- **rubric 可獨立引用**：`reference/rubric.md` 的五維錨點本身不依賴腳本，可單獨拿去對非 repo 文件源做人工評分——但那是「借用錨點」而非 docgrad 流程：無機械訊號、不可重現，也不該落 scorecard/history。
+- **rubric 可獨立引用**：`reference/rubric.md` 的六維錨點本身不依賴腳本，可單獨拿去對非 repo 文件源做人工評分——但那是「借用錨點」而非 docgrad 流程：無機械訊號、不可重現，也不該落 scorecard/history。
 - **能力天花板要明說**：Blocker 禁區擋住的星等（目前：新鮮度 ★5 需 CI gate 而 loop 不碰 CI）由 `improve.md` 的設計性天花板規則明文判定，不靠當輪 model 臨場繞過——否則報告會把「設計上不可達」誤呈成「這兩輪沒修動」。
-- **使用者決策（2026-07-12 定案）**：獨立 git repo 發布（本 repo）；impeccable 式「init 一次、之後逐步收斂」；五維計星＋token 經濟只報告不計星；loop 每輪 commit、達標才停；評分＝內建機械腳本＋LLM 判斷混合。
+- **使用者決策（2026-07-12 定案）**：獨立 git repo 發布（本 repo）；impeccable 式「init 一次、之後逐步收斂」；五維計星＋token 經濟只報告不計星（**v1.0.0 起改為六維，token 經濟的固定成本與污染面升格計星**，見下節）；loop 每輪 commit、達標才停；評分＝內建機械腳本＋LLM 判斷混合。
 
 ## Repo 結構（impeccable 同款骨架）
 
@@ -45,7 +45,7 @@ docgrad/
 ├── SKILL.md              # 路由：init · audit · improve · loop · report
 ├── reference/
 │   ├── init.md           # 掃描＋問卷 → 寫入目標 repo 的 .docgrad.yml
-│   ├── rubric.md         # 五維星等錨點（評分穩定性的關鍵，見下）
+│   ├── rubric.md         # 六維星等錨點（評分穩定性的關鍵，見下）
 │   ├── audit.md          # 單次評分流程：腳本 → LLM 抽查 → scorecard（含 scoped audit）
 │   ├── improve.md        # 收斂輪流程（improve 與 loop 共用）
 │   └── placement.md      # 資訊安置政策：落點與重複的判定規則（一致性維度消費）
@@ -111,7 +111,7 @@ language: zh-TW                    # 報告與 commit 語言
 
 repo 沒有 `.docgrad.yml` 時，`audit`/`improve`/`loop` 一律先導向 `init`（同 impeccable「PRODUCT.md 缺失就先 teach」的 blocker 模式）。
 
-## 五維 rubric（錨點住 reference/rubric.md）
+## 六維 rubric（錨點住 reference/rubric.md）
 
 分數要能跨輪比較，錨點必須寫死。各維 ★1–★5 錨點自實戰評比沉澱；凍結正文在 [reference/rubric.md](../reference/rubric.md)，本表僅摘要：
 
@@ -122,8 +122,16 @@ repo 沒有 `.docgrad.yml` 時，`audit`/`improve`/`loop` 一律先導向 `init`
 | **新鮮度** | 有日期訊號慣例但靠自律；關鍵文件 staleness ≤60 天 | 日期訊號全覆蓋＋「同 MR 隨改隨更」有機械 gate 強制＋生命週期管理（superseded 即處理） | freshness.mjs：訊號覆蓋率＋git log 真實日期 vs 宣稱日期 |
 | **連結度** | 相對連結失效 ≤2%；有索引但非唯一入口 | 全量驗證零死鏈＋單一頂層索引 transitive 全可達（零孤兒）＋錨點用 `path › symbol()` 抗行號漂移 | links.mjs 全量機械驗證 |
 | **一致性** | 同主題重疊 ≤2 處且不矛盾 | 一主題一權威（其餘摘要＋連結）＋衝突有仲裁慣例（newer wins＋以 code 仲裁） | LLM：挑關鍵事實宣稱做跨文件＋對 code 三角驗證 |
+| **經濟性** | 固定成本 ≤10,000 tokens | 固定成本 ≤3,000＋污染面 <10%＋入口檔 token 預算有機械 gate 強制 | inventory.mjs 的 `entry_cost.tokens_est` 與 `pollution.ratio`，全量機械 |
 
-**Token 經濟（只報告，不計星）**：①固定成本＝entry_files token 量②邊際成本＝按 `scenario` 沿路由規則模擬必讀路徑的 token 合計③污染面＝exclude 目錄與 WIP 佔語料比例。CJK-aware 估算（中文 token/byte 密度與英文不同，inventory.mjs 內建係數）。報告附「損益兩平」解讀（固定 vs 邊際的任務組成權衡）。
+**經濟性為什麼是一個維度而不是一則報告**（v1.0.0，issue #11）：完整性獎勵覆蓋、經濟性懲罰成本，
+兩者方向相反。只報不計星時，loop 每一輪的合法動作都是「補文件」，沒有任何力量把不值得它的 token 的
+內容搬出入口檔——外部實證（多個 coding agent 在 SWE-Bench Lite 與 AgentBench 上的對照）指出 context
+檔變長會提高成本而未必提高成功率。加維度＝rubric 結構變更＝major＋所有 repo 歷史分數重新起算，
+這個代價是知情下付的（對比 0.5.0 一致性擴範圍時**刻意不**加第六維的決定：那次改的是既有維度的判定
+範圍，這次改的是獎勵方向本身）。
+
+**Token 經濟報告**：①固定成本＝entry_files token 量（**計星**）②邊際成本＝`scenarios` 機械算或按 `scenario` LLM 模擬必讀路徑的 token 合計（report-only）③污染面＝exclude 目錄與 WIP 佔語料比例（**計星**）。CJK-aware 估算（中文 token/byte 密度與英文不同，inventory.mjs 內建係數）。報告附「損益兩平」解讀（固定 vs 邊際的任務組成權衡）。
 
 ## 衝突仲裁慣例
 

@@ -81,6 +81,9 @@ test('loadConfig: 未填欄位補預設值、巢狀深合併', () => {
     assert.deepEqual(cfg.entry_files, []);
     assert.equal(cfg.index_file, null);
     assert.equal(cfg.targets.completeness, 4);
+    assert.equal(cfg.targets.economy, 4); // v1.0.0 第六維：舊設定沒寫也要補上預設 target
+    assert.deepEqual(cfg.economy.entry_cost_tiers, [20000, 10000, 5000, 3000]);
+    assert.equal(cfg.economy.pollution_max, 0.1);
     assert.equal(cfg.freshness.convention, 'frontmatter');
     assert.equal(cfg.freshness.stale_after_days, 60); // 預設值沒被 freshness 覆寫吃掉
     assert.equal(cfg.correctness_sample, 8);

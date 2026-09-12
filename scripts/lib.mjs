@@ -85,7 +85,9 @@ const DEFAULTS = {
   // heading_field 是 heading-line 用的行內關鍵字，未設時 fallback 用 field（相容舊設定）。
   freshness: { convention: 'none', field: null, heading_field: null, stale_after_days: 60 },
   coverage: { drift_after_days: 30, min_commits: 3 },
-  targets: { completeness: 4, correctness: 4, freshness: 4, linkage: 4, consistency: 4 },
+  targets: { completeness: 4, correctness: 4, freshness: 4, linkage: 4, consistency: 4, economy: 4 },
+  // 經濟性錨點的門檻（v1.0.0 新增）。改這裡＝改 rubric 錨點語意＝major，見 reference/rubric.md。
+  economy: { entry_cost_tiers: [20000, 10000, 5000, 3000], pollution_max: 0.1 },
   correctness_sample: 8,
   scenario: null,
   scenarios: [], // retrieval.mjs 用：代表性 code 路徑（檔案或目錄）清單，report-only

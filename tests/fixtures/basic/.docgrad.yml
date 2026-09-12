@@ -11,6 +11,7 @@ targets:
   freshness: 4
   linkage: 4
   consistency: 4
+  economy: 4
 correctness_sample: 4
 scenario: "在 guide 模組加一個典型新功能"
 language: zh-TW
