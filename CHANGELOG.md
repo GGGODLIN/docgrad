@@ -22,8 +22,24 @@ best practices 後的結構修正。**不改動任何星等錨點語意，歷史
   - **錨點表與量測方式一字未動**，僅移動歷史註記。新鮮度 ★5 的 graduation-only 說明屬**現行規則**
     （improve.md 的設計性天花板依賴它）而非沿革，故留在正文，只把可比性那句移入 details。
   - 一併補記 0.2.0（完整性改以 coverage 為機械基礎）到沿革清單。
-- **驗證**：`node --test tests/*.test.mjs` 58 pass；`links.mjs` 對本 repo dead 0／bad_anchors 0／
-  orphans 0／reachable 1.0（新增的 Contents 錨點全數通過 GitHub slug 對齊後的檢查）。
+- **修正（#26，lib）`collectFiles()` 漏收 `index_file`**：`index_file` 落在 `docs_dirs` 之外且不在
+  `entry_files` 時不進語料，於是被 `links.mjs` 的 roots 過濾掉（roots 只認語料內路徑），
+  **整棵只從索引可達的子樹被誤判成孤兒**，`reachable_ratio` 一併下修且無任何 note。
+  索引本來就是文件體系的一部分，改為比照 `entry_files` 補進語料。
+  - 受影響：把索引放 repo 根的 repo——這些 repo 過去的連結度星等**偏低**，失分點還會指向沒問題的檔案。
+    `index_file` 在 `docs_dirs` 內者數字不變。
+  - 回歸測試：新增 `tests/fixtures/root-index/`，已驗證未修復時為紅。
+- **修正（#22）本 repo 自身 `.docgrad.yml` 誤報固定成本**：`entry_files` 原含 `README.md`，
+  但它是 GitHub 落地頁、不進 agent context。移除後固定成本 2,823 → **1,047 tokens**（原值灌水 1.7 倍）。
+  一併補 `src_dirs: [scripts/]` 與 `scenarios:`，讓 coverage／retrieval 脫離降級模式。
+- **修正（#23）frontmatter**：`license` 改為合法 SPDX 標識 `MIT`（原值 `MIT. See NOTICE.md for
+  attribution.` 混入說明文字）；移除 `user-invocable: true`（該欄位預設即為 true，用途是設成 false）。
+  - **未採用 `allowed-tools`**：Bash 規則第一個 `*` 之前必須逐字相符，而 skill 撰寫時不知道自己的
+    安裝絕對路徑；唯一可攜的 pattern 是 `Bash(node *)`，等於預先放行任意 node 指令。改為在
+    `docs/how-to.md` 教使用者用自己的絕對路徑加規則。
+- **驗證**：`node --test tests/*.test.mjs` **59 pass**；本 repo dead 0／bad_anchors 0／orphans 0／
+  reachable 1.0、freshness coverage 1.0／stale 0／mismatch 0／污染面 0%
+  （新增的 Contents 錨點全數通過 GitHub slug 對齊後的檢查）。
 
 ## 0.6.1 — 2026-09-05
 

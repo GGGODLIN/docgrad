@@ -226,8 +226,11 @@ export function collectFiles(rootDir, config, { include = [] } = {}) {
     const abs = path.join(rootDir, dir);
     if (fs.existsSync(abs)) walkMarkdown(abs, rootDir, all);
   }
-  for (const f of config.entry_files) {
-    if (fs.existsSync(path.join(rootDir, f)) && !all.includes(f)) all.push(f);
+  // entry_files 與 index_file 可能落在 docs_dirs 之外（如 repo 根的 SKILL.md／README.md），
+  // 兩者都是文件體系的一部分，必須納入語料——index_file 漏收會讓它被 links.mjs 的
+  // roots 過濾掉（roots 只認 includedSet 內的路徑），整棵只從索引可達的子樹被誤判成孤兒。
+  for (const f of [...config.entry_files, config.index_file]) {
+    if (f && fs.existsSync(path.join(rootDir, f)) && !all.includes(f)) all.push(f);
   }
   const isExcluded = (p) =>
     config.exclude.some((ex) => p === ex || p.startsWith(ex.endsWith('/') ? ex : `${ex}/`));
