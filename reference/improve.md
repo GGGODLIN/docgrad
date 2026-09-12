@@ -13,8 +13,8 @@
 ## Branch 紀律
 
 - 一律在 `docgrad/converge` branch 工作：不存在 → 從目前 branch 建立；已存在 → checkout 續跑（中斷可續）。
-- 只 commit docs 變更與 `.docgrad/` 狀態檔——「docs 變更」＝ `.docgrad.yml` 的 `docs_dirs`／`entry_files`
-  涵蓋的檔案，**不含 source code 檔**（含其註解）。**絕不碰目標 repo 的 CI 設定。**
+- 只 commit docs 變更與 `.docgrad/` 狀態檔——「docs 變更」＝ `.docgrad.yml` 的 `docs_dirs`／`docs_files`／
+  `entry_files` 涵蓋的檔案，**不含 source code 檔**（含其註解）。**絕不碰目標 repo 的 CI 設定。**
 - branch 隔離讓使用者可整批 review 再合併；每輪一 commit 保證可回退。
 
 ## 每輪步驟
@@ -48,7 +48,8 @@
      **禁止為了降成本而刪掉仍然正確、仍被需要的內容**；真的只剩「刪了才降得下來」時，
      判 plateau 並把取捨攤給使用者，不要自行決定砍哪一份文件。
      `entry_files` 設定本身錯了（列了不進 agent context 的檔、或漏列必讀檔）→ 改 `.docgrad.yml`
-     並在 commit message 明示，這算設定修正不算刷分。
+     並在 commit message 明示，這算設定修正不算刷分。列進去的檔其實是**條件式**載入時，
+     改列 `docs_files`（仍在語料內、不計固定成本），**不要**直接刪掉——刪掉會同時掉完整性。
    - **落點類的界線**：只動 docs 範圍內的檔案（entry file ↔ docs、docs ↔ docs 的搬移照做）。
      要把資訊搬進 code 註解或其他 source 檔的建議**一律不自動執行**——那超出「只 commit docs 變更」
      的 branch 紀律，且五支腳本驗證不到 code 註解，改了也無從確認沒改壞。這類失分點改寫進本輪報告的

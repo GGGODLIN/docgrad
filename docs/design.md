@@ -26,7 +26,10 @@
 
 ## 定位與邊界
 
-- **評什麼**：一個 repo 的文件體系（docs 目錄＋root 指引檔）作為 **AI agent 開發時的 context 來源**的品質。
+- **評什麼**：一個 repo 的文件體系作為 **AI agent 開發時的 context 來源**的品質。語料邊界由三個設定欄位
+  界定：`docs_dirs`（目錄，遞迴掃）、`docs_files`（目錄之外的單檔，當一般文件收）、`entry_files`／`index_file`
+  （入口與索引，各有特殊角色）。root 指引檔因此有兩種收法——**always-loaded 的走 `entry_files`（計固定成本），
+  條件式載入的走 `docs_files`（不計）**，判準與選錯的代價見 [reference/init.md](../reference/init.md) 問卷第 3 項。
 - **不評什麼**：prose 風格（Vale 的事）、SKILL.md 本身品質（agnix/skill-audit 的事）、程式碼品質（code review 的事）。
 - **資訊落點 vs code 品質的界線**：docgrad 判「這則資訊該住哪個載體、有沒有第二份權威」（規則見 [reference/placement.md](../reference/placement.md)），為此**會讀** code 註解——但只判落點與重複，**不評**註解寫得好不好、該不該補註解。判準是「有沒有第二份權威／位置對不對」，不是「寫得好不好」；沒有這條界線，一致性維度會滑成 code review。
 - **通用性**：零 repo 假設。結構（文件夾、索引、入口檔、新鮮度慣例）全部由 `init` 偵測＋問卷確認後寫入設定檔，之後每輪讀設定檔。
@@ -89,11 +92,12 @@ skill 名稱＝目錄名＝`docgrad`（安裝進 `~/.claude/skills/docgrad` 或 
 
 ## `init` 與 `.docgrad.yml`
 
-`init` 自動掃描：docs 目錄候選（`docs/`、`doc/`、`documentation/`）、always-loaded 入口檔（`CLAUDE.md`、`AGENTS.md`、`.cursorrules`…）、索引檔候選（`docs/README.md`、`docs/index.md`）、應排除目錄（`archive/`、`node_modules/`、generated、gitignored WIP）。掃描結果以問卷逐項確認，含目標星等。寫入：
+`init` 自動掃描：docs 目錄候選（`docs/`、`doc/`、`documentation/`）、always-loaded 入口檔（`CLAUDE.md`、`AGENTS.md`、`.cursorrules`…）、root 層的單檔文件候選（`PRODUCT.md`、`DESIGN.md`…）、索引檔候選（`docs/README.md`、`docs/index.md`）、應排除目錄（`archive/`、`node_modules/`、generated、gitignored WIP）。掃描結果以問卷逐項確認，含目標星等。寫入：
 
 ```yaml
 # .docgrad.yml — docgrad 設定（進版控，團隊共用）
 docs_dirs: [docs/]
+docs_files: [PRODUCT.md]          # docs_dirs 之外的單檔，當一般文件收（條件式載入，不計固定成本）
 entry_files: [CLAUDE.md]          # always-loaded，計入固定成本
 index_file: docs/README.md        # 孤兒判定的可達性根
 exclude: [docs/archive/]          # 不計分但列入污染面報告
