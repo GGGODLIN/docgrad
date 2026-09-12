@@ -1,6 +1,23 @@
 # docgrad how-to — 常見開發任務
 
-> **Last updated:** 2026-09-04
+> **Last updated:** 2026-09-13
+
+## 減少跑腳本的權限提示（選用，由使用者自行設定）
+
+`audit` 每次固定跑五支腳本，`loop` 每輪都跑，每次都會問一次權限。可以在**自己的** settings
+加一條 allow 規則免問：
+
+```jsonc
+// ~/.claude/settings.json 或目標 repo 的 .claude/settings.local.json
+{ "permissions": { "allow": ["Bash(node /絕對路徑/到/docgrad/scripts/*)"] } }
+```
+
+絕對路徑用 `/docgrad` 觸發後實際跑的那一行（plugin 安裝路徑因機器而異）。
+
+**為什麼 SKILL.md 不直接放 `allowed-tools`**：Bash 規則第一個 `*` 之前的字必須逐字相符，
+而 skill 在撰寫時不知道自己的安裝絕對路徑；唯一寫得出來的可攜 pattern 是 `Bash(node *)`，
+那等於把「執行任意 node 指令」預先放行一輪——對一個只讀文件的評分工具，這個代價不值得。
+路徑只有使用者知道，所以這條規則由使用者自己加。
 
 ## 新增一個評分維度
 

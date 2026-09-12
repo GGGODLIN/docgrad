@@ -29,3 +29,11 @@ test('links: --include 只採計死鏈/壞錨，孤兒與可達率一律不計',
   assert.equal(out.dead_links.length, 1); // 死鏈是 per-file 判定，scope 下照抓
   assert.equal(out.bad_anchors.length, 1);
 });
+
+test('links: index_file 在 docs_dirs 之外且非 entry_file → 仍為可達性起點（不誤判孤兒）', () => {
+  const fixture = fileURLToPath(new URL('./fixtures/root-index/', import.meta.url));
+  const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', fixture], { encoding: 'utf8' }));
+  assert.deepEqual(out.orphans, []); // 漏收 index_file 時 docs/guide.md 會被誤判成孤兒
+  assert.equal(out.reachable_ratio, 1);
+  assert.deepEqual(out.dead_links, []);
+});

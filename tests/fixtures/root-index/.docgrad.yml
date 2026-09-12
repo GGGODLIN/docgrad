@@ -1,0 +1,18 @@
+# index_file 落在 docs_dirs 之外、且不是 entry_file——collectFiles 漏收它時
+# links.mjs 的 roots 會被過濾掉，只從索引可達的子樹全成孤兒。
+docs_dirs: [docs/]
+entry_files: []
+index_file: README.md
+exclude: []
+freshness:
+  convention: heading-line
+  field: "Last updated:"
+targets:
+  completeness: 4
+  correctness: 4
+  freshness: 4
+  linkage: 4
+  consistency: 4
+correctness_sample: 4
+scenario: "在 guide 模組加一個典型新功能"
+language: zh-TW
