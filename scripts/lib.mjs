@@ -1,6 +1,8 @@
 // scripts/lib.mjs — docgrad 量測腳本共用模組（零依賴，Node ≥18）
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 export const CONFIG_FILENAME = '.docgrad.yml';
 
@@ -405,4 +407,62 @@ export function extractCodeRefs(text, srcDirs = []) {
     }
   }
   return refs;
+}
+
+// --- docgrad 自身的版本指紋（history.jsonl 的可比性欄位用）----------------------
+//
+// rubric_hash 是「這一輪用的尺」的指紋：rubric.md 一改，hash 就變，report 據此畫
+// 可比性斷點。取前 8 碼夠分辨（碰撞機率可忽略），也讓 history 每行不至於太長。
+
+const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+export function docgradMeta(skillRoot = SKILL_ROOT) {
+  let version = null;
+  try {
+    version = JSON.parse(fs.readFileSync(path.join(skillRoot, '.claude-plugin/plugin.json'), 'utf8')).version ?? null;
+  } catch {
+    version = null; // 從 source tree 以外的方式執行時允許缺，不讓整支腳本炸掉
+  }
+  let rubricHash = null;
+  try {
+    const rubric = fs.readFileSync(path.join(skillRoot, 'reference/rubric.md'), 'utf8');
+    rubricHash = createHash('sha256').update(rubric, 'utf8').digest('hex').slice(0, 8);
+  } catch {
+    rubricHash = null;
+  }
+  return { version, rubric_hash: rubricHash };
+}
+
+// --- 具體宣稱（claim）候選 ------------------------------------------------------
+//
+// 「具體宣稱」＝fence 外、帶得到 code 座標的那些行（extractCodeRefs 抽得到 ref）。
+// 純敘述句抽不到座標，本來就不該進 claim-ledger——rubric 正確性的加權抽樣規則
+// （優先抽含路徑/符號者）於是變成機械可重現的，而不是每輪由 LLM 重新自由挑。
+// 標題行排除：標題是導航不是宣稱。
+export function extractClaimLines(text, srcDirs = []) {
+  const out = [];
+  let inFence = false;
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (/^\s*#{1,6}\s/.test(line)) continue;
+    if (!line.trim()) continue;
+    const refs = extractCodeRefs(line, srcDirs);
+    if (!refs.length) continue;
+    out.push({ line: i + 1, text: line.trim(), refs: refs.length });
+  }
+  return out;
+}
+
+// 跨檔彙總 claim 候選並給一個**穩定**排序：ref 多的優先（宣稱越具體越該驗），
+// 同分依 path、再依 line——同一份語料每次跑出來的順序一定相同，抽樣才可重現。
+export function rankClaimCandidates(perFile) {
+  return perFile
+    .flatMap(({ path: p, claims }) => claims.map((c) => ({ path: p, ...c })))
+    .sort((a, b) => b.refs - a.refs || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) || a.line - b.line);
 }

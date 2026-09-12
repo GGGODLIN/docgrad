@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs } from '../scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, extractClaimLines, rankClaimCandidates } from '../scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -286,4 +286,60 @@ test('extractCodeRefs: 跳過 code fence 內的 backtick、跳過非路徑形狀
   const text = '```\n`apps/api/src/skip.ts`\n```\n一般 `npm install` 不是路徑。';
   const refs = extractCodeRefs(text, ['apps/api/src']);
   assert.deepEqual(refs, []);
+});
+
+test('docgradMeta: 回傳版本與 rubric 指紋；rubric 一改 hash 就變', () => {
+  const meta = docgradMeta();
+  assert.match(meta.version, /^\d+\.\d+\.\d+$/);
+  assert.match(meta.rubric_hash, /^[0-9a-f]{8}$/);
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-meta-'));
+  try {
+    fs.mkdirSync(path.join(tmp, '.claude-plugin'));
+    fs.mkdirSync(path.join(tmp, 'reference'));
+    fs.writeFileSync(path.join(tmp, '.claude-plugin/plugin.json'), '{"version":"9.9.9"}');
+    fs.writeFileSync(path.join(tmp, 'reference/rubric.md'), '★4 錨點 A');
+    const before = docgradMeta(tmp);
+    assert.equal(before.version, '9.9.9');
+    fs.writeFileSync(path.join(tmp, 'reference/rubric.md'), '★4 錨點 B');
+    assert.notEqual(docgradMeta(tmp).rubric_hash, before.rubric_hash);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('docgradMeta: 讀不到檔案時回 null 而不是丟錯', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-meta-'));
+  try {
+    assert.deepEqual(docgradMeta(tmp), { version: null, rubric_hash: null });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('extractClaimLines: 只收 fence 外、帶得到 code 座標的非標題行', () => {
+  const text = [
+    '# 標題含 `src/a.ts` 但不算宣稱',
+    '',
+    '路由定義在 `src/router.ts`。',
+    '這是一段沒有座標的純敘述。',
+    '```',
+    'fence 內的 `src/ignored.ts` 不算',
+    '```',
+    '- `src/lib.ts › parse()` 負責解析',
+  ].join('\n');
+  const claims = extractClaimLines(text, ['src/']);
+  assert.deepEqual(claims.map((c) => c.line), [3, 8]);
+  assert.equal(claims[0].refs, 1);
+});
+
+test('rankClaimCandidates: ref 多者優先，同分依 path 再依 line（穩定可重現）', () => {
+  const ranked = rankClaimCandidates([
+    { path: 'b.md', claims: [{ line: 2, text: 'x', refs: 1 }] },
+    { path: 'a.md', claims: [{ line: 9, text: 'y', refs: 1 }, { line: 1, text: 'z', refs: 3 }] },
+  ]);
+  assert.deepEqual(
+    ranked.map((c) => `${c.path}:${c.line}`),
+    ['a.md:1', 'a.md:9', 'b.md:2']
+  );
 });

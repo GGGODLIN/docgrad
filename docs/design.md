@@ -61,7 +61,8 @@ docgrad/
 │   ├── design.md         # 本檔
 │   └── how-to.md         # 常見開發任務（加維度/改 rubric/擴充 lib）
 ├── .docgrad.yml          # 本 repo 自己的 docgrad 設定（dogfood）
-├── .docgrad/             # dogfood 收斂狀態：history.jsonl（歷輪分數）＋scorecard-latest.md
+├── .docgrad/             # dogfood 收斂狀態：history.jsonl（歷輪分數＋版本指紋）、
+│                         # ledger.jsonl（累積 claim 驗證紀錄）、scorecard-latest.md
 ├── CHANGELOG.md          # 各版變更；版號語意見 docs/how-to.md §發版
 ├── NOTICE.md             # 出處致謝（ln-21 claim-ledger、Diátaxis、HumanLayer、impeccable）
 ├── LICENSE               # MIT
@@ -151,7 +152,15 @@ repo 沒有 `.docgrad.yml` 時，`audit`/`improve`/`loop` 一律先導向 `init`
 2. 挑**最低分維度**（同分取 rubric 表順序靠前者），從該維的失分點生成一批 focused 修改（一輪只修一個維度，避免全量改一半留矛盾——收斂不是重寫）。
 3. 機械修正（死鏈、日期 backfill 用 `git log -1 --format=%as` 真實日期不捏造、孤兒補入索引）直接做；語意修改（合併冗餘文件、改寫敘述為 refer-to-code、刪檔）也做，但在 commit message 明示清單。
 4. 重跑量測確認該維分數上升、其他維不降。
-5. 在專用 branch（`docgrad/converge`）commit，message 附本輪 scorecard 摘要。
+5. 在專用 branch（`docgrad/converge`）commit，message 附本輪 scorecard 摘要；狀態落 `.docgrad/`
+   （history 一行＋ledger 累積 append）。
+
+**分數為什麼要能重現（v1.1.0，issue #12）**：2026-07-13 的 oikos 實跑裡，收官後同日重驗一致性
+從 ★4 掉到 ★2——不是尺變了，是**抽樣沒被約束**：四輪抽樣都沒碰到那條與 code 相反的 balance 正負號。
+對策不是把錨點寫得更細（錨點再細也管不到「抽哪些」），而是把抽樣本身從 LLM 手上收回：
+母體與取用序由 `inventory.mjs` 機械產出（穩定排序），驗證結果累積落 `.docgrad/ledger.jsonl`，
+下一輪先重驗舊條目再抽新的。報告同時給通過率與累積覆蓋率——**單獨一個星等不揭露它建立在多大的樣本上**。
+這對應 Anthropic skill authoring 的原則：必須一致的操作要降低自由度，而不是加更多說明文字。
 
 **停止條件**（任一成立即停）：
 - ✅ 全維 ≥ `.docgrad.yml` targets → 收官報告＋畢業建議。

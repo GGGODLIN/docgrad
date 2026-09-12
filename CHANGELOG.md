@@ -3,6 +3,35 @@
 版本權威在 [.claude-plugin/plugin.json](.claude-plugin/plugin.json) 的 `version`；本檔記錄各版變更。
 版號語意（semver，docgrad 特化）見 [docs/how-to.md](docs/how-to.md) §發版。
 
+## 1.1.0 — 2026-09-13
+
+正確性的抽樣從「每輪由 LLM 自由挑」改成機械決定並累積落檔，history 補上版本指紋。
+**既有 ★1–★5 錨點文字一字未動**——變的是抽哪些、以及分數旁邊附什麼數字。
+
+- **修正（#12）正確性分數不可重現**：2026-07-13 oikos 收官後同日重驗，一致性 ★4→★2
+  （`transactions-design.md` 的 balance 正負號與 `lib/balance.ts` 相反，「前四輪抽樣未覆蓋」）。
+  根因不是錨點不夠細，是**抽樣沒被約束**——錨點再細也管不到「抽哪些」。
+  - **抽樣母體與取用序改由腳本產出**：`inventory.mjs` 新增 `totals.claims_total`
+    （fence 外、帶得到 code 座標的非標題行）與 `claim_candidates`（依 ref 數 → path → line
+    穩定排序，取前 60）。同一份語料每次跑出的順序完全相同（已加測試驗證）。
+  - **ledger 累積落檔**：`improve`／`loop` 每輪 append `.docgrad/ledger.jsonl`
+    （`claim_id`＝`<path>:<line>`、只增不重寫，重驗時 append 新一行，看得出何時壞何時修好）。
+    行號漂移時沿用舊 `claim_id` 並標 `moved_from`，避免累積覆蓋率虛增。
+  - **下一輪先重驗再抽新**：`fail`／`stale` 全部重驗，`pass` 抽半數（依 `claim_id` 排序取偶數位，
+    可重現）。`audit` **讀** ledger 但不寫——與「audit 純報告不落檔」的鐵則一致。
+  - **報告改為「星等＋覆蓋率」**：`正確性 ★4（通過率 8/8，累積覆蓋 23/68 ＝ 34%）`。
+    通過率 8/8 在覆蓋 5% 與 60% 下是兩回事，只給星等會讓讀者高估可信度。覆蓋率不影響星等。
+  - scoped audit 下**不可報**累積覆蓋率（分母被 `--include` 縮過，與全量不同義），ledger 照讀不寫。
+- **新增（#16）history 的版本指紋**：每行補 `docgrad_version` 與 `rubric_hash`
+  （`reference/rubric.md` 內容的 sha256 前 8 碼），由 `inventory.mjs` 的新 `docgrad` 區塊提供，
+  不由 LLM 自己填。`report` 在 `rubric_hash` 改變處畫可比性斷點——修掉「尺變了卻被畫成品質退步」
+  （本 repo round 9 的一致性 ★5→★4 就是這種情況，當時只能寫在 notes 的自然語言裡）。
+  缺欄位的舊紀錄視為 unknown，不阻擋。
+- **新增（lib）**：`docgradMeta()`（版本＋rubric 指紋，讀不到檔時回 `null` 不丟錯）、
+  `extractClaimLines()`、`rankClaimCandidates()`。
+- **`report`**：有 `.docgrad/ledger.jsonl` 時一併報累積覆蓋率與目前仍為 `fail`／`stale` 的宣稱。
+- **測試**：59 → 63（rubric 指紋會隨內容變、缺檔回 null、claim 行抽取排除 fence/標題、候選排序穩定）。
+
 ## 1.0.0 — 2026-09-13
 
 > ### ⚠️ BREAKING — rubric 結構變更，歷史分數需重新起算

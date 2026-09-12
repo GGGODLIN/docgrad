@@ -46,12 +46,24 @@
 4. **驗證**：重跑腳本＋受影響維度重評。成功＝目標維上升且其他維不降。
    任何維度下降 → revert 造成下降的修改，記入 notes。
 5. **記錄＋commit**：
-   - append 一行到 `.docgrad/history.jsonl`（無則建立）：
+   - append 一行到 `.docgrad/history.jsonl`（無則建立）。`docgrad_version` 與 `rubric_hash`
+     **直接抄 `inventory.mjs` 輸出的 `docgrad` 區塊**，不要自己填：
 
      ```json
-     {"round": 3, "date": "2026-07-12", "dimension": "linkage", "scores": {"completeness": 4, "correctness": 3, "freshness": 4, "linkage": 4, "consistency": 4, "economy": 4}, "notes": "修 12 死鏈；2 孤兒併入索引"}
+     {"round": 3, "date": "2026-07-12", "dimension": "linkage", "docgrad_version": "1.1.0", "rubric_hash": "b6e4f7f3", "scores": {"completeness": 4, "correctness": 3, "freshness": 4, "linkage": 4, "consistency": 4, "economy": 4}, "coverage": {"claims_verified": 23, "claims_total": 68}, "notes": "修 12 死鏈；2 孤兒併入索引"}
      ```
 
+     兩個版本欄位是給 `report` 畫可比性斷點用的：`rubric_hash` 一變代表尺換了，
+     前後分數不可直接比較。缺欄位的舊紀錄視為 unknown，不阻擋。
+   - append 本輪驗證過的 claim 到 `.docgrad/ledger.jsonl`（無則建立）。**累積、只增不重寫**——
+     重驗舊條目時 append 新一行（帶新的 `round`），不要改舊行，這樣才看得出某條宣稱何時壞、何時修好：
+
+     ```json
+     {"claim_id": "docs/x.md:75", "round": 3, "doc": "docs/x.md", "line": 75, "claim": "路由定義在 src/router.ts", "verify": "Read src/router.ts", "result": "pass", "verified_at": "2026-07-12"}
+     ```
+
+     `claim_id` ＝ `<path>:<line>`。文件重排導致行號漂移時，以宣稱內容為準沿用舊 `claim_id`
+     並在該行加 `"moved_from": "<舊 id>"`，不要當成新 claim——那會讓累積覆蓋率虛增。
    - 覆寫 `.docgrad/scorecard-latest.md`（audit.md 的 scorecard 全文）。
    - commit（zh-TW）：
 
@@ -63,6 +75,7 @@
      - …（無則省略此段）
 
      scorecard: 完整性★x 正確性★x 新鮮度★x 連結度★x 一致性★x 經濟性★x
+     ledger: 累積覆蓋 m/N（本輪新驗 a、重驗 b）
      ```
 
 ## 維度封頂：設計性天花板

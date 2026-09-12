@@ -3,7 +3,10 @@
 // 用法: node inventory.mjs [--root <repo>] [--config <file>] [--include <glob>]；JSON → stdout。
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadConfig, collectFiles, estimateTokens, parseArgs, fail, extractCodeRefs } from './lib.mjs';
+import {
+  loadConfig, collectFiles, estimateTokens, parseArgs, fail,
+  extractCodeRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
+} from './lib.mjs';
 
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+\.)\s+/;
 
@@ -95,13 +98,16 @@ function measure(rootDir, relPath, config) {
   const structure = buildStructure(text, config);
   const ruleLines = structure._ruleLines;
   delete structure._ruleLines;
+  const claimLines = extractClaimLines(text, config.src_dirs);
   return {
     path: relPath,
     bytes: Buffer.byteLength(text),
     tokens_est: estimateTokens(text),
     type: fileType(relPath, config),
+    claims: claimLines.length, // 帶得到 code 座標的行數＝claim-ledger 抽樣母體
     structure,
     _ruleLines: ruleLines, // 內部彙總用，輸出前會被移除
+    _claimLines: claimLines,
   };
 }
 
@@ -113,21 +119,30 @@ try {
   const excludedFiles = excluded.map((p) => measure(root, p, config));
   const rulesTotal = filesRaw.reduce((s, f) => s + f._ruleLines.length, 0);
   const rulesAnchored = filesRaw.reduce((s, f) => s + f._ruleLines.filter((r) => r.anchored).length, 0);
-  const files = filesRaw.map(({ _ruleLines, ...f }) => f);
+  const claimsTotal = filesRaw.reduce((s2, f) => s2 + f._claimLines.length, 0);
+  // 穩定排序的候選清單：同一份語料每次跑出來順序相同，claim-ledger 的抽樣才可重現。
+  // 只輸出前 60 筆——母體大小看 totals.claims_total，這裡是給抽樣用的取用序。
+  const claimCandidates = rankClaimCandidates(
+    filesRaw.map((f) => ({ path: f.path, claims: f._claimLines }))
+  ).slice(0, 60);
+  const files = filesRaw.map(({ _ruleLines, _claimLines, ...f }) => f);
   const totalTokens = files.reduce((s, f) => s + f.tokens_est, 0);
   const excludedTokens = excludedFiles.reduce((s, f) => s + f.tokens_est, 0);
   process.stdout.write(
     `${JSON.stringify(
       {
         scope: include.length ? include : null,
+        docgrad: docgradMeta(), // history.jsonl 的 docgrad_version／rubric_hash 由此取
         files,
         totals: {
           files: files.length,
           bytes: files.reduce((s, f) => s + f.bytes, 0),
           tokens_est: totalTokens,
+          claims_total: claimsTotal,
           rules_total: rulesTotal,
           rules_anchored_ratio: rulesTotal ? Number((rulesAnchored / rulesTotal).toFixed(4)) : 0,
         },
+        claim_candidates: claimCandidates,
         entry_cost: (() => {
           // scope 限定時只計範圍內的 entry 檔——固定成本是全量概念，scoped 報告不可直接引用。
           // symlink 去重：多個 entry 名指向同一實體檔（kdan-bpm 的 `CLAUDE.md -> AGENTS.md`）時，
