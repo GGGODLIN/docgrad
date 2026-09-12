@@ -118,4 +118,7 @@ docgrad 評的是**本地 markdown 檔案樹**：五支腳本都以本地路徑�
 node --test tests/*.test.mjs
 ```
 
+skill 級評測（星等可重現性、抽樣覆蓋率、偽陽性）另見 [evals/README.md](evals/README.md)——
+`tests/` 測的是腳本輸出，測不到星等穩不穩。
+
 設計文件：[docs/design.md](docs/design.md)；常見開發任務：[docs/how-to.md](docs/how-to.md)。

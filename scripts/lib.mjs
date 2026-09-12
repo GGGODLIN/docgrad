@@ -440,9 +440,30 @@ export function docgradMeta(skillRoot = SKILL_ROOT) {
 // （優先抽含路徑/符號者）於是變成機械可重現的，而不是每輪由 LLM 重新自由挑。
 // 標題行排除：標題是導航不是宣稱。
 export function extractClaimLines(text, srcDirs = []) {
-  const out = [];
-  let inFence = false;
   const lines = text.split(/\r?\n/);
+
+  // 先切段：每個標題開一段，段落範圍用來給驗證者「該讀到哪裡」。
+  // 這一步是必要的，不是方便——矛盾常出現在**錨點行的鄰句**而不是錨點行本身：
+  // oikos 那條 balance 正負號寫在「結算由 `src/balance.ts › settle()` 負責」的下一句，
+  // 只驗錨點行會整條漏掉（2026-07-13 收官後重驗 ★4→★2 的形態）。
+  const sections = [];
+  let inFence = false;
+  let current = { title: null, start: 1, end: lines.length };
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*(```|~~~)/.test(lines[i])) inFence = !inFence;
+    if (inFence) continue;
+    const m = lines[i].match(/^\s*#{1,6}\s+(.+?)\s*#*\s*$/);
+    if (!m) continue;
+    current.end = i; // 前一段收在標題行之前
+    sections.push(current);
+    current = { title: m[1].replace(/[*_`]/g, '').trim(), start: i + 2, end: lines.length };
+  }
+  sections.push(current);
+  const sectionOf = (lineNo) =>
+    sections.find((s) => lineNo >= s.start && lineNo <= s.end) ?? sections.at(-1);
+
+  const out = [];
+  inFence = false;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (/^\s*(```|~~~)/.test(line)) {
@@ -454,7 +475,15 @@ export function extractClaimLines(text, srcDirs = []) {
     if (!line.trim()) continue;
     const refs = extractCodeRefs(line, srcDirs);
     if (!refs.length) continue;
-    out.push({ line: i + 1, text: line.trim(), refs: refs.length });
+    const sec = sectionOf(i + 1);
+    out.push({
+      line: i + 1,
+      text: line.trim(),
+      refs: refs.length,
+      section: sec.title,
+      // 驗證範圍：整段，不是只有這一行。
+      section_lines: [sec.start, sec.end],
+    });
   }
   return out;
 }

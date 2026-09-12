@@ -333,6 +333,27 @@ test('extractClaimLines: 只收 fence 外、帶得到 code 座標的非標題行
   assert.equal(claims[0].refs, 1);
 });
 
+test('extractClaimLines: 帶回所屬 section 範圍，讓驗證涵蓋錨點行的鄰句', () => {
+  // oikos 那條 balance 正負號就寫在錨點行的下一句——只驗錨點行會整條漏掉。
+  const text = [
+    '# 結算設計',
+    '',
+    '結算由 `src/balance.ts › settle()` 負責。',
+    '',
+    '回傳正數代表 memberA 欠 memberB。',
+    '',
+    '## 其他',
+    '',
+    '無關內容。',
+  ].join('\n');
+  const [claim] = extractClaimLines(text, ['src/']);
+  assert.equal(claim.line, 3);
+  assert.equal(claim.section, '結算設計');
+  const [start, end] = claim.section_lines;
+  assert.ok(start <= 5 && end >= 5, `鄰句第 5 行必須落在 section 範圍 [${start}, ${end}] 內`);
+  assert.ok(end < 7, 'section 範圍不可越過下一個標題');
+});
+
 test('rankClaimCandidates: ref 多者優先，同分依 path 再依 line（穩定可重現）', () => {
   const ranked = rankClaimCandidates([
     { path: 'b.md', claims: [{ line: 2, text: 'x', refs: 1 }] },

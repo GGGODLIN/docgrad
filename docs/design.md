@@ -56,7 +56,9 @@ docgrad/
 │   ├── freshness.mjs     # 日期訊號覆蓋率＋git log 真實日期對照（convention 可多值）
 │   ├── coverage.mjs      # 覆蓋漂移：code 區域 vs 提及它的 docs 的 git 時滯
 │   └── retrieval.mjs     # 可回溯性＋邊際成本：scenarios/areas/index_hotness（report-only）
-├── tests/                # node --test；fixtures/basic/、fixtures/retrieval/ 迷你目標 repo
+├── tests/                # node --test：腳本的單元行為；fixtures/ 為迷你目標 repo
+├── evals/                # skill 級評測：星等的可重現性／抽樣覆蓋率／偽陽性
+│                         # （claude plugin eval；三個 case ＋ fixtures/ 三個 repo）
 ├── docs/
 │   ├── design.md         # 本檔
 │   └── how-to.md         # 常見開發任務（加維度/改 rubric/擴充 lib）
