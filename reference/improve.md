@@ -23,7 +23,17 @@
 2. **挑維度**：取最低分維度；同分 → 取 rubric 順序靠前者
    （完整性 → 正確性 → 新鮮度 → 連結度 → 一致性 → 經濟性）。
    已判**設計性天花板**（見停止條件）的維度不列入挑選，取次低者。
-   **一輪只修這一維**——收斂不是重寫，全量改一半會留下矛盾。
+   **一輪只修這一維**——收斂不是重寫，全量改一半會留下矛盾。兩個例外，都要在報告寫明：
+
+   - **trivial-fix 白名單**：死鏈修復、孤兒補進索引、錯字級一致性，**任何輪次都可順手修**，
+     只需列進 commit message。理由：這三類有全量機械驗證（腳本重跑即知），不存在
+     「改一半留矛盾」的風險，而規則擋著它們只是把零風險的修正推到下一輪。
+   - **小語料模式**：`inventory.totals.tokens_est` < 10,000 或 `totals.files` < 5 時，
+     允許單輪多維，報告標注「小語料模式：本輪修 N 維」。理由：dream-calm-true 只有兩份
+     文件，一輪一維在那裡純粹是輪次開銷——它的 scorecard 自己記著「install 兩法可統一，
+     但改它會違反一輪只修一維」，一個兩行的零風險修正就這樣被推了出去。
+
+   兩個例外都不豁免步驟 4 的驗證：任一維下降照樣 revert。
    選中**一致性**時再細分一層：一輪只修一類失分，依 `[矛盾]` → `[重複]` → `[落點]` 排序
    （矛盾讓 agent 讀到錯的事實、危害最大；重複是矛盾的溫床；落點只是取用效率）。
    搬動資訊落點會動到 code 註解／spec，比改 docs 風險高——排最後，且該輪不得同時修其他類。
@@ -102,13 +112,55 @@
 
 `improve` 單輪跑完直接停，輸出本輪 scorecard 與 diff 摘要。
 
-## 畢業建議（達標收官報告的固定尾節）
+## 畢業（達標收官時做，不是只寫建議）
 
-達標後在收官報告固定附上：
+**為什麼這節有交付物**：沒有 gate 的收斂會自然衰減。oikos 收官**當天**就冒出新孤兒
+（`utm-convention.md`）與缺 `last_updated` 的檔案，coverage 95.1% → 90.7%；兩個月後
+仍在原地沒人回收。散文式的「建議自建 CI」沒有交付物，所以沒有人執行。
 
-> 建議把可機械化的規則沉澱成本 repo 自己的 docs-gate CI（死鏈/孤兒/新鮮度/
-> 入口檔 token 預算），docgrad 的五支 scripts（inventory/links/freshness/coverage/retrieval）
-> 可直接搬去改造。docgrad 只評分與修內容，不代寫 CI——由團隊自行決定 gate 的嚴格度。
+Blocker #3「不碰 CI」的意思是**不自動改動使用者的 CI**，不是不得產出 CI 素材。
 
-有維度因設計性天花板封頂時，本節要點名它：該維要再上一星只能靠這道 CI
-（例：新鮮度 ★5 ＝ 「docs 與 code 同 MR 更新」的 gate），並說明目前上限星等。
+達標收官時做兩件事：
+
+1. **產出，但不安裝**。把 `$SKILL_DIR/templates/` 的兩支複製到目標 repo 的
+   `.docgrad/graduation/`，並依該 repo 的實況調整 `THRESHOLDS`（現況值即門檻，
+   讓 gate 一開始就是綠的，之後只准更嚴）：
+
+   ```bash
+   mkdir -p .docgrad/graduation
+   cp "$SKILL_DIR/templates/docs-gate.mjs" "$SKILL_DIR/templates/docs-gate.yml" .docgrad/graduation/
+   ```
+
+   **絕不寫入 `.github/`**，也不改動任何既有 CI 設定。
+
+2. **報告固定附上這段**（路徑要填實際值）：
+
+   > 已產出 `.docgrad/graduation/docs-gate.mjs` 與 `docs-gate.yml`，**未安裝**。
+   > 要啟用：把 `.mjs` 放到 `.github/scripts/`、`.yml` 放到 `.github/workflows/`，
+   > 兩者都已按本 repo 現況設好門檻。gate 只擋死鏈／壞錨／孤兒／新鮮度覆蓋率／
+   > 入口檔 token 預算——嚴格度由團隊決定，docgrad 不替你決定。
+   >
+   > 死鏈與格式也可改用更成熟的現成工具（lychee 或 markdown-link-check、markdownlint、
+   > Vale）。docgrad 腳本的差異化價值在孤兒／可達性與入口檔 token 預算——這兩個是
+   > 「文件作為 agent context」特有的量測，一般 docs linter 不做。
+
+有維度因設計性天花板封頂時，本節要點名它：該維要再上一星只能靠這道 gate
+（新鮮度 ★5 ＝「docs 與 code 同 MR 更新」；經濟性 ★5 ＝「入口檔 token 預算」），
+並說明目前上限星等。
+
+## 職權外發現的出口
+
+docgrad 不動 code、不碰 CI，但評分過程一定會撞到那些東西（oikos round 3 抓到
+`lib/supabase/server.ts` 的 docstring stale，只能寫進 notes，兩個月後還在原地）。
+自然語言的 notes 沒有任何東西會去追蹤它，於是每輪都在生產不會被處理的尾巴。
+
+發現落在職權外時，append 一行到 `.docgrad/out-of-scope.jsonl`（無則建立，只增不重寫）：
+
+```json
+{"round": 3, "kind": "code-comment", "path": "lib/supabase/server.ts", "line": 42, "claim": "docstring 仍寫 without an Auth API round-trip，v1.0.2 起已非事實", "suggested_action": "改 docstring；docgrad 不動 code", "status": "open"}
+```
+
+- `kind`：`code-comment`／`ci`／`product-decision`／`other`。
+- 後續輪次確認已被處理 → append 同一筆但 `status: "resolved"`，不要改舊行。
+- **收官報告必須列出所有 `status: open` 的項目與筆數**，不能只寫在當輪的 notes 裡。
+- 使用者要求時可代為 `gh issue create` 逐條開票——**需明確確認後才執行**。

@@ -80,7 +80,9 @@ scoped 報告一律**不寫入 `.docgrad/`**——歷輪走勢只認全量 audit
 
 ### 4. 畢業 — 達標後把規則沉澱成 CI
 
-全維達標時，收官報告會附上**畢業建議**：把可機械化的檢查（死鏈／孤兒／新鮮度／入口檔 token 預算）搬進這個 repo 自己的 docs-gate CI，讓文件品質往後由 CI 自動守住。docgrad 的五支 scripts（inventory／links／freshness／coverage／retrieval）可直接搬去改造。
+全維達標時收官報告會**產出畢業交付物**：`.docgrad/graduation/` 下的 `docs-gate.mjs` 與 `docs-gate.yml`，門檻已按該 repo 現況設好。**產出但不安裝**——要啟用得自己複製到 `.github/`，docgrad 絕不寫入你的 CI 設定。
+
+沒有這道 gate，收斂會自然衰減：oikos 收官當天就冒出新孤兒與缺日期的檔案，兩個月後仍在原地。死鏈與格式也可改用更成熟的現成工具（lychee、markdownlint、Vale）；docgrad 腳本的差異化價值在孤兒／可達性與入口檔 token 預算。
 
 docgrad 只評分與修內容，**不代寫、不碰目標 repo 的 CI**——gate 要多嚴由團隊自己定。跑完這步，這個 repo 就從 docgrad「畢業」了。
 

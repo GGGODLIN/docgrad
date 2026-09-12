@@ -149,3 +149,53 @@ test('freshness: 只設 field 且 convention 含 heading-line → fallback 用 f
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('freshness: docgrad 自己的收斂 commit 不算內容更新（不自我污染）', () => {
+  // oikos 2026-07-13 實況：round 1 backfill 39 檔的 last_updated，那個 commit 本身把
+  // 這些檔的 git 日期整批推到當天，於是 round 2 收到 38 筆假 mismatch。
+  const tmp = makeGitFixture();
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 't@example.com',
+    GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 't@example.com',
+    GIT_AUTHOR_DATE: '2026-08-20T12:00:00', GIT_COMMITTER_DATE: '2026-08-20T12:00:00',
+  };
+  // 模擬一次 docgrad 收斂：只改日期行，commit message 走 improve.md 的固定格式。
+  const claude = path.join(tmp, 'CLAUDE.md');
+  fs.writeFileSync(claude, fs.readFileSync(claude, 'utf8').replace('2026-06-01', '2026-06-15'));
+  execFileSync('git', ['add', '-A'], { cwd: tmp, env });
+  execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m',
+    'docs(docgrad): 第 1 輪收斂 — 新鮮度 ★1→★4'], { cwd: tmp, env });
+
+  const out = JSON.parse(spawnSync(process.execPath, [SCRIPT, '--root', tmp], {
+    encoding: 'utf8',
+    env: { ...process.env, DOCGRAD_TODAY: '2026-09-01' },
+  }).stdout);
+  const claudeRow = out.stale.find((s) => s.path === 'CLAUDE.md');
+  // 認 2026-06-15（最近一筆非 docgrad commit），不是收斂當天的 2026-08-20。
+  assert.equal(claudeRow.actual_git, '2026-06-15');
+  assert.equal(out.mismatches.length, 0); // 日期已對齊，且收斂 commit 沒把 git 日期推走
+});
+
+test('freshness: date_concentration 抓出大批 backfill 的痕跡', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-conc-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'),
+      'docs_dirs: [docs/]\nfreshness:\n  convention: heading-line\n  field: "Last updated:"\n');
+    // 三檔同一天（backfill），一檔不同天。
+    for (const [name, date] of [['a', '2026-07-13'], ['b', '2026-07-13'], ['c', '2026-07-13'], ['d', '2026-08-01']]) {
+      fs.writeFileSync(path.join(tmp, 'docs', `${name}.md`), `# ${name}\n\n> **Last updated:** ${date}\n`);
+    }
+    const out = JSON.parse(spawnSync(process.execPath, [SCRIPT, '--root', tmp], {
+      encoding: 'utf8',
+      env: { ...process.env, DOCGRAD_TODAY: '2026-09-01' },
+    }).stdout);
+    assert.equal(out.coverage_ratio, 1); // 覆蓋率滿分，但訊號其實沒有鑑別力
+    assert.equal(out.date_concentration.max_same_day_ratio, 0.75);
+    assert.equal(out.date_concentration.date, '2026-07-13');
+    assert.equal(out.date_concentration.files, 3);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

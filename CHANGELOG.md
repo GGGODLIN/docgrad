@@ -3,6 +3,47 @@
 版本權威在 [.claude-plugin/plugin.json](.claude-plugin/plugin.json) 的 `version`；本檔記錄各版變更。
 版號語意（semver，docgrad 特化）見 [docs/how-to.md](docs/how-to.md) §發版。
 
+## 1.3.0 — 2026-09-13
+
+一批 P1：都來自 oikos／dream-calm-true 的實跑痕跡，不是設想出來的。
+**★1–★5 錨點文字一字未動。**
+
+- **修正（#15，freshness）backfill 自我污染**：git 日期比對排除 docgrad 自己的收斂 commit
+  （`docs(docgrad):` 前綴），取最近一筆非 docgrad commit。
+  - 原狀：oikos round 1 backfill 39 檔的 `last_updated`，那個 commit 本身把這些檔的 git 日期
+    整批推到當天，round 2 於是收到 **38 筆假 mismatch**——第二輪有一半在收拾第一輪的量測殘局。
+  - **跨 1.3.0 比較新鮮度分數**：舊分數可能含假 mismatch 而偏低，屬修正不是退步。
+- **新增（#15）`date_concentration`**（report-only，不影響星等）：最大同日佔比。
+  oikos 實測 **0.68**（28/41 檔卡在 backfill 當天）——這些檔會同步老化、同步變 stale，
+  `coverage_ratio` 95% 也分辨不出誰真的久未維護。
+  它分不出「backfill」與「本來就同時改」，只提示不下判斷。
+- **新增（#14）畢業交付物**：`templates/docs-gate.mjs` ＋ `templates/docs-gate.yml`。
+  收官時複製到目標 repo 的 `.docgrad/graduation/` 並按現況設好門檻，**產出但不安裝**，
+  絕不寫入 `.github/`。Blocker #3 的「不碰 CI」是不自動改動，不是不得產出素材。
+  - 起因：沒有 gate 的收斂會自然衰減。oikos 收官**當天**就冒出新孤兒（`utm-convention.md`）
+    與缺 `last_updated` 的檔案（coverage 95.1%→90.7%），兩個月後仍在原地。散文式建議沒有
+    交付物，所以沒有人執行。
+  - `docs-gate.mjs` 刻意**不 import** `lib.mjs`（它會被複製出去、與 docgrad 安裝路徑脫鉤），
+    改成呼叫已安裝的腳本讀 JSON。`exit 1` ＝文件不合格、`exit 2` ＝環境問題，CI 分得出誰的錯。
+  - 範本明講死鏈／格式可改用更成熟的現成工具（lychee、markdown-link-check、markdownlint、Vale）；
+    docgrad 腳本的差異化價值在孤兒／可達性與入口檔 token 預算。
+- **新增（#17）`.docgrad/out-of-scope.jsonl`**：職權外發現（code 註解 stale、CI、產品決策）
+  改落機器可讀的檔案，只增不重寫，收官報告必須列出所有 `status: open` 的項目與筆數。
+  - 起因：oikos round 3 抓到 `lib/supabase/server.ts` docstring stale，只能寫進 notes，
+    兩個月後還在原地——自然語言的 notes 沒有任何東西會去追蹤它。
+- **修正（#13）`report` 的 branch 分岔**：先查 `git rev-list --count HEAD..docgrad/converge`，
+  > 0 就在報告最上方警示走勢可能不完整；標頭固定標注資料來源 `<branch> @ <short-sha>`。
+  - 起因：oikos main 的 history 停在 round 4「全維 ★4 達標」，真相在未合併的 converge branch
+    （round 5 記一致性 ★2）。在 main 跑 report 會得到過度樂觀且與事實不符的走勢，且無任何警告。
+- **放寬（#18）「一輪只修一維」**，兩個例外，都要在報告寫明：
+  - **trivial-fix 白名單**（死鏈、孤兒補索引、錯字級一致性）任何輪次可順手修——這三類有全量
+    機械驗證，不存在「改一半留矛盾」的風險，規則擋著它們只是把零風險修正推到下一輪。
+  - **小語料模式**（`tokens_est` < 10,000 或 `files` < 5）允許單輪多維。
+    dream-calm-true 的 scorecard 自己記著「install 兩法可統一，但改它會違反一輪只修一維」，
+    一個兩行的零風險修正就這樣被推了出去。
+  - 兩個例外都不豁免步驟 4 的驗證：任一維下降照樣 revert。
+- **測試**：64 → 66（docgrad commit 不算內容更新、`date_concentration` 抓 backfill 痕跡）。
+
 ## 1.2.0 — 2026-09-13
 
 補上 Anthropic skill authoring checklist 的 Testing 三項（#19），並修掉建 eval 時才暴露出來的
