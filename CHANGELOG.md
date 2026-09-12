@@ -3,6 +3,45 @@
 版本權威在 [.claude-plugin/plugin.json](.claude-plugin/plugin.json) 的 `version`；本檔記錄各版變更。
 版號語意（semver，docgrad 特化）見 [docs/how-to.md](docs/how-to.md) §發版。
 
+## 1.0.0 — 2026-09-13
+
+> ### ⚠️ BREAKING — rubric 結構變更，歷史分數需重新起算
+>
+> 新增第六維**經濟性**。各 repo `.docgrad/history.jsonl` 的舊紀錄缺 `economy` 鍵，
+> **跨 1.0.0 的「達標與否」與總體分數不可比**，收斂輪應從基線重新起算（舊紀錄保留，不要刪）。
+> **既有五維的 ★1–★5 錨點文字一字未動**——不可比的是維度組成，不是各維自身的尺。
+>
+> 升級動作：對每個已導入的 repo 重跑 `/docgrad audit` 取得六維基線；`.docgrad.yml` 不改也能跑
+> （`targets.economy` 與 `economy.*` 未設時走預設），想調目標才需補欄位。
+
+- **新增（維度）經濟性 economy**（issue #11）：固定成本與污染面從 report-only 升格為計星維度。
+  - 錨點：★1 固定成本 > 20,000 tokens／★2 > 10,000 ≤ 20,000／★3 > 5,000 ≤ 10,000／
+    ★4 ≤ 5,000 且污染面 < 10%／★5 ≤ 3,000、污染面 < 10% 且入口檔 token 預算有機械 gate 強制。
+  - 降級規則：污染面 ≥ 10% 時本維上限 ★3（否則「成本低但污染重」會落在錨點縫隙裡無星可定）。
+  - 全量機械（`inventory.mjs` 的 `entry_cost.tokens_est` 與 `pollution.ratio`），不經 LLM 判斷。
+  - **★5 判設計性天花板**：要求的機械 gate 得動 CI，撞 Blocker #3 → loop 內上限 ★4，
+    與新鮮度 ★5 同一性質（`reference/improve.md` §維度封頂現有兩例）。
+  - 維度順序排最後：它與完整性方向相反（補文件會推高固定成本），同分時先讓內容維度動，
+    避免 loop 在「補了又刪」之間來回。
+- **為什麼加維度而不是只報告**：完整性獎勵覆蓋，只報不計星時 loop 每一輪的合法動作都是「補文件」，
+  沒有任何力量把不值得它的 token 的內容搬出入口檔。外部實證（多個 coding agent 在 SWE-Bench Lite
+  與 AgentBench 上的對照）指出 context 檔變長會提高成本而未必提高成功率。加維度的代價
+  （major＋歷史重算）是知情下付的——對比 0.5.0 一致性擴範圍時刻意**不**加第六維：那次改的是既有
+  維度的判定範圍，這次改的是獎勵方向本身。
+- **`improve` 的經濟性修法有護欄**：只允許「把入口檔內容搬出去、只留指路」與「把 WIP／歷史包袱移出
+  語料」。搬移必須落在 `docs_dirs` 內且從索引連得到，否則完整性／連結度會掉、驗證步驟會擋下。
+  **禁止為降成本刪掉仍然正確、仍被需要的內容**；只剩「刪了才降得下來」時判 plateau，取捨攤給使用者。
+- **`report` 的斷點處理**：缺 `economy` 鍵的輪次屬五維時代，該維畫 `—`，走勢表在該處畫斷點線並註明
+  不可與新輪次相比。
+- **設定**：`targets.economy`（預設 4）與 `economy.entry_cost_tiers`／`economy.pollution_max`
+  （預設 `[20000, 10000, 5000, 3000]`／`0.1`）。未設時走預設，既有 repo 不必重跑 `init`。
+  改門檻＝改 rubric 錨點＝歷史分數失去可比性，`init` 已明示「寧可降 target 也不要改門檻」。
+- **`init` 問卷**：`entry_files` 補上判準說明——「agent 每次任務都會自動載入」而非「重要」。
+  給人看的 GitHub 落地頁列進去就是憑空多付的固定稅（本 repo 自己踩過，見 0.6.2 的 #22）。
+- **scoped audit**：經濟性**不可在 scoped 下定星**（固定成本與污染面都是全量概念），
+  報「不適用（需全量 audit）」，不可因此打 ★1——同連結度的孤兒／可達率。
+- **測試**：59（新增 `targets.economy` 與 `economy.*` 的預設值斷言）。
+
 ## 0.6.2 — 2026-09-13
 
 跨專案回顧（oikos／dream-calm-true／本 repo／kdan-bpm）＋對照 Anthropic 官方 skill authoring

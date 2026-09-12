@@ -20,7 +20,8 @@
 ## 每輪步驟
 
 1. **評分**：依 [audit.md](audit.md) 全量評分（腳本＋LLM），得本輪 scorecard。
-2. **挑維度**：取最低分維度；同分 → 取 rubric 順序靠前者（完整性 → 正確性 → 新鮮度 → 連結度 → 一致性）。
+2. **挑維度**：取最低分維度；同分 → 取 rubric 順序靠前者
+   （完整性 → 正確性 → 新鮮度 → 連結度 → 一致性 → 經濟性）。
    已判**設計性天花板**（見停止條件）的維度不列入挑選，取次低者。
    **一輪只修這一維**——收斂不是重寫，全量改一半會留下矛盾。
    選中**一致性**時再細分一層：一輪只修一類失分，依 `[矛盾]` → `[重複]` → `[落點]` 排序
@@ -31,6 +32,13 @@
      `git log -1 --format=%as -- <file>` 的真實日期，**禁止捏造日期**。
    - 語意修正也做，但必須在 commit message 列清單：合併冗餘文件、敘述改寫為
      refer-to-code、刪檔、補缺口文件。
+   - **經濟性的修法**：唯一機械可行的兩條路是「把入口檔的內容搬出去、只留指路」與「把 WIP／
+     歷史包袱移出語料（`exclude` 或刪檔）」。前者是搬移不是刪減——**內容要搬到 `docs_dirs` 內
+     並從索引連得到**，否則完整性與連結度會一起掉，驗證步驟會擋下來。
+     **禁止為了降成本而刪掉仍然正確、仍被需要的內容**；真的只剩「刪了才降得下來」時，
+     判 plateau 並把取捨攤給使用者，不要自行決定砍哪一份文件。
+     `entry_files` 設定本身錯了（列了不進 agent context 的檔、或漏列必讀檔）→ 改 `.docgrad.yml`
+     並在 commit message 明示，這算設定修正不算刷分。
    - **落點類的界線**：只動 docs 範圍內的檔案（entry file ↔ docs、docs ↔ docs 的搬移照做）。
      要把資訊搬進 code 註解或其他 source 檔的建議**一律不自動執行**——那超出「只 commit docs 變更」
      的 branch 紀律，且五支腳本驗證不到 code 註解，改了也無從確認沒改壞。這類失分點改寫進本輪報告的
@@ -41,7 +49,7 @@
    - append 一行到 `.docgrad/history.jsonl`（無則建立）：
 
      ```json
-     {"round": 3, "date": "2026-07-12", "dimension": "linkage", "scores": {"completeness": 4, "correctness": 3, "freshness": 4, "linkage": 4, "consistency": 4}, "notes": "修 12 死鏈；2 孤兒併入索引"}
+     {"round": 3, "date": "2026-07-12", "dimension": "linkage", "scores": {"completeness": 4, "correctness": 3, "freshness": 4, "linkage": 4, "consistency": 4, "economy": 4}, "notes": "修 12 死鏈；2 孤兒併入索引"}
      ```
 
    - 覆寫 `.docgrad/scorecard-latest.md`（audit.md 的 scorecard 全文）。
@@ -54,7 +62,7 @@
      - 合併 a.md 與 b.md（重疊主題）
      - …（無則省略此段）
 
-     scorecard: 完整性★x 正確性★x 新鮮度★x 連結度★x 一致性★x
+     scorecard: 完整性★x 正確性★x 新鮮度★x 連結度★x 一致性★x 經濟性★x
      ```
 
 ## 維度封頂：設計性天花板
@@ -62,8 +70,11 @@
 某維的下一星錨點落在 Blocker 禁區 → 該維判「docgrad 範圍內已收斂（上限 ★x）」：不再列入挑維度、
 達標判定時視同已達標、在收官報告與畢業建議點名它與其原因。**這不停 loop**，只是把該維移出工作集。
 
-目前唯一一例：新鮮度 ★5 錨點要求「同 MR 隨改隨更**有機械 gate 強制**」，而 Blocker #3 明訂不碰目標
-repo 的 CI —— loop 內新鮮度上限 ★4（僅在該維 target 設為 5 時撞到；預設 target ★4 不受影響）。
+目前有兩例，性質相同（★5 錨點都要求機械 gate，而 Blocker #3 明訂不碰目標 repo 的 CI），
+且都只在該維 target 設為 5 時撞到，預設 target ★4 不受影響：
+
+- **新鮮度 ★5**：要求「同 MR 隨改隨更有機械 gate 強制」→ loop 內上限 ★4。
+- **經濟性 ★5**：要求「入口檔 token 預算有機械 gate 強制」→ loop 內上限 ★4。
 
 **與 plateau 的區別**：plateau＝修得動、但這兩輪沒修出成績，再跑有機會；設計性天花板＝設計上不可達，
 再跑幾輪也不會動。判成 plateau 會讓報告誤導使用者「多跑幾輪試試」，所以先判天花板再判 plateau。

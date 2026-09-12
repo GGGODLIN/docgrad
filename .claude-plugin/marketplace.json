@@ -7,7 +7,7 @@
     {
       "name": "docgrad",
       "source": "./",
-      "description": "文件體系評分與收斂：五維計星＋token 經濟報告＋loop 逐輪修到達標。"
+      "description": "文件體系評分與收斂：六維計星（含經濟性／入口檔 token 稅）＋loop 逐輪修到達標。"
     }
   ]
 }

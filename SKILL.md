@@ -1,6 +1,6 @@
 ---
 name: docgrad
-description: Use when the user wants to audit, score, grade, improve, or converge a repository's documentation system as an AI-agent context source — five-dimension star rating (completeness, correctness, freshness, linkage, consistency) plus token-economy reporting, with an improvement loop that fixes docs until target ratings are met. Covers docs quality audit, documentation health check, dead-link/orphan/staleness checks, doc convergence. 中文關鍵字：文件評分、文件健檢、文件收斂、docs 評比、文件品質、死鏈檢查、文件過期。Not for prose style linting, SKILL.md auditing, or code review.
+description: Use when the user wants to audit, score, grade, improve, or converge a repository's documentation system as an AI-agent context source — six-dimension star rating (completeness, correctness, freshness, linkage, consistency, economy) including entry-file token cost, with an improvement loop that fixes docs until target ratings are met. Covers docs quality audit, documentation health check, dead-link/orphan/staleness checks, doc convergence. 中文關鍵字：文件評分、文件健檢、文件收斂、docs 評比、文件品質、死鏈檢查、文件過期。Not for prose style linting, SKILL.md auditing, or code review.
 argument-hint: "[init · audit · improve · loop · report]"
 license: MIT
 ---
@@ -8,7 +8,7 @@ license: MIT
 > **Last updated:** 2026-09-13
 
 評估並收斂一個 repo 的文件體系（docs 目錄＋root 指引檔）作為 **AI agent context 來源**的品質：
-五維計星＋token 經濟報告；`loop` 逐輪修到達標。不評 prose 風格、不評 code、不碰 CI。
+六維計星（含經濟性——入口檔 token 稅）；`loop` 逐輪修到達標。不評 prose 風格、不評 code、不碰 CI。
 
 前提：文件是**本地 markdown 檔案樹**且目標 repo 根可寫入 `.docgrad.yml`；wiki／遠端文件源不支援
 （邊界與變通見 [docs/design.md](docs/design.md) §定位與邊界）。
@@ -25,7 +25,7 @@ license: MIT
 | `audit <scope>`／`audit --dim <維度>` | scoped audit：限定目錄／glob／主題，或只評單一維度。同樣純報告，且**絕不寫 `.docgrad/`**——見 audit.md §scoped audit |
 | `improve` | 先讀 rubric.md，再照 [reference/improve.md](reference/improve.md) 跑一輪 |
 | `loop` | 同 improve，反覆到停止條件 |
-| `report` | 讀目標 repo `.docgrad/scorecard-latest.md` 重印＋用 `.docgrad/history.jsonl` 畫歷輪分數走勢表；檔案不存在 → 提示先跑 improve/loop（audit 純報告不落檔） |
+| `report` | 讀目標 repo `.docgrad/scorecard-latest.md` 重印＋用 `.docgrad/history.jsonl` 畫歷輪分數走勢表；檔案不存在 → 提示先跑 improve/loop（audit 純報告不落檔）。**缺 `economy` 鍵的輪次屬 v1.0.0 前的五維時代**：該維畫 `—`，並在走勢表該處畫一條斷點線註明「以下為五維，達標判定與總體分數不可與新輪次相比」 |
 
 ## Blockers（不可跳過）
 

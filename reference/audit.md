@@ -12,8 +12,9 @@
 - [步驟 3. 正確性（claim-ledger）](#3-正確性claim-ledger)
 - [步驟 4/5. 新鮮度 / 連結度](#4-新鮮度--5-連結度)
 - [步驟 6. 一致性（跨文件＋跨載體）](#6-一致性跨文件跨載體)
-- [步驟 7. Token 經濟報告](#7-token-經濟報告)
-- [步驟 8. 輸出 scorecard](#8-輸出-scorecard)
+- [步驟 7. 經濟性](#7-經濟性)
+- [步驟 8. Token 經濟報告](#8-token-經濟報告)
+- [步驟 9. 輸出 scorecard](#9-輸出-scorecard)
 - [scoped audit（限定範圍／單一維度）](#scoped-audit限定範圍單一維度)
 
 使用者指定了範圍（目錄／glob／主題）或單一維度 → 先讀本檔最後的 [§scoped audit](#scoped-audit限定範圍單一維度)，再回來跑下面的步驟。
@@ -78,9 +79,19 @@ links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊
 5. 依 rubric 一致性錨點定星。**只判落點與重複，不評註解品質**——界線見
    [design.md](../docs/design.md) §定位與邊界。
 
-### 7. Token 經濟報告
+### 7. 經濟性
 
-依 rubric.md「Token 經濟」節計算固定成本、污染面，附損益兩平解讀。
+直接以 `inventory.mjs` 的 `entry_cost.tokens_est`（固定成本）與 `pollution.ratio`（污染面）
+對 rubric 經濟性錨點定星——**全量機械，不經 LLM 判斷**。兩點必查：
+
+1. `entry_cost.files` 是不是真的每次任務都載入。把只有人看的落地頁（如 GitHub 用的 `README.md`）
+   列進 `entry_files` 會讓固定成本灌水；反過來，agent 每次都必讀卻沒列進去則會低報。
+   發現設定與現實不符 → 記為失分點並建議修 `.docgrad.yml`，**不要**自行改設定再評分。
+2. 污染面 ≥ 10% 時本維上限 ★3（rubric 的降級規則），即使固定成本很低。
+
+### 8. Token 經濟報告
+
+依 rubric.md「Token 經濟報告」節展開固定成本與污染面的細節，附損益兩平解讀。
 
 邊際成本：`.docgrad.yml` 有設 `scenarios:`（代表性 code 路徑清單）時，直接消費 `retrieval.mjs` 的
 `scenarios[]` 輸出——每條列出 `marginal_tokens`／`max_depth`／`fan_in`／`code_pointer`，並用
@@ -92,7 +103,7 @@ links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊
 `index_hotness`（`ratio` 明顯偏高時點名，附 `top5`）；`inventory.mjs` 各檔 `structure.rules` 裡
 `median_chars`/`p90_chars` 明顯偏長或 `anchored_ratio` 明顯偏低的檔案，建議契約層／細節層拆分。
 
-### 8. 輸出 scorecard
+### 9. 輸出 scorecard
 
 ```markdown
 # docgrad scorecard — <repo 名> @ <YYYY-MM-DD>
@@ -104,13 +115,14 @@ links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊
 | 新鮮度 | ★x | ★y | … |
 | 連結度 | ★x | ★y | … |
 | 一致性 | ★x | ★y | …（失分點標 `[矛盾]`／`[重複]`／`[落點]`） |
+| 經濟性 | ★x | ★y | …（固定成本 N tokens、污染面 x%） |
 
-## Token 經濟（不計星）
-- 固定成本：~N tokens（entry_files: …）
+## Token 經濟報告
+- 固定成本：~N tokens（entry_files: …）— 已計入經濟性
 - 邊際成本：有 scenarios 時逐條列（scenario「path」：~N tokens、max_depth N 跳、fan_in N、
   code_pointer yes/no、churn_commits N——標出稅最重那條）；無 scenarios 則沿用 scenario「…」LLM
   模擬：~N tokens，必讀路徑 a.md → b.md → …
-- 污染面：x%（exclude: …）
+- 污染面：x%（exclude: …）— 已計入經濟性
 - 解讀：…
 
 ### 可回溯性（report-only）
@@ -150,7 +162,8 @@ links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊
 | 新鮮度 | 直接可用（per-file 判定，不受範圍影響）。 |
 | 連結度 | 只採計死鏈／壞錨；孤兒與可達率腳本會回 `null`——可達性是全量索引概念，範圍一縮就失真。報告寫「不適用」，**不可**因此打 ★1。 |
 | 一致性 | 跨文件比對限縮在 scope 內；矛盾的另一半落在範圍外時記為「需全量 audit 確認」。 |
-| Token 經濟 | 只報範圍內 tokens。固定成本／污染面是全量概念，scoped 值不可與全量報告對比，標明即可；`retrieval.mjs` 不吃 `--include`（同 coverage.mjs 理由，見其 `note`），邊際成本／可回溯性報全量。 |
+| 經濟性 | **不可在 scoped 下定星**。固定成本＝entry_files 的全量概念，污染面是佔全語料比例，範圍一縮兩者都失真。報告寫「不適用（需全量 audit）」，**不可**因此打 ★1——同連結度的孤兒/可達率。 |
+| Token 經濟報告 | 只報範圍內 tokens，並標明 scoped 值不可與全量報告對比；`retrieval.mjs` 不吃 `--include`（同 coverage.mjs 理由，見其 `note`），邊際成本／可回溯性報全量。 |
 
 **報告標頭**（取代全量 scorecard 的標題行）：
 

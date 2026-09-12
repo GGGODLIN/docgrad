@@ -1,6 +1,6 @@
 # init — 一次性設定
 
-> **Last updated:** 2026-09-04
+> **Last updated:** 2026-09-13
 
 目的：掃描目標 repo → 問卷確認 → 把 `.docgrad.yml` 寫進目標 repo 根目錄（進版控，團隊共用）。
 已有 `.docgrad.yml` 時重跑 init＝重新掃描，並以現有設定為問卷預設值。
@@ -19,13 +19,18 @@
 ## 2. 問卷（AskUserQuestion，逐項帶掃描結果當預設選項）
 
 1. `docs_dirs`（多選，帶掃描候選）
-2. `entry_files`（多選）
+2. `entry_files`（多選）——判準是「**agent 每次任務都會自動載入**」，不是「重要」。
+   給人看的 GitHub 落地頁（典型是 root `README.md`）除非同時是 agent 入口，否則**不要列**：
+   自 v1.0.0 起固定成本計星（經濟性），多列一份就是憑空多付的稅，少列必讀檔則會低報。
+   它同時是索引時，填進 `index_file` 就好，兩處不必重複。
 3. `index_file`（單選；無候選 → 填 `null` 並提醒：連結度會因無可達性根而受限，improve 第一輪可代建索引）
 4. `exclude`（多選；掃到的候選＋自由輸入）
 5. freshness `convention`（frontmatter / heading-line / none；可多選——同一 repo 混用兩種慣例時選多個，
    逗號分隔寫入）＋ `field`（frontmatter 用）／`heading_field`（heading-line 用；只選一種慣例且該慣例
    已用 `field` 描述時可留空，腳本會 fallback 用 `field`）
-6. `targets`：預設全 4，問「哪些維度願意降到 3？」（多選）
+6. `targets`：預設全 4（六維），問「哪些維度願意降到 3？」（多選）。
+   經濟性若因該 repo 的入口檔本來就很大而難以達標，寧可降 target 也不要改
+   `economy.entry_cost_tiers`——改門檻等於改 rubric 錨點，會讓歷史分數失去可比性
 7. `scenario`：請使用者用一句話描述該 repo 的代表性開發任務（無 `scenarios` 時的 LLM 模擬 fallback 用）
 8. `correctness_sample`：預設 8；大型 docs 體系（>50 檔）建議 12
 9. `src_dirs`（多選，帶掃描候選；覆蓋漂移偵測與 retrieval.mjs 用）：選空 → 完整性降級為純 LLM 對照
@@ -60,6 +65,10 @@ targets:
   freshness: 4
   linkage: 4
   consistency: 4
+  economy: 4
+economy:
+  entry_cost_tiers: [20000, 10000, 5000, 3000]   # 經濟性 ★1/★2/★3/★4→★5 的固定成本門檻
+  pollution_max: 0.1                              # 污染面上限；超過時經濟性上限 ★3
 correctness_sample: 8
 scenario: "在 <某模組> 加一個典型新功能"   # 無 scenarios 時的 LLM 模擬 fallback
 scenarios: [src/foo/bar.ts, src/foo]      # retrieval.mjs 機械模擬邊際成本＋可回溯性用；可省略
