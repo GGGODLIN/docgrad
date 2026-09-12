@@ -48,15 +48,35 @@ node "$SKILL_DIR/scripts/retrieval.mjs" --root .
 
 ### 3. 正確性（claim-ledger）
 
-1. 從 included 文件抽 `correctness_sample` 條「具體宣稱」。加權抽樣：優先抽含檔案路徑、
-   符號名、狀態機/路由描述的段落；同一文件最多 2 條；純敘述性段落不抽。
-2. 逐條對 code 驗證（Read/Grep 實查，不憑印象），記入 ledger 表：
+**抽樣不可由你自由決定**——那是 2026-07-13 oikos 收官後重驗一致性 ★4→★2 的根因（`transactions-design.md`
+的 balance 正負號與 code 相反，「前四輪抽樣未覆蓋」）。抽哪些由腳本決定，你只負責驗證。
 
-   | # | 文件 | 宣稱 | 驗證方式 | 結果 |
+1. **先重驗既有 ledger**：目標 repo 有 `.docgrad/ledger.jsonl` → 讀進來，把 `result` 為 `fail`／`stale`
+   的條目**全部**重驗，`pass` 的抽一半重驗（取 `claim_id` 排序後的偶數位，可重現）。
+   已修好的記 `pass`，仍錯的維持原判並列進失分點。
+   > 沒有 ledger（第一次跑）→ 跳過本步，直接抽新樣本。
+2. **再抽新樣本**：消費 `inventory.mjs` 的 `claim_candidates`（已依「ref 數 → path → line」穩定排序，
+   同一份語料每次順序相同）。從**尚未進過 ledger** 的候選由前往後取，取到補滿
+   `correctness_sample` 條為止；同一文件最多 2 條（跳過超額者，繼續往下取）。
+   候選耗盡就取到多少算多少，並在報告寫明。
+   > `claim_candidates` 的母體＝`totals.claims_total`（fence 外、帶得到 code 座標的非標題行）。
+   > 純敘述性段落抽不到座標、本來就不該進 ledger，這與舊版「純敘述不抽」的規則一致，
+   > 差別只在現在由腳本判定而非逐輪重新解讀。
+3. **逐條對 code 驗證**（Read/Grep 實查，不憑印象），記入 ledger 表：
+
+   | # | 文件:行 | 宣稱 | 驗證方式 | 結果 |
    |---|---|---|---|---|
-   | 1 | docs/x.md | 「路由定義在 src/router.ts」 | Read src/router.ts | pass / fail / stale |
+   | 1 | docs/x.md:75 | 「路由定義在 `src/router.ts`」 | Read src/router.ts | pass / fail / stale |
 
-3. 通過率＋錯誤性質（細節 vs 機制）→ rubric 定星。
+4. **算兩個數字，兩個都要寫進報告**：
+   - **通過率**＝pass ÷ 本輪驗證總數 → 依 rubric 正確性錨點定星。
+   - **累積覆蓋率**＝ledger 內相異 claim 數 ÷ `totals.claims_total` → 報告寫成
+     `正確性 ★4（通過率 8/8，累積覆蓋 23/68 ＝ 34%）`。
+     **單獨一個星等沒有意義**——它建立在多大的樣本上，讀者要看得見。
+5. 錯誤性質（細節 vs 機制）一併記入失分點。
+
+> **audit 不落檔**：本流程**讀** ledger 但不寫。ledger 的寫入只發生在 `improve`／`loop`
+> （見 [improve.md](improve.md) 步驟 5）——與「audit 純報告」的鐵則一致。
 
 ### 4. 新鮮度 / 5. 連結度
 
@@ -111,7 +131,7 @@ links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊
 | 維度 | 星等 | 目標 | 主要失分點 |
 |---|---|---|---|
 | 完整性 | ★x | ★y | … |
-| 正確性 | ★x | ★y | …（附 ledger 通過率 n/N） |
+| 正確性 | ★x | ★y | …（通過率 n/N、累積覆蓋 m/總數 ＝ x%） |
 | 新鮮度 | ★x | ★y | … |
 | 連結度 | ★x | ★y | … |
 | 一致性 | ★x | ★y | …（失分點標 `[矛盾]`／`[重複]`／`[落點]`） |
@@ -158,7 +178,7 @@ links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊
 | 維度 | scoped 行為 |
 |---|---|
 | 完整性 | `coverage.mjs` 一律全量比對（`--include` 對它刻意不生效）——docs 端一縮，範圍外的提及會被誤判成 undocumented。LLM 補判則限縮在 scope 內的領域。 |
-| 正確性 | claim-ledger 只從 scope 內文件抽樣；`correctness_sample` 可按檔案數等比縮小，實際抽樣數寫進報告。 |
+| 正確性 | claim-ledger 只從 scope 內文件抽樣（`claim_candidates` 已隨 `--include` 縮到範圍內）；`correctness_sample` 可按檔案數等比縮小，實際抽樣數寫進報告。累積覆蓋率**不可報**——分母 `claims_total` 被 scope 縮過，與全量報告的覆蓋率不同義。既有 ledger 照樣讀、照樣重驗，但**不寫回**。 |
 | 新鮮度 | 直接可用（per-file 判定，不受範圍影響）。 |
 | 連結度 | 只採計死鏈／壞錨；孤兒與可達率腳本會回 `null`——可達性是全量索引概念，範圍一縮就失真。報告寫「不適用」，**不可**因此打 ★1。 |
 | 一致性 | 跨文件比對限縮在 scope 內；矛盾的另一半落在範圍外時記為「需全量 audit 確認」。 |

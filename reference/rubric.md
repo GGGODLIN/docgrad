@@ -61,7 +61,14 @@
 | ★4 | 抽查通過 ≥90%，且無殭屍機制文件。 |
 | ★5 | 抽查全過＋殭屍代碼/已退役機制有標註＋權威列表 refer-to-code 不複述。 |
 
-量測：claim-ledger——抽 `correctness_sample` 條具體宣稱（加權：優先抽含路徑/符號/狀態機/路由者，同一文件最多 2 條），逐條對 code 驗證（見 audit.md 步驟 3）。
+量測：claim-ledger——抽 `correctness_sample` 條具體宣稱，逐條對 code 驗證（見 [audit.md](audit.md) 步驟 3）。
+**抽樣由腳本決定**：母體＝`inventory.totals.claims_total`（fence 外、帶得到 code 座標的非標題行），
+取用序＝`inventory.claim_candidates`（依 ref 數 → path → line 穩定排序），同一文件最多 2 條。
+既有 `.docgrad/ledger.jsonl` 的條目先重驗（fail/stale 全驗、pass 抽半數）再抽新樣本，ledger 累積不重抽。
+
+> **通過率與覆蓋率要分開報**：本維星等看**通過率**（pass ÷ 本輪驗證數）；
+> **累積覆蓋率**（ledger 相異 claim ÷ `claims_total`）不影響星等，但**報告必須附上**——
+> 通過率 8/8 在覆蓋 5% 與覆蓋 60% 下是兩回事，只給星等會讓讀者高估這個數字的可信度。
 
 ## 新鮮度 freshness
 
@@ -174,6 +181,10 @@ symlink 別名已去重）；**污染面**＝`inventory.pollution.ratio`。兩�
 <details>
 <summary>展開</summary>
 
+- **v1.1.0 — 正確性抽樣改為機械決定**（非錨點變更）：★1–★5 門檻（通過率 <50%／50–79%／≥80%／
+  ≥90%／全過）一字未動，變的是**抽哪些**——從逐輪由 LLM 自由挑，改成消費 `inventory.claim_candidates`
+  的穩定排序，並先重驗既有 ledger。跨 v1.1.0 比較正確性分數時要知道：舊分數的樣本不可重現，
+  新分數的可以。同時報告新增「累積覆蓋率」（report-only，不影響星等）。
 - **v1.0.0 — 新增第六維「經濟性」**（**breaking，rubric 結構變更**）：固定成本與污染面從
   report-only 升格為計星維度。五維時代的 `history.jsonl` 缺 `economy` 鍵，**跨 v1.0.0 的總體分數
   不可比**，受影響 repo 的收斂輪應從基線重新起算（舊紀錄保留，`report` 在此處畫斷點）。
