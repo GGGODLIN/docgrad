@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
-const SCRIPT = fileURLToPath(new URL('../scripts/freshness.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../skills/docgrad/scripts/freshness.mjs', import.meta.url));
 
 function makeGitFixture() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-git-'));

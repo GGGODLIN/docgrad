@@ -1,3 +1,7 @@
+---
+type: llm
+---
+
 This fixture is deliberately free of any defects. Mechanical signals:
 
 ```

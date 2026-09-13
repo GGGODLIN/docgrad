@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const SCRIPT = fileURLToPath(new URL('../scripts/coverage.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../skills/docgrad/scripts/coverage.mjs', import.meta.url));
 
 const GIT_ENV = {
   ...process.env,

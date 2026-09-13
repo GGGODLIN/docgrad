@@ -72,21 +72,29 @@
 4. **Verify**: rerun the scripts and re-score the affected dimensions. Success = the target dimension goes up and no other dimension drops.
    Any dimension dropping → revert the change that caused the drop, and note it.
 5. **Record and commit**:
-   - Append one line to `.docgrad/history.jsonl` (create it if it doesn't exist). `docgrad_version`, `rubric_hash` and
-     `corpus_hash` **must be copied straight from `inventory.mjs`'s output `docgrad` block** (all three live there), don't fill
-     them in yourself:
+   - Append one line to `.docgrad/history.jsonl` (create it if it doesn't exist). `docgrad_version`, `rubric_hash`,
+     `thresholds_hash` and `corpus_hash` **must be copied straight from `inventory.mjs`'s output `docgrad` block** (all four
+     live there), don't fill them in yourself:
 
      ```json
-     {"round": 3, "date": "2026-07-12", "dimension": "linkage", "docgrad_version": "1.1.0", "rubric_hash": "b6e4f7f3", "corpus_hash": "684034d6", "scores": {"completeness": 4, "correctness": 3, "freshness": 4, "linkage": 4, "consistency": 4, "economy": 4}, "coverage": {"claims_verified": 23, "claims_total": 68}, "notes": "fixed 12 dead links; folded 2 orphans into the index"}
+     {"round": 3, "date": "2026-07-12", "dimension": "linkage", "docgrad_version": "1.1.0", "rubric_hash": "b6e4f7f3", "thresholds_hash": "ec596daf", "corpus_hash": "684034d6", "scores": {"completeness": 4, "correctness": 3, "freshness": 4, "linkage": 4, "consistency": 4, "economy": 4}, "coverage": {"claims_verified": 23, "claims_total": 68}, "notes": "fixed 12 dead links; folded 2 orphans into the index"}
      ```
 
-     The three version fields are for `report` to draw comparability breakpoints: when `rubric_hash` changes it means the ruler changed,
+     The four version fields are for `report` to draw comparability breakpoints: when `rubric_hash` changes it means the ruler changed,
      and the scores before and after can't be compared directly; when `corpus_hash` changes it means the set of files being measured
      changed (`docs_dirs`/`docs_files`/`entry_files`/`exclude`/`out_of_scope`/`index_file`/`exclude_untracked`), which moves `files_total`,
      `claims_total`, the freshness denominator and the pollution denominator at once — every dimension in that round is affected,
      not just one. **Write `corpus_hash` every round even when it hasn't moved**: `report` can only spot the change by comparing
      consecutive lines, so a round that omits it leaves the break undetectable. `corpus_hash` is `null` when the round ran without a
      config. Old records missing these fields are treated as unknown and don't block anything.
+
+     `thresholds_hash` (added v1.7.0) covers the three config values that move a judgement boundary without changing a word of
+     `rubric.md`: `economy.entry_cost_tiers`, `economy.pollution_max` and `freshness.stale_after_days`. Two rounds whose
+     `thresholds_hash` differs were **not measured by the same ruler**, however identical their `rubric_hash` — so treat a move
+     exactly like a `rubric_hash` move and draw the break. One thing it cannot tell you: rounds recorded **before** v1.7.0 have no
+     such field, so the round where a repo's custom `economy:` block went from inert to authoritative reads as "unknown → first
+     value", not as a change. That transition is a real break and it is stated in the v1.7.0 CHANGELOG rather than detectable
+     here.
 
      A dimension judged **not measurable** (see the design-ceiling section below — currently only correctness, when the corpus
      holds no verifiable claims) is recorded as `null`, never as a number. `report` must render it as `n/a` and must not
@@ -95,7 +103,8 @@
      when re-verifying an old entry, append a new line (with the new `round`) rather than editing the old line, so you can still see when a given claim broke and when it got fixed:
 
      ```json
-     {"claim_hash": "728d463bc0b4", "round": 3, "doc": "docs/x.md", "line": 75, "claim": "Routing is defined in src/router.ts", "verify": "Read src/router.ts", "result": "pass", "verified_at": "2026-07-12"}
+     {"claim_hash": "728d463bc0b4", "round": 3, "doc": "docs/x.md", "line": 75, "claim": "Routing is defined in src/router.ts", "verify": "Read src/router.ts", "result": "pass", "borderline": false, "verified_at": "2026-07-12"}
+     {"claim_hash": "91ac07f2e5d1", "round": 3, "doc": "docs/y.md", "line": 29, "claim": "each group channel subscribes to INSERT / UPDATE / DELETE", "verify": "Read RealtimeProvider.tsx", "result": "fail", "borderline": true, "rationale": "the 11-row table below :29 has two rows (GroupBalance:107, OikosGroups:116) subscribing to UPDATE only; judged against every row per audit.md boundary rule 1", "verified_at": "2026-07-12"}
      ```
 
      **`claim_hash` is the key. Copy it from `inventory.claim_candidates`; never compute or invent one.** It is a
@@ -116,6 +125,22 @@
      > `claim_candidates` reports, and the claim is recognised as already covered. A row whose text no longer matches any
      > candidate is a claim that was edited or deleted since — leave it in the ledger as history and let the new wording be
      > drawn as the new claim it is. Once migrated, write `claim_hash` on every new row and stop writing `claim_id`.
+
+     > **`borderline` and `rationale` (added v1.7.0) are forward-only.** `borderline` is written on every row;
+     > `rationale` is mandatory on every `fail` and every borderline `pass` (see [audit.md](audit.md) step 4). Rows written
+     > before this version have neither, and are **not** to be back-filled — a rationale reconstructed now would be this
+     > round's reasoning wearing an older round's date, which is worse than an honest gap. Treat a missing `borderline` as
+     > unknown rather than as `false`: the borderline count for a pre-v1.7.0 round is not zero, it is unrecorded, and a
+     > report comparing across the boundary has to say so.
+
+     **Reading a pass-rate change.** A pass rate is `pass ÷ verified`, and both a documentation change and a verifier
+     change move it. Before attributing a move to the documentation, compare the borderline counts on the two rounds: a
+     drop from 8/8 to 7/9 alongside a rise from 0 to 3 borderline rows is at least as likely to be a stricter reading as
+     a decay. Measured case: the identical claim over unmodified code was `pass` in round 9 and `fail` in round 12,
+     because the two verifiers drew the generalisation-versus-list boundary differently — and nothing in the ledger or the
+     scorecard recorded that this had happened. When the borderline counts differ materially, say so in the round's notes
+     instead of reporting the delta as a documentation outcome; `loop` uses this dimension's pass rate to decide whether to
+     keep working on it, so an unstable verdict makes the stopping point unstable too.
    - Overwrite `.docgrad/scorecard-latest.md` (the full scorecard text from audit.md).
    - **Before committing the scorecard, check `inventory.untracked.count`.** Non-zero means the pollution surface — and
      therefore the economy rating — was measured against files that exist only on this machine, so the numbers you are about
@@ -176,9 +201,31 @@ no number of further rounds will move it. Judging it as plateau would mislead th
 
 ## Graduation (do it when targets are met, do not just recommend it)
 
-**Why this section has a deliverable**: convergence without a gate decays naturally. On the **very day** oikos graduated, a new orphan appeared
-(`utm-convention.md`) along with files missing `last_updated`, and coverage went 95.1% → 90.7%; two months later
-it was still sitting there, unreclaimed. A prose-style "we recommend you build your own CI" has no deliverable, so nobody acts on it.
+**Why this section has a deliverable, and why that was not enough**: convergence without a gate decays naturally. On the
+**very day** oikos graduated, a new orphan appeared (`utm-convention.md`) along with files missing `last_updated`, and
+coverage went 95.1% → 90.7%. A prose-style "we recommend you build your own CI" has no deliverable, so nobody acts on it —
+that reasoning was right, and producing the files was the right response to it.
+
+**It did not work.** Measured on the same repo: the gate was produced at round 8 with `min_freshness_coverage: 0.93`
+("round 8 is at 0.9348, the threshold may only go up"). Running that same file today prints
+`✗ 新鮮度覆蓋率: 0.9（門檻 ≥ 0.93）`, and `.github/` contains no reference to it — it has never been executed since the day
+it was written. The cause is not that the documentation got worse; it is that **the corpus grew**: round 9 pulled
+`PRODUCT.md`/`DESIGN.md` in through `docs_files` and round 10 added two specs, so the denominator went 46 → 50 and the new
+files carried no `last_updated`. A pinned ratio threshold **expires by itself when the corpus grows**, and growing the
+corpus is something this tool actively encourages.
+
+So the honest form of the argument is: **a deliverable is necessary, not sufficient.** It also needs something that reports
+its state without being asked, because "the user will not go and do it" is the premise the whole section rests on — and that
+premise does not stop applying the moment the file exists. Note which way each failure points. A prose recommendation nobody
+follows leaves the team **knowing** they have no gatekeeper. A produced gate nobody runs leaves them **believing** they have
+one, with a green promise in version control and a red answer in reality. The second is worse, which is why
+[audit.md](audit.md) step 8b now evaluates a present gate's declared thresholds on every audit and report — without
+executing it — and says so when it is red or when no workflow references it.
+
+The same repo shows why the mechanical signal has to be fine-grained. `utm-convention.md` decayed in two ways at once: it
+became an orphan, and it lost its date signal. **The orphan half got fixed** — a script reported it by name every round. **The
+date-signal half is still missing today**, because it only ever appeared diluted inside `coverage_ratio`, one file among
+fifty. Same document, two kinds of rot, two outcomes, and the difference was whether a round's output named it.
 
 Blocker #3's "don't touch CI" means **don't automatically modify the user's CI**, not that you can't produce CI materials.
 
@@ -191,7 +238,12 @@ Do two things at graduation:
    ```bash
    mkdir -p .docgrad/graduation
    cp "$SKILL_DIR/templates/docs-gate.mjs" "$SKILL_DIR/templates/docs-gate.yml" .docgrad/graduation/
+   cp "$SKILL_DIR/templates/graduation-README.md" .docgrad/graduation/README.md
    ```
+
+   The README goes with them: it says how to run the gate, and that a ratio threshold expires on its own as the corpus
+   grows. Fill in the actual threshold values and today's measurements where it asks for them — a README describing
+   thresholds it does not name is the same failure one level up.
 
    **Never write into `.github/`**, and never modify any existing CI configuration.
 

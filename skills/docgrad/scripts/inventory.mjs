@@ -5,10 +5,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   loadConfig, collectFiles, estimateTokens, parseArgs, fail,
-  extractCodeRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
-  gitTrackedFiles, GIT_UNAVAILABLE_NOTE, matchesPathPrefix,
+  extractCodeRefs, extractApiRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
+  gitTrackedFiles, gitUnavailableNote, matchesPathPrefix,
   buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, AUTHORSHIP_UNAVAILABLE_NOTE,
-  MAX_SRC_SYMBOL_FILE_BYTES,
+  MAX_SRC_SYMBOL_FILE_BYTES, SHIPPED_TIERS, SHIPPED_POLLUTION_MAX,
 } from './lib.mjs';
 
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+\.)\s+/;
@@ -69,8 +69,15 @@ function extractH2Sections(text) {
 
 // A rule line = a list item (an optional leading emoji is fine; the test is just whether it
 // contains the pattern substring) that also contains rules.pattern.
-// anchored = extractCodeRefs can extract coordinates from the line itself.
-function extractRuleLines(text, pattern, srcDirs) {
+//
+// anchored = the line carries code coordinates, using **the same definition as the claim
+// population**: path-shaped inline code, or API-shaped inline code whose every segment exists as a
+// symbol under src_dirs. Until v1.7.0 this counted path shapes only, so a library repo — whose
+// documentation describes an API, not a file tree — scored anchored_ratio 0 by construction, and
+// rubric.md's traceability note ("<0.5 means claims lack verifiable code landing points") fired on
+// repos where every single rule had one. #40 had already fixed exactly that definition for the
+// claim population; this is the same fix in the place that was left behind (#51).
+function extractRuleLines(text, pattern, srcDirs, symbols) {
   const lines = text.split(/\r?\n/);
   let inFence = false;
   const rules = [];
@@ -83,13 +90,15 @@ function extractRuleLines(text, pattern, srcDirs) {
     if (!LIST_ITEM_RE.test(line)) continue;
     if (!line.includes(pattern)) continue;
     const content = line.replace(LIST_ITEM_RE, '').trim();
-    rules.push({ chars: content.length, anchored: extractCodeRefs(line, srcDirs).length > 0 });
+    const anchored =
+      extractCodeRefs(line, srcDirs).length > 0 || extractApiRefs(line, symbols).length > 0;
+    rules.push({ chars: content.length, anchored });
   }
   return rules;
 }
 
-function buildStructure(text, config) {
-  const ruleLines = extractRuleLines(text, config.rules.pattern, config.src_dirs);
+function buildStructure(text, config, symbols) {
+  const ruleLines = extractRuleLines(text, config.rules.pattern, config.src_dirs, symbols);
   return {
     h2: extractH2Sections(text),
     rules: {
@@ -107,7 +116,7 @@ function buildStructure(text, config) {
 
 function measure(rootDir, relPath, config, symbols) {
   const text = fs.readFileSync(path.join(rootDir, relPath), 'utf8');
-  const structure = buildStructure(text, config);
+  const structure = buildStructure(text, config, symbols);
   const ruleLines = structure._ruleLines;
   delete structure._ruleLines;
   const claimLines = extractClaimLines(text, config.src_dirs, { symbols });
@@ -201,7 +210,7 @@ try {
   const untrackedFiles = tracked === null ? null : collected.filter((f) => !tracked.has(f.path));
   const untracked =
     untrackedFiles === null
-      ? { count: null, tokens_est: null, files: null, note: GIT_UNAVAILABLE_NOTE }
+      ? { count: null, tokens_est: null, files: null, note: gitUnavailableNote() }
       : {
           count: untrackedFiles.length,
           tokens_est: untrackedFiles.reduce((s, f) => s + f.tokens_est, 0),
@@ -237,6 +246,69 @@ try {
     untrackedFiles && untrackedFiles.length
       ? `this ratio includes ${untrackedFiles.length} untracked local file(s) (see "untracked"), so it will differ on a clean checkout of the same commit and two people can arrive at different economy ratings; set exclude_untracked: true in .docgrad.yml to measure the clean-checkout corpus instead`
       : null;
+  const entryCost = (() => {
+    // When scope-limited, count only entry files within the scope — fixed cost is a
+    // full-corpus concept, so a scoped report cannot cite it directly.
+    // Symlink dedup: multiple entry names pointing at the same real file (kdan-bpm's
+    // `CLAUDE.md -> AGENTS.md`) get loaded by an agent as a single file, so summing them by
+    // name would double the fixed cost (measured on 2026-09-05: 5,792 vs the true 2,896).
+    // Group by realpath, count the same real file once; files still lists every name, and
+    // aliases that got folded together are called out.
+    const entries = files.filter((f) => f.type === 'entry');
+    const seen = new Map();
+    const aliases = [];
+    for (const f of entries) {
+      let key = f.path;
+      try {
+        key = fs.realpathSync(path.join(root, f.path));
+      } catch {
+        /* fall back to the path itself when it can't be read — better to double-count than to miss it */
+      }
+      if (seen.has(key)) {
+        aliases.push({ path: f.path, same_file_as: seen.get(key) });
+        continue;
+      }
+      seen.set(key, f.path);
+    }
+    const counted = new Set(seen.values());
+    return {
+      files: entries.map((f) => f.path),
+      tokens_est: entries
+        .filter((f) => counted.has(f.path))
+        .reduce((s, f) => s + f.tokens_est, 0),
+      ...(aliases.length ? { symlink_aliases: aliases } : {}),
+    };
+  })();
+
+  const pollutionRatio =
+    totalTokens + excludedTokens === 0
+      ? 0
+      : Number((excludedTokens / (totalTokens + excludedTokens)).toFixed(4));
+
+  // Economy's two thresholds used to live only in reference/rubric.md's prose, retyped by hand,
+  // while the identically-named config fields were read by nothing at all (#50). Editing them
+  // changed no outcome, and init.md warned against editing them for a reason that did not exist.
+  // They are read here now, so the rubric can cite one source instead of keeping a second copy.
+  //
+  // The verdicts below are arithmetic over two already-mechanical numbers, not a rating: the star
+  // still comes from the anchors. `cost_allows_star` is the ceiling the fixed cost alone permits;
+  // ★5 additionally requires a mechanical gate, which no script can observe.
+  const tiers = config.economy.entry_cost_tiers;
+  const pollutionMax = config.economy.pollution_max;
+  const cost = entryCost.tokens_est;
+  const economyThresholds = {
+    entry_cost_tiers: tiers,
+    pollution_max: pollutionMax,
+    customised: JSON.stringify([tiers, pollutionMax]) !== JSON.stringify([SHIPPED_TIERS, SHIPPED_POLLUTION_MAX]),
+    entry_cost_tokens_est: cost,
+    pollution_ratio: pollutionRatio,
+    cost_allows_star: cost > tiers[0] ? 1 : cost > tiers[1] ? 2 : cost > tiers[2] ? 3 : 4,
+    star_5_cost_met: cost <= tiers[3],
+    pollution_caps_at: pollutionRatio >= pollutionMax ? 3 : null,
+    note:
+      'thresholds come from .docgrad.yml economy:; cost_allows_star is the ceiling the fixed cost alone permits and ★5 also requires a mechanical gate. When customised is true these are not the shipped anchors, so this repo\'s economy rating is not comparable with one graded at the defaults.',
+  };
+
   process.stdout.write(
     `${JSON.stringify(
       {
@@ -295,46 +367,11 @@ try {
           ],
         },
         claim_candidates: claimCandidates,
-        entry_cost: (() => {
-          // When scope-limited, count only entry files within the scope — fixed cost is a
-          // full-corpus concept, so a scoped report cannot cite it directly.
-          // Symlink dedup: multiple entry names pointing at the same real file (kdan-bpm's
-          // `CLAUDE.md -> AGENTS.md`) get loaded by an agent as a single file, so summing them by
-          // name would double the fixed cost (measured on 2026-09-05: 5,792 vs the true 2,896).
-          // Group by realpath, count the same real file once; files still lists every name, and
-          // aliases that got folded together are called out.
-          const entries = files.filter((f) => f.type === 'entry');
-          const seen = new Map();
-          const aliases = [];
-          for (const f of entries) {
-            let key = f.path;
-            try {
-              key = fs.realpathSync(path.join(root, f.path));
-            } catch {
-              /* fall back to the path itself when it can't be read — better to double-count than to miss it */
-            }
-            if (seen.has(key)) {
-              aliases.push({ path: f.path, same_file_as: seen.get(key) });
-              continue;
-            }
-            seen.set(key, f.path);
-          }
-          const counted = new Set(seen.values());
-          return {
-            files: entries.map((f) => f.path),
-            tokens_est: entries
-              .filter((f) => counted.has(f.path))
-              .reduce((s, f) => s + f.tokens_est, 0),
-            ...(aliases.length ? { symlink_aliases: aliases } : {}),
-          };
-        })(),
+        entry_cost: entryCost,
         pollution: {
           excluded_files: excludedFiles.map((f) => ({ path: f.path, tokens_est: f.tokens_est })),
           excluded_tokens: excludedTokens,
-          ratio:
-            totalTokens + excludedTokens === 0
-              ? 0
-              : Number((excludedTokens / (totalTokens + excludedTokens)).toFixed(4)),
+          ratio: pollutionRatio,
           ...(pollutionNote ? { note: pollutionNote } : {}),
         },
         // Sits next to pollution, and is emitted on **every** run — empty field included. That is
@@ -343,6 +380,7 @@ try {
         // can move anything you like out of the surface; how much you moved is printed on the same
         // page, by the same run, in the same units.
         out_of_scope: outOfScopeBlock,
+        economy_thresholds: economyThresholds,
         untracked,
       },
       null,

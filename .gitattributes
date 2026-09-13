@@ -1,6 +1,6 @@
 # .docgrad/ledger.jsonl is append-only and unordered: two branches each appending their own
 # verifications should merge to the union of both, not stop the merge. Duplicates, if they ever
-# happen, are detectable on (claim_id, round).
+# happen, are detectable on (claim_hash, round) — the key was renamed from claim_id in v1.6.0 (#41).
 .docgrad/ledger.jsonl merge=union
 
 # history.jsonl is deliberately NOT union-merged. Its lines are ordered rounds, so a union merge

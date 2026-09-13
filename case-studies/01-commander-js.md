@@ -193,7 +193,7 @@ documentation debt stays permanently unsampleable — and the correctness score 
 > converged repo can still have its correctness score rest on the tool's own prose. What changed is that this is now
 > **measured and must be reported**: `inventory.mjs` marks each file and each candidate `docgrad_authored` (read from the
 > subject of the commit that added the file) and emits `totals.claims_docgrad_authored_ratio`, which
-> [reference/audit.md](../reference/audit.md) step 3 and [reference/rubric.md](../reference/rubric.md) §Correctness now
+> [reference/audit.md](../skills/docgrad/reference/audit.md) step 3 and [reference/rubric.md](../skills/docgrad/reference/rubric.md) §Correctness now
 > require beside cumulative coverage, with a high ratio named as a finding in its own right. A ★4 built on a population
 > that is 100% docgrad-authored is still available — it just can no longer be reported without saying so. The measurements
 > above were taken before the fix and are left as recorded.

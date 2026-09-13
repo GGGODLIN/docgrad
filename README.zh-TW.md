@@ -116,7 +116,7 @@ scoped 報告一律**不寫入 `.docgrad/`**——歷輪走勢只認全量 audit
 | `/docgrad loop` | 反覆 improve 直到達標／plateau／需人裁決 |
 | `/docgrad report` | 重印最近 scorecard＋歷輪分數走勢 |
 
-路由與 blockers 的權威定義在 [SKILL.md](SKILL.md)，本表僅摘要。
+路由與 blockers 的權威定義在 [skills/docgrad/SKILL.md](skills/docgrad/SKILL.md)，本表僅摘要。
 
 ## 安裝、更新、移除
 
@@ -159,12 +159,35 @@ session 內的 `/plugin install` 對話框會問 scope，選 **User**。之後 `
 
 ### 不用 plugin 系統
 
+clone 下來之後把 skill 本體 symlink 過去——**不要直接 clone 進 `~/.claude/skills/`**，因為 v1.7.0
+之後本體在 `skills/docgrad/`，而 plugin manifest 留在 repo 根：
+
 ```bash
-git clone https://github.com/redtear1115/docgrad ~/.claude/skills/docgrad
+git clone https://github.com/redtear1115/docgrad ~/.docgrad-src
+ln -s ~/.docgrad-src/skills/docgrad ~/.claude/skills/docgrad
 ```
 
-更新＝到該目錄 `git pull`；是否有新版自己對 [CHANGELOG.md](CHANGELOG.md)。
+更新＝到 `~/.docgrad-src` `git pull`；是否有新版自己對 [CHANGELOG.md](CHANGELOG.md)。
 你只損失更新通知，其他都一樣。
+
+直接 `cp -r skills/docgrad ~/.claude/skills/docgrad` 也載得起來，但這樣會把 `.claude-plugin/` 留在原地，
+於是每支腳本的 JSON 與每一列 `history.jsonl` 的 `version` 都變成 `null`——你會**無聲地**失去
+「這個分數是哪一把尺量的」這個指紋。要嘛 symlink，要嘛整包複製。
+
+### 其他平台
+
+佈局遵循 [Agent Skills 標準](https://agentskills.io/specification)（`skills/<name>/SKILL.md`），
+各平台的 manifest 放在 repo 根，所以其他 agent 也拿得到。**下表的「已驗證」只代表一件事：從這台機器實際裝過一次，
+裝完 skill 與腳本都解析得到。** 它不代表行為與文件敘述比對過。
+
+| 平台 | 打包 | 狀態 |
+|---|---|---|
+| Claude Code | `.claude-plugin/{plugin,marketplace}.json`，`skills/` 自動探索 | **已驗證**——marketplace add → install → `skills/docgrad/SKILL.md` 在位、五支腳本從安裝副本跑得起來、`version` 解析得到 |
+| Codex | `.codex-plugin/plugin.json`（`"skills": "./skills/"`）、`.agents/plugins/marketplace.json` | **未驗證**——manifest 依標準撰寫並參照可運作的實例，但沒有從這台機器跑過 Codex 安裝 |
+| Antigravity | 根目錄 `plugin.json`、`.agents/` workspace 探索、`.agents/workflows/docgrad.md` | **未驗證**——同上 |
+| Skills CLI（`npx skills add`） | `skills/docgrad/SKILL.md` | **未驗證**——它從已發佈的 GitHub repo 安裝，所以在這版合併前無法對這個佈局實測 |
+
+如果你在未驗證的平台上裝起來了，歡迎開 issue 說成不成功——那是這幾列唯一會改變的途徑。
 
 ## Case studies
 
@@ -185,22 +208,27 @@ docgrad 評的是**本地 markdown 檔案樹**：五支腳本都以本地路徑�
 
 - **git 不是硬需求**：沒有 git 時新鮮度只認文件自稱的日期、覆蓋漂移無法量測，其餘照跑。
 - **wiki／Confluence 等遠端文件源不支援**：檔案不在樹上、設定檔無處可放。真要評這類文件源，
-  可只借用 [reference/rubric.md](reference/rubric.md) 的六維錨點做人工評分——無機械訊號、不可重現，也不落 scorecard。
+  可只借用 [skills/docgrad/reference/rubric.md](skills/docgrad/reference/rubric.md) 的六維錨點做人工評分——無機械訊號、不可重現，也不落 scorecard。
 - **新鮮度 ★5 屬畢業後範圍**：★5 要求 CI gate，而 docgrad 不碰 CI，所以 loop 內該維上限 ★4。
   預設 target 就是 ★4，只有把 target 調到 5 才會遇到。
 
 不評 prose 風格（Vale 的事）、不評 SKILL.md 本身、不評程式碼品質。一致性維度**會讀** code 註解，
-但只判「同一件事有沒有第二份權威、位置對不對」（見 [reference/placement.md](reference/placement.md)），
+但只判「同一件事有沒有第二份權威、位置對不對」（見 [skills/docgrad/reference/placement.md](skills/docgrad/reference/placement.md)），
 不評註解寫得好不好。完整定位見 [docs/design.md](docs/design.md)。
 
 ## Repo 結構
 
 ```text
 docgrad/
-├── SKILL.md            # 路由、blockers、scripts 契約
-├── reference/          # rubric（凍結錨點）、audit、improve、init、placement
-├── scripts/            # 五支零依賴 Node 量測腳本
-├── templates/          # 畢業交付物：docs-gate.mjs / docs-gate.yml
+├── skills/docgrad/     # skill 本體——agent 執行期會載入的東西都在這
+│   ├── SKILL.md        # 路由、blockers、scripts 契約
+│   ├── reference/      # rubric（凍結錨點）、audit、improve、init、placement
+│   ├── scripts/        # 五支零依賴 Node 量測腳本
+│   └── templates/      # 畢業交付物：docs-gate.mjs / docs-gate.yml
+├── .claude-plugin/     # Claude Code manifest
+├── .codex-plugin/      # Codex manifest
+├── .agents/            # Codex／Antigravity workspace 探索
+├── plugin.json         # Antigravity manifest
 ├── case-studies/       # 實測紀錄，附重跑指令
 ├── evals/              # skill 級評測（星等可不可重現？）
 ├── tests/              # 腳本單元測試

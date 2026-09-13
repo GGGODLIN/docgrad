@@ -9,6 +9,9 @@
 // Usage:
 //   DOCGRAD_DIR=/path/to/docgrad node docs-gate.mjs [--root <repo>]
 //
+// DOCGRAD_DIR may point at either the plugin/repo root or the skill directory itself; both the
+// pre-1.7.0 layout (scripts/ at the root) and the current one (skills/docgrad/scripts/) resolve.
+//
 // If DOCGRAD_DIR isn't found, it guesses once along common plugin install locations,
 // and reports a clear error if it still can't find one.
 
@@ -26,21 +29,50 @@ const THRESHOLDS = {
   max_entry_cost_tokens: 5000, // entry-file fixed cost: the tax every task has to pay
 };
 
+// Returns the directory that actually *contains* `scripts/`, which since v1.7.0 is not necessarily
+// the directory you point at: the skill payload moved to `skills/docgrad/` while an install root
+// may still be the repo root. Probing both layouts keeps one gate file working against a 1.6.0
+// install and a 1.7.0 one — CI copies of this file outlive the version that produced them.
+const LAYOUTS = ['.', 'skills/docgrad'];
+
+function scriptsDirUnder(dir) {
+  for (const layout of LAYOUTS) {
+    const candidate = path.resolve(dir, layout);
+    if (fs.existsSync(path.join(candidate, 'scripts/links.mjs'))) return candidate;
+  }
+  return null;
+}
+
 function resolveDocgradDir() {
   if (process.env.DOCGRAD_DIR) {
     const dir = path.resolve(process.env.DOCGRAD_DIR);
-    if (fs.existsSync(path.join(dir, 'scripts/links.mjs'))) return dir;
-    console.error(`docs-gate: could not find scripts/links.mjs under DOCGRAD_DIR=${dir}. Check that the path points at docgrad's root directory.`);
+    const resolved = scriptsDirUnder(dir);
+    if (resolved) return resolved;
+    console.error(`docs-gate: could not find scripts/links.mjs under DOCGRAD_DIR=${dir} (looked there and in skills/docgrad/). Check that the path points at docgrad's root directory.`);
     process.exit(2);
   }
-  const candidates = [
-    path.join(os.homedir(), '.claude/skills/docgrad'),
-    ...['claude-plugins-official', 'docgrad'].map((m) =>
-      path.join(os.homedir(), '.claude/plugins/cache', m, 'docgrad')
-    ),
-  ];
+  // A real plugin install lands at <cache>/<marketplace>/docgrad/<version>/, so the plugin-cache
+  // candidates need that extra segment — without it this branch only ever matched the bare-clone
+  // symlink, and every DOCGRAD_DIR-less run against a plugin install exited 2.
+  const cacheRoots = ['claude-plugins-official', 'docgrad'].map((m) =>
+    path.join(os.homedir(), '.claude/plugins/cache', m, 'docgrad')
+  );
+  const versioned = cacheRoots.flatMap((root) => {
+    try {
+      return fs
+        .readdirSync(root, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => path.join(root, e.name))
+        .sort()
+        .reverse(); // newest version first, lexicographically
+    } catch {
+      return [];
+    }
+  });
+  const candidates = [path.join(os.homedir(), '.claude/skills/docgrad'), ...cacheRoots, ...versioned];
   for (const c of candidates) {
-    if (fs.existsSync(path.join(c, 'scripts/links.mjs'))) return c;
+    const resolved = scriptsDirUnder(c);
+    if (resolved) return resolved;
   }
   console.error(
     'docs-gate: could not find a docgrad install directory. Set the DOCGRAD_DIR environment variable to the docgrad repo/plugin root.'

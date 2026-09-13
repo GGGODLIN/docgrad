@@ -108,8 +108,13 @@ const DEFAULTS = {
   freshness: { convention: 'none', field: null, heading_field: null, stale_after_days: 60 },
   coverage: { drift_after_days: 30, min_commits: 3 },
   targets: { completeness: 4, correctness: 4, freshness: 4, linkage: 4, consistency: 4, economy: 4 },
-  // Thresholds for the economy anchors (added in v1.0.0). Changing these = changing the meaning
-  // of a rubric anchor = major, see reference/rubric.md.
+  // Thresholds for the economy anchors (added in v1.0.0, actually read since v1.7.0 — until then
+  // they were inert and reference/rubric.md retyped the numbers in prose, so editing them changed
+  // nothing while init.md warned that it changed everything). inventory.mjs reads them now and the
+  // rubric cites what it emits. Changing them does not change a *shipped* anchor — it changes the
+  // ruler this repo is graded by, which is why they are in thresholds_hash: a score measured at
+  // custom thresholds is not comparable with one measured at the defaults, and the fingerprint is
+  // how a reader can tell.
   economy: { entry_cost_tiers: [20000, 10000, 5000, 3000], pollution_max: 0.1 },
   correctness_sample: 8,
   // How many of the ranked claim candidates inventory.mjs actually emits. The population itself is
@@ -235,11 +240,49 @@ export function validateConfigTypes(config, configFile = CONFIG_FILENAME) {
       );
     }
   }
+  // Nested maps were never type-checked. That was survivable while nothing read economy; it is not
+  // now, and freshness.stale_after_days has driven a rubric anchor since long before that.
+  const economy = config.economy ?? {};
+  const tiers = economy.entry_cost_tiers;
+  if (!Array.isArray(tiers) || tiers.length !== 4 || tiers.some((t) => typeof t !== 'number' || !(t > 0))) {
+    throw new Error(
+      `${configFile}: economy.entry_cost_tiers must be a list of four positive numbers, but got ${describeValue(tiers)}. ` +
+        `Correct form: economy.entry_cost_tiers: [20000, 10000, 5000, 3000] — the ★1/★2/★3/★4 fixed-cost boundaries, highest first.`
+    );
+  }
+  for (let i = 1; i < tiers.length; i += 1) {
+    if (tiers[i] >= tiers[i - 1]) {
+      throw new Error(
+        `${configFile}: economy.entry_cost_tiers must decrease, but ${tiers[i - 1]} is followed by ${tiers[i]}. ` +
+          `They are star boundaries read highest-first; out of order they would place a cheaper entry file in a worse band than an expensive one.`
+      );
+    }
+  }
+  if (typeof economy.pollution_max !== 'number' || !(economy.pollution_max > 0) || economy.pollution_max > 1) {
+    throw new Error(
+      `${configFile}: economy.pollution_max must be a ratio greater than 0 and at most 1, but got ${describeValue(economy.pollution_max)}. ` +
+        `Correct form: economy.pollution_max: 0.1 — that is 10%, written as a fraction, not as 10.`
+    );
+  }
+  const staleAfter = config.freshness?.stale_after_days;
+  if (!Number.isInteger(staleAfter) || staleAfter < 1) {
+    throw new Error(
+      `${configFile}: freshness.stale_after_days must be a positive whole number of days, but got ${describeValue(staleAfter)}. ` +
+        `Correct form: freshness.stale_after_days: 60. It sets the rubric's freshness ★3 staleness boundary for this repo.`
+    );
+  }
   return config;
 }
 
 // configFile can be external (--config): for when the doc source itself can't take a written file
 // (an export directory, a read-only mount) and you want to point at a config file elsewhere.
+// The shipped anchor values, exported so a run can say whether it was graded by them or by
+// something this repo chose. Deliberately not derived from DEFAULTS at call time: the point of
+// comparison is "the values docgrad ships", and reading them out of the same object a config has
+// already been merged into would compare a thing with itself.
+export const SHIPPED_TIERS = [20000, 10000, 5000, 3000];
+export const SHIPPED_POLLUTION_MAX = 0.1;
+
 export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILENAME)) {
   if (!fs.existsSync(configFile)) {
     throw new Error(`Could not find ${configFile} (root: ${rootDir}). Run /docgrad init first.`);
@@ -252,6 +295,10 @@ export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILEN
     coverage: { ...DEFAULTS.coverage, ...(parsed.coverage ?? {}) },
     targets: { ...DEFAULTS.targets, ...(parsed.targets ?? {}) },
     rules: { ...DEFAULTS.rules, ...(parsed.rules ?? {}) },
+    // economy was the only nested map without this, so `economy: { pollution_max: 0.2 }` used to
+    // leave entry_cost_tiers undefined rather than at its default. Nothing noticed because nothing
+    // read the field; now that inventory.mjs does, a partial economy block would have crashed it.
+    economy: { ...DEFAULTS.economy, ...(parsed.economy ?? {}) },
   };
   validateConfigTypes(config, configFile);
   const needsField = parseFreshnessConventions(config.freshness.convention).some(
@@ -402,17 +449,50 @@ function pushSingleFile(rootDir, rel, field, out) {
 // in a .gitignore'd directory, so it is untracked *and* ignored, and --exclude-standard would
 // filter it straight back out. "Not in git" is the property that matters here, and an ignored
 // file has it.
+// Set by gitTrackedFiles() on its way to returning null, so a caller can say **which** cause
+// applied. The three are not interchangeable, and each points at a different action:
+//
+//   no-git-binary   install git, or run somewhere it exists
+//   not-a-work-tree the check can never apply here; stop recommending it
+//   git-failed      git exists and ran and broke — run where git works; the check does apply
+//
+// The first version of this (v1.7.0, #52) had only the first two and inferred the second from
+// "anything that is not ENOENT". That was wrong in a way that mattered: under an agent sandbox
+// where `/usr/bin/git` is macOS's xcrun shim and cannot write its cache, git exits non-zero inside
+// a directory that **is** a work tree, and the report said "not a git working tree" — the one
+// message whose follow-up is the opposite of the right one. Found by running docgrad under
+// `claude plugin eval`; the trace is in evals/README.md.
+let lastGitFailure = null;
+let lastGitStderr = null;
+
+export function gitUnavailableReason() {
+  return lastGitFailure;
+}
+
+// git's own words for a directory that genuinely is not a work tree. Matched rather than assumed,
+// because "git exited non-zero" covers far more than that.
+const NOT_A_WORK_TREE_RE = /not a git repository|does not appear to be a git repository/i;
+
 export function gitTrackedFiles(rootDir) {
   try {
     const out = execFileSync('git', ['ls-files', '-z'], {
       cwd: rootDir,
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      // stderr is captured, not discarded: it is the only thing that separates "not a work tree"
+      // from "git is broken here". Piped rather than inherited, so a normal run stays quiet.
+      stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 64 * 1024 * 1024,
     });
+    lastGitFailure = null;
+    lastGitStderr = null;
     return new Set(out.split('\0').filter(Boolean)); // git already prints posix separators
-  } catch {
-    return null; // not a git work tree / git not installed — callers must report null, never zero
+  } catch (err) {
+    const stderr = String(err?.stderr ?? '').trim();
+    lastGitStderr = stderr ? stderr.split('\n')[0].slice(0, 200) : null;
+    if (err && err.code === 'ENOENT') lastGitFailure = 'no-git-binary';
+    else if (NOT_A_WORK_TREE_RE.test(stderr)) lastGitFailure = 'not-a-work-tree';
+    else lastGitFailure = 'git-failed';
+    return null;
   }
 }
 
@@ -425,8 +505,24 @@ export function matchesPathPrefix(p, list) {
 }
 
 const NO_GIT = 'git is unavailable or this is not a git working tree';
-export const GIT_UNAVAILABLE_NOTE =
-  `${NO_GIT}: tracked and untracked files cannot be told apart, so this is null rather than zero`;
+
+// The disjunction above is what a caller says when it genuinely does not know which applied; when
+// it does know, it must say so, because the two have different remedies.
+const GIT_FAILURE_TEXT = {
+  'no-git-binary': 'git is not installed (or not on PATH)',
+  'not-a-work-tree': 'this directory is not a git working tree',
+  'git-failed': 'git is present but failed to run here, so whether this is a work tree is unknown',
+};
+
+export function gitUnavailableNote(reason = gitUnavailableReason(), stderr = lastGitStderr) {
+  const cause = GIT_FAILURE_TEXT[reason] ?? NO_GIT;
+  const detail = reason === 'git-failed' && stderr ? ` (git said: ${stderr})` : '';
+  return `${cause}${detail}: tracked and untracked files cannot be told apart, so this is null rather than zero`;
+}
+
+// Retained as the cause-unknown wording; prefer gitUnavailableNote() at any call site that has just
+// made the failing call itself.
+export const GIT_UNAVAILABLE_NOTE = gitUnavailableNote(null);
 
 // tracked: pass a Set from gitTrackedFiles() to reuse one git call; undefined = look it up when
 // config.exclude_untracked needs it; null = caller already established git is unavailable.
@@ -937,12 +1033,83 @@ export function corpusHash(config) {
     .slice(0, 8);
 }
 
-const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Resolved through realpath first, because the documented bare-clone install symlinks
+// `skills/docgrad` into `~/.claude/skills/` and the manifest search below walks *up* from here.
+// Node normally resolves realpaths itself, so this is inert on a default run. It earns its place
+// under `--preserve-symlinks --preserve-symlinks-main` *together*: `--preserve-symlinks-main` alone
+// keeps only the entry module on its symlink path, and this file is an imported module, so Node
+// still realpaths it. With both flags and without this call the walk climbs `~/.claude/skills/` and
+// `version` comes back null; with it, the real version. Measured on a symlinked install.
+function resolveSkillRoot() {
+  const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  try {
+    return fs.realpathSync(dir);
+  } catch {
+    return dir;
+  }
+}
+
+// --- thresholds_hash ---------------------------------------------------------------
+//
+// rubric_hash fingerprints the ruler docgrad ships. It does not cover the ruler a *repo* is
+// actually graded by, because three config values move judgement boundaries without touching a
+// word of rubric.md:
+//
+//   economy.entry_cost_tiers   the ★1/★2/★3/★4 fixed-cost bands
+//   economy.pollution_max      the ★3 cap on the pollution surface
+//   freshness.stale_after_days the ★3 staleness boundary, written in the anchor as "≤60 days"
+//
+// The first two were inert until v1.7.0 and warned about anyway; the third has been live since it
+// was introduced and was never warned about at all — the wiring was the opposite of what the docs
+// said in both directions (#50). Now they are all read, and all fingerprinted: two rounds whose
+// thresholds_hash differs were not measured by the same ruler, however identical their rubric_hash.
+//
+// null without a config, for the same reason corpus_hash is: "unknown" must stay distinguishable
+// from "the defaults".
+export function thresholdsHash(config) {
+  if (!config) return null;
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        config.economy?.entry_cost_tiers ?? null,
+        config.economy?.pollution_max ?? null,
+        config.freshness?.stale_after_days ?? null,
+      ]),
+      'utf8'
+    )
+    .digest('hex')
+    .slice(0, 8);
+}
+
+const SKILL_ROOT = resolveSkillRoot();
+
+// The manifest is at the *plugin* root, which since v1.7.0 is not the skill root: the skill payload
+// lives at `skills/docgrad/` while `.claude-plugin/` stays at the repo root. Walking up is what
+// keeps `version` populated in both layouts.
+//
+// This is deliberately the one lookup that searches. A missing manifest makes `version` null, and
+// the catch below swallows it silently — so the failure shows up as a `history.jsonl` full of null
+// versions, months later, with nothing pointing at the cause. That is exactly the "state file
+// quietly stops matching reality" class #36 exists to catch, which is why it also has a test.
+const MANIFEST_SEARCH_LEVELS = 4;
+
+function findManifest(startDir) {
+  let dir = startDir;
+  for (let i = 0; i <= MANIFEST_SEARCH_LEVELS; i += 1) {
+    const candidate = path.join(dir, '.claude-plugin/plugin.json');
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // hit the filesystem root
+    dir = parent;
+  }
+  return null;
+}
 
 export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   let version = null;
   try {
-    version = JSON.parse(fs.readFileSync(path.join(skillRoot, '.claude-plugin/plugin.json'), 'utf8')).version ?? null;
+    const manifest = findManifest(skillRoot);
+    version = manifest ? JSON.parse(fs.readFileSync(manifest, 'utf8')).version ?? null : null;
   } catch {
     version = null; // allowed to be missing when run from outside the source tree; don't let it crash the script
   }
@@ -953,7 +1120,12 @@ export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   } catch {
     rubricHash = null;
   }
-  return { version, rubric_hash: rubricHash, corpus_hash: corpusHash(config) };
+  return {
+    version,
+    rubric_hash: rubricHash,
+    thresholds_hash: thresholdsHash(config),
+    corpus_hash: corpusHash(config),
+  };
 }
 
 // --- Claim identity ------------------------------------------------------------------

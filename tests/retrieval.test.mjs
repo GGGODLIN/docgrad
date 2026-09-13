@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { estimateTokens } from '../scripts/lib.mjs';
+import { estimateTokens } from '../skills/docgrad/scripts/lib.mjs';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.meta.url));
 const ENTRY_CHAIN_FIXTURE = fileURLToPath(new URL('./fixtures/retrieval-entry-chain/', import.meta.url));
-const SCRIPT = fileURLToPath(new URL('../scripts/retrieval.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../skills/docgrad/scripts/retrieval.mjs', import.meta.url));
 
 function copyFixture(src = FIXTURE) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-retrieval-'));
@@ -203,4 +203,41 @@ test('retrieval: no .docgrad.yml -> exit 1 + stderr points at init', () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /Run \/docgrad init first/);
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// #51: inventory.mjs has deduplicated entry files on realpath since the symlink-alias fix, while
+// retrieval.mjs deduplicated on the config string. A `CLAUDE.md -> AGENTS.md` pair therefore cost
+// its tokens once in entry_cost and twice in every scenario's marginal_tokens — and rubric.md's
+// Token economy section defines marginal_tokens as counting each file once, so the script
+// contradicted both its own spec and the other script's number for the same repo.
+test('retrieval: a symlinked entry-file alias is charged once, matching inventory (#51)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-alias-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.mkdirSync(path.join(tmp, 'src'));
+    fs.writeFileSync(path.join(tmp, 'AGENTS.md'), `# agents\n\n${'shared guidance words. '.repeat(60)}\n`);
+    fs.symlinkSync('AGENTS.md', path.join(tmp, 'CLAUDE.md'));
+    fs.writeFileSync(path.join(tmp, 'docs/README.md'), '# index\n');
+    fs.writeFileSync(path.join(tmp, 'src/a.js'), 'export function go() {}\n');
+    fs.writeFileSync(
+      path.join(tmp, '.docgrad.yml'),
+      'docs_dirs: [docs/]\nentry_files: [CLAUDE.md, AGENTS.md]\nindex_file: docs/README.md\nsrc_dirs: [src/]\nscenarios: [src/a.js]\n'
+    );
+
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    const inventory = JSON.parse(
+      execFileSync(process.execPath, [fileURLToPath(new URL('../skills/docgrad/scripts/inventory.mjs', import.meta.url)), '--root', tmp], {
+        encoding: 'utf8',
+      })
+    );
+    assert.equal(
+      out.scenarios[0].marginal_tokens,
+      inventory.entry_cost.tokens_est,
+      'the two scripts must charge the same real file the same amount'
+    );
+    // The alias really is an alias, so the fixture is testing what it claims to test.
+    assert.deepEqual(inventory.entry_cost.symlink_aliases, [{ path: 'CLAUDE.md', same_file_as: 'AGENTS.md' }]);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

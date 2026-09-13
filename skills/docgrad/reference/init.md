@@ -31,12 +31,16 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
      `entry_files`; read only when doing a certain kind of work (the entry file says "read `DESIGN.md` before touching the UI") →
      `docs_files`. Listing one document in both places is pointless — `entry_files` wins and counts toward fixed cost.
    - **Getting this wrong has an asymmetric cost.** Stuffing a conditional document into `entry_files` inflates fixed cost for
-     nothing (measured on oikos: 9,037 → 21,474 tokens, crossing the 20,000 threshold in `economy.entry_cost_tiers` and dropping
-     economy from ★3 to ★1), and [audit.md](audit.md) §Economy will find `entry_cost.files` doesn't match reality and **log a
+     nothing (measured on oikos: 9,037 → 21,474 tokens, crossing the first `economy.entry_cost_tiers` threshold — 20,000 at the shipped
+     defaults — and dropping economy from ★3 to ★1), and [audit.md](audit.md) §Economy will find `entry_cost.files` doesn't match reality and **log a
      separate** deduction. The reverse (putting a truly always-loaded file into `docs_files`) underreports fixed cost, which is
      equally false.
-   - **Files only**: listing a directory drops it (put directories in `docs_dirs`); a nonexistent file is silently skipped;
-     files already scanned under `docs_dirs` don't need to be listed again (duplicates count once anyway).
+   - **Files only**: listing a directory is a **hard error** — every script that reaches corpus collection exits 1 with
+     `docs_files may only list a single file, but <path> is a directory — put the whole directory in docs_dirs instead`.
+     A nonexistent file is a different case and *is* silently skipped. (`coverage.mjs` with `src_dirs` unset is the one
+     exception, and not a real one: it returns its "cannot measure" note and exits 0 before it ever collects the corpus, so
+     it never reads the bad field. Set `src_dirs` and it fails like the rest.) Files already scanned under `docs_dirs` don't need
+     to be listed again (duplicates count once anyway).
    - **Not a reachability root**: it is subject to orphan detection like a regular document — some document must link to it, or
      linkage will log an orphan. This is deliberate — if a conditional document can't be reached by a link, the agent can only
      find it by guessing.
@@ -56,7 +60,7 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
    Getting it wrong in the second direction is what broke `tj/commander.js`: the owner scoped out `docs/zh-CN/` because the
    translations are graded as a separate corpus, the only field that existed was `exclude`, and docgrad charged **40.6%**
    pollution and capped economy at ★3 while the fixed cost was a perfect 0 (see
-   [case-studies/01-commander-js.md](../case-studies/01-commander-js.md) finding 1). Nothing in the docs was wrong; the field
+   [case-studies/01-commander-js.md](../../../case-studies/01-commander-js.md) finding 1). Nothing in the docs was wrong; the field
    was.
 
    Two properties to state when asking, so `out_of_scope` is not mistaken for a free pass:
@@ -83,8 +87,13 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
    one and write them comma-separated) + `field` (for frontmatter) / `heading_field` (for heading-line; can be left blank when
    only one convention is chosen and it's already described by `field` — the scripts fall back to `field`)
 8. `targets`: default all 4 (six dimensions), ask "which dimensions are you willing to lower to 3?" (multi-select).
-   If economy is hard to hit because the repo's entry file is inherently large, lower the target rather than change
-   `economy.entry_cost_tiers` — changing the threshold changes the rubric anchor, which makes historical scores incomparable
+   If economy is hard to hit because the repo's entry file is inherently large, prefer lowering the target over changing
+   `economy.entry_cost_tiers`. Both are legitimate; they say different things. Lowering the target says "this repo accepts
+   ★3 economy"; raising the tiers says "this repo's ★4 means something looser than docgrad's ★4", and every later reader
+   has to know that to read the score. Since v1.7.0 the change is at least **visible**: the thresholds are reported on
+   every run (`inventory.economy_thresholds.customised`) and folded into `thresholds_hash`, so `report` draws a
+   comparability break where it happened. Before v1.7.0 these two fields were read by nothing at all — editing them changed
+   no outcome, while this questionnaire warned that it changed the rubric. Both halves of that were wrong
 9. `scenario`: ask the user to describe the repo's representative development task in one sentence (used as the LLM-simulation
    fallback when `scenarios` is absent)
 10. `correctness_sample`: **the number of claims drawn *new* each round** (re-verification of the existing ledger is a separate
@@ -169,7 +178,7 @@ As soon as it's written, verify: it's only done once `node "$SKILL_DIR/scripts/i
 When the doc tree itself can't take a written file (a read-only mount, an export directory) → write `.docgrad.yml` elsewhere,
 and the scripts can run `audit` by specifying `--config <file>` (`improve`/`loop` still need a writable workspace with git).
 This only solves the config file's placement — it doesn't change the premise that "the docs must be a local markdown file
-tree." See [design.md](../docs/design.md) §Positioning and boundaries for the boundary.
+tree." See [design.md](../../../docs/design.md) §Positioning and boundaries for the boundary.
 
 ## 4. Wrap-up
 

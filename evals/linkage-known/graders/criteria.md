@@ -1,3 +1,7 @@
+---
+type: llm
+---
+
 This fixture's mechanical signals are fixed and can be verified directly by rerunning the scripts:
 
 ```

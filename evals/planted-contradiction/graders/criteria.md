@@ -1,3 +1,7 @@
+---
+type: llm
+---
+
 This fixture has **one** claim planted that contradicts the code:
 
 - `docs/balance-design.md` says "a positive return value means `memberA` owes `memberB`"

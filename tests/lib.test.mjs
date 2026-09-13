@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored } from '../scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash } from '../skills/docgrad/scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -741,6 +741,106 @@ test('docgradMeta: corpus_hash is null without a config, and present with one (b
   assert.match(docgradMeta(undefined, cfg).corpus_hash, /^[0-9a-f]{8}$/);
 });
 
+// #47: the skill payload moved to skills/docgrad/ while .claude-plugin/ stayed at the repo root,
+// so the manifest is no longer a sibling of the skill root. docgradMeta() swallows a missing
+// manifest and returns version: null — nothing throws, nothing warns, and the only trace is a
+// history.jsonl slowly filling with null versions. These two tests exist because that failure is
+// silent; without them the layout can regress and every other test stays green.
+// #47 gave the repo a second manifest for Codex carrying its own copy of the version, and a third
+// (Antigravity) that carries none. docs/how-to.md's release step names the authority; this makes a
+// half-done bump fail the suite instead of shipping two different answers to "what version is this".
+// #50: economy was the only nested map loadConfig never deep-merged. It did not matter while
+// nothing read the fields; inventory.mjs reads them now, so a partial economy block would have
+// handed it `entry_cost_tiers: undefined`.
+test('loadConfig: a partial economy block keeps the untouched key at its default', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-economy-'));
+  try {
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\neconomy:\n  pollution_max: 0.2\n');
+    const cfg = loadConfig(tmp);
+    assert.equal(cfg.economy.pollution_max, 0.2);
+    assert.deepEqual(cfg.economy.entry_cost_tiers, [20000, 10000, 5000, 3000], 'the untouched key must survive the merge');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('validateConfigTypes: the nested maps that can move a judgement are checked', () => {
+  const base = { ...loadConfig(FIXTURE) };
+  const withEconomy = (economy) => ({ ...base, economy: { ...base.economy, ...economy } });
+  assert.throws(() => validateConfigTypes(withEconomy({ entry_cost_tiers: [1, 2] })), /four positive numbers/);
+  assert.throws(() => validateConfigTypes(withEconomy({ entry_cost_tiers: [3000, 5000, 10000, 20000] })), /must decrease/);
+  assert.throws(() => validateConfigTypes(withEconomy({ pollution_max: 10 })), /at most 1/);
+  assert.throws(
+    () => validateConfigTypes({ ...base, freshness: { ...base.freshness, stale_after_days: 0 } }),
+    /positive whole number of days/
+  );
+  // The shipped defaults must of course pass.
+  assert.ok(validateConfigTypes(base));
+});
+
+// thresholds_hash exists because these three values move judgement boundaries without changing a
+// word of rubric.md, so rubric_hash alone cannot tell two differently-ruled rounds apart.
+test('thresholdsHash: stable at the defaults, moves for each of the three fields, null without a config', () => {
+  const base = loadConfig(FIXTURE);
+  const at = thresholdsHash(base);
+  assert.match(at, /^[0-9a-f]{8}$/);
+  assert.equal(thresholdsHash(loadConfig(FIXTURE)), at, 'the same config must hash the same');
+  assert.equal(thresholdsHash(null), null, 'unknown must stay distinguishable from the defaults');
+
+  const moved = [
+    { ...base, economy: { ...base.economy, entry_cost_tiers: [20000, 10000, 5000, 2500] } },
+    { ...base, economy: { ...base.economy, pollution_max: 0.2 } },
+    { ...base, freshness: { ...base.freshness, stale_after_days: 365 } },
+  ];
+  for (const cfg of moved) assert.notEqual(thresholdsHash(cfg), at);
+  // ...and each moves it to its own value, so the hash identifies which ruler, not merely "not the default".
+  assert.equal(new Set(moved.map(thresholdsHash)).size, 3);
+});
+
+test('packaging: the Codex manifest version matches the Claude Code manifest, which is the authority', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const authority = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin/plugin.json'), 'utf8'));
+  const codex = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin/plugin.json'), 'utf8'));
+  assert.match(authority.version, /^\d+\.\d+\.\d+$/);
+  assert.equal(codex.version, authority.version, '.codex-plugin/plugin.json drifted from the version authority');
+  // The Antigravity manifest deliberately has no version; asserting that keeps a well-meaning
+  // "consistency" edit from adding a third copy to keep in sync.
+  const antigravity = JSON.parse(fs.readFileSync(path.join(root, 'plugin.json'), 'utf8'));
+  assert.equal(antigravity.version, undefined);
+});
+
+test('docgradMeta: version is non-null from the real tree (the manifest is a level above the skill root)', () => {
+  const meta = docgradMeta();
+  assert.notEqual(meta.version, null, 'version went null — the manifest search no longer reaches .claude-plugin/plugin.json');
+  assert.match(meta.version, /^\d+\.\d+\.\d+$/);
+});
+
+test('docgradMeta: the manifest search walks up, and stops rather than escaping upward forever', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-layout-'));
+  try {
+    const skillRoot = path.join(tmp, 'skills/docgrad');
+    fs.mkdirSync(path.join(skillRoot, 'reference'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, '.claude-plugin'));
+    fs.writeFileSync(path.join(tmp, '.claude-plugin/plugin.json'), '{"version":"9.9.9"}');
+    fs.writeFileSync(path.join(skillRoot, 'reference/rubric.md'), '★4 anchor A');
+    // Found two levels up, which is the shipped layout.
+    assert.equal(docgradMeta(skillRoot).version, '9.9.9');
+    // rubric_hash still resolves from the skill root itself, not from the manifest's directory.
+    assert.match(docgradMeta(skillRoot).rubric_hash, /^[0-9a-f]{8}$/);
+
+    // A skill root with no manifest anywhere above it inside the search window reports null rather
+    // than picking up an unrelated manifest from further up the filesystem.
+    const orphan = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-orphan-'));
+    try {
+      assert.equal(docgradMeta(orphan).version, null);
+    } finally {
+      fs.rmSync(orphan, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('docgradMeta: returns version and rubric fingerprint; the hash changes when rubric changes', () => {
   const meta = docgradMeta();
   assert.match(meta.version, /^\d+\.\d+\.\d+$/);
@@ -764,7 +864,12 @@ test('docgradMeta: returns version and rubric fingerprint; the hash changes when
 test('docgradMeta: returns null instead of throwing when files cannot be read', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-meta-'));
   try {
-    assert.deepEqual(docgradMeta(tmp), { version: null, rubric_hash: null, corpus_hash: null });
+    assert.deepEqual(docgradMeta(tmp), {
+      version: null,
+      rubric_hash: null,
+      thresholds_hash: null,
+      corpus_hash: null,
+    });
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

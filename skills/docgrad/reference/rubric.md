@@ -97,6 +97,14 @@ ascending), plus `correctness_sample` claims that have never entered the ledger.
 never reduces the new draws, so cumulative coverage grows by `correctness_sample` per round until
 the emitted window is exhausted; the ledger accumulates rather than resampling. The pass rate that
 sets the star rating is computed over that whole verified set.
+**The pass rate is a measurement with a rater in it, and the report must show that.** Every ledger
+row carries `borderline`, and the round's borderline count is printed beside the pass rate — because
+a pass rate moves when the documentation changes *and* when the reading changes, and those are not
+the same finding. A `fail`, and any borderline `pass`, also carries a `rationale`: which sentence,
+which code line, why. Without it a later round can re-verify the claim but not the judgement, and
+the judgement is the part that was demonstrably unstable (see [§Version history](#version-history-and-comparability-notes),
+v1.7.0). [audit.md](audit.md) step 4 settles the two recurring boundaries rather than leaving each
+round to re-derive them.
 
 > **The one ceiling that does exist is the emitted window, and it is a config setting, not a
 > property of the repo.** Coverage climbs by `correctness_sample` a round until the ledger holds
@@ -140,12 +148,20 @@ sets the star rating is computed over that whole verified set.
 |---|---|
 | ★1 | No date-signal convention (coverage_ratio <20%). |
 | ★2 | Signals are scattered (20–60%), or key documents have staleness >180 days. |
-| ★3 | A date-signal convention exists but relies on discipline; key documents have staleness ≤60 days. |
+| ★3 | A date-signal convention exists but relies on discipline; key documents have staleness within the staleness window (shipped: ≤60 days, `freshness.stale_after_days`). |
 | ★4 | Coverage ≥90%, only isolated mismatches, drift <30 days. |
 | ★5 | Full coverage + "updated in the same MR as the change" enforced by a mechanical gate + lifecycle management (superseded documents handled as soon as they are superseded). |
 
 Measurement: `coverage_ratio` / `stale` / `mismatches` from freshness.mjs. "Key documents" means
 `entry_files` + `index_file` + each area's authoritative document.
+The ★3 staleness window is `freshness.stale_after_days` (shipped 60), and it is **configurable** —
+which means a repo can set it to 365 and make ★3 mean "within a year" without a word of this file
+changing. That is legitimate for a repo whose documentation genuinely ages that slowly, and it is
+also exactly why the value is in `thresholds_hash`: the scorecard must state the window in force
+whenever it is not the shipped one, and `report` draws a comparability break when it moves.
+A related constant is **not** configurable: `mismatches` only fires when a document's claimed date
+and its git date differ by more than 7 days (`freshness.mjs › MISMATCH_TOLERANCE_DAYS`), a fixed
+tolerance for the ordinary gap between editing a file and committing it.
 The git date comparison **excludes docgrad's own convergence commits** (the `docs(docgrad):`
 prefix) and takes the most recent non-docgrad commit — otherwise the backfill round counts its own
 commit dates as "the content was updated" and produces false mismatches.
@@ -202,15 +218,32 @@ When comparing this dimension's score across v0.5.0, note the scope was widened
 
 | Star | Anchor |
 |---|---|
-| ★1 | Fixed cost > 20,000 tokens. |
-| ★2 | Fixed cost > 10,000 and ≤ 20,000. |
-| ★3 | Fixed cost > 5,000 and ≤ 10,000. |
-| ★4 | Fixed cost ≤ 5,000 and pollution surface < 10%. |
-| ★5 | Fixed cost ≤ 3,000, pollution surface < 10%, and the entry-file token budget is enforced by a mechanical gate. |
+| ★1 | Fixed cost above the first tier (shipped: > 20,000 tokens). |
+| ★2 | Fixed cost in the second band (shipped: > 10,000 and ≤ 20,000). |
+| ★3 | Fixed cost in the third band (shipped: > 5,000 and ≤ 10,000). |
+| ★4 | Fixed cost at or below the third tier (shipped: ≤ 5,000) and pollution surface below the cap (shipped: < 10%). |
+| ★5 | Fixed cost at or below the fourth tier (shipped: ≤ 3,000), pollution surface below the cap, and the entry-file token budget is enforced by a mechanical gate. |
 
 Measurement: **fixed cost** = `inventory.entry_cost.tokens_est` (the tax every task pays for
 loading `entry_files`, with symlink aliases de-duplicated); **pollution surface** =
 `inventory.pollution.ratio`. Both are fully mechanical, neither passes through LLM judgement.
+
+**Read the boundaries off the run, not off this table.** `inventory.economy_thresholds` carries the
+values this round actually used — `entry_cost_tiers`, `pollution_max` — plus the arithmetic over
+them: `cost_allows_star` (the ceiling the fixed cost alone permits), `star_5_cost_met`, and
+`pollution_caps_at`. The parenthesised numbers above are what docgrad **ships**; a repo may set its
+own in `.docgrad.yml`, and then the shipped numbers are not the ones it was graded by.
+
+Two consequences the audit must honour:
+
+- **`customised: true` is a reporting obligation, not a violation.** A repo is allowed to choose its
+  own thresholds. But a rating produced under custom thresholds is not comparable with one produced
+  at the defaults, so the scorecard must say which thresholds were in force. `thresholds_hash` in the
+  `docgrad` block is the mechanical form of the same statement, and it is what `report` compares
+  across rounds.
+- **★5 still needs the gate.** `star_5_cost_met` reports only the cost half. No script can see
+  whether a mechanical gate exists and runs, which is why ★5 stays a judgement even though the rest
+  of this dimension is arithmetic.
 
 > **What the pollution surface measures — and what it does not**: it measures *how much junk this repo contains*, not *how
 > much of it you chose not to grade*. Those are two different questions and only the first should move a star. Two config
@@ -322,6 +355,11 @@ economy report. The mechanical basis is `retrieval.mjs` (`code_pointer_ratio` / 
   examples, which may be long) — long rule lines mixed with background narrative force the agent to
   read the whole passage every time to find the one sentence that is actually a MUST, and a low
   anchored ratio means the claims have no verifiable landing point in the code.
+  A coordinate is path-shaped **or** API-shaped, the same definition the claim population uses — so
+  on a library repo, whose rules land on functions rather than files, `anchored_ratio` measures what
+  it claims to. Before v1.7.0 it counted path shapes only, which made this signal fire on exactly
+  the repos where every rule did have a landing point (#51). Like the claim population, the API half
+  is inert when `src_dirs` is unset.
 
 ## Version history and comparability notes
 
@@ -353,6 +391,51 @@ individual dimension did not).
     side of a change to it. Folding it in would draw a whole-round comparability break across all six dimensions — five of
     which cannot have been affected — every time someone applies the fix the tool itself recommends. The narrower, honest
     disclosure is the per-round `claim_population.truncated`, which is emitted whether or not anyone changed the field.
+- **v1.7.0 — the economy thresholds became real, and the fingerprint gained a fourth field**
+  (issue #50) (**not an anchor change**): the shipped numbers are unchanged — 20,000 / 10,000 / 5,000 / 3,000 and 10% — so a
+  repo that never wrote an `economy:` block is graded exactly as before and its history stays comparable. What changed is
+  **who those numbers come from**. `economy.entry_cost_tiers` and `economy.pollution_max` existed in `.docgrad.yml` since
+  v1.0.0 and **were read by nothing**; the thresholds actually applied were retyped in this file's prose. Consequences:
+  - **A repo that set a custom `economy:` block is regraded, with no file changing.** Before v1.7.0 such a repo was graded
+    at the shipped numbers whatever its config said; from v1.7.0 it is graded at its own. A repo carrying
+    `pollution_max: 0.2` was judged at 0.1 and is now judged at 0.2 — the economy star can move on the version bump alone.
+    This is the intended fix, and it is a genuine break in that repo's trend.
+  - **The transition round is not mechanically detectable.** `thresholds_hash` (new here, covering `entry_cost_tiers`,
+    `pollution_max` and `freshness.stale_after_days`) is absent from every pre-v1.7.0 `history.jsonl` line, so the round
+    where the change took effect reads as "unknown → first value" rather than as a move. From the first v1.7.0 round onward
+    it works normally and `report` draws the break.
+  - **`freshness.stale_after_days` is the mirror image and is not new — only its disclosure is.** It has always driven the
+    freshness ★3 staleness window while the anchor read like a fixed "≤60 days" and nothing warned that changing it moved
+    the boundary. No behaviour changes here; the anchor now says it is configurable and the value is fingerprinted, so a
+    repo grading itself at 365 days can no longer do so invisibly.
+  - `inventory.economy_thresholds` reports the values in force on every run, with `customised` saying whether they are the
+    shipped ones. The audit must state the thresholds whenever `customised` is true.
+  - **Correctness pass rates are not comparable across this version** (issue #48). `reference/audit.md` gained two named
+    boundary rules, and one of them can only lower a pass rate: a generalisation adjacent to a structured list is now judged
+    against **every row** of that list, where before it was left to the round's verifier to decide whether such a sentence was
+    a claim about the list or a loose summary above it. The anchors are untouched — the thresholds are still <50% / 50–79% /
+    ≥80% / ≥90% / all pass — but the same documentation can produce a lower pass rate under the new rules, so a drop across
+    this version is **not** evidence the documentation decayed.
+    - **No fingerprint covers this.** `rubric_hash` is computed over *this file only* (`lib.mjs › docgradMeta()`), and the
+      rules live in `audit.md`, so `report` cannot draw the break mechanically the way it does for an anchor change. This
+      entry is the disclosure. Treat the first v1.7.0 round in any repo as a baseline for correctness rather than as a
+      continuation.
+    - The reason the rules exist is the failure they were drawn from: the **same claim over unmodified code** was judged
+      `pass` in one round and `fail` in a later one, both verifiers describing the code correctly and disagreeing only about
+      what the sentence claimed. The ledger recorded the verdicts and not the reasoning, so the change was indistinguishable
+      from documentation rot. Hence the ledger's new `rationale` (mandatory on every `fail` and every borderline `pass`) and
+      `borderline` fields, and the borderline count now printed beside the pass rate. Both are **forward-only**: a
+      pre-v1.7.0 round's borderline count is unrecorded, not zero.
+  - **Two report-only numbers move once in this version and neither carries a star** (issue #51).
+    `structure.rules.anchored_ratio` now counts API-shaped coordinates as well as path-shaped ones,
+    so it rises on any repo that documents an API — on a library repo it was **0 by construction**
+    and the traceability note fired there for the one reason #40 had already retired. And
+    `retrieval.marginal_tokens` now deduplicates entry files on realpath, as `inventory.entry_cost`
+    has all along: a `CLAUDE.md -> AGENTS.md` symlink pair used to be charged twice in every
+    scenario (measured on a fixture: 348 tokens in `entry_cost` against 696 in `marginal_tokens`,
+    exactly double) while this file's Token economy section has always specified each file counted
+    once. Both figures are advisory, so nothing is regraded; a repo with either shape will simply
+    see a step in its trend at this version.
 - **v1.6.0 — the correctness sampling population now includes API-shaped claims, and discloses who wrote it**
   (issues #40, #41) (**not an anchor change**): the ★1–★5 thresholds (pass rate <50% / 50–79% / ≥80% / ≥90% / all pass) are
   unchanged word for word, and no dimension gained or lost a criterion. What changed is **which lines are eligible to be

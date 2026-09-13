@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
 const RETRIEVAL_FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.meta.url));
 const DOCS_FILES_FIXTURE = fileURLToPath(new URL('./fixtures/docs-files/', import.meta.url));
-const SCRIPT = fileURLToPath(new URL('../scripts/inventory.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../skills/docgrad/scripts/inventory.mjs', import.meta.url));
 
 function gitInit(tmp) {
   const env = {
@@ -640,5 +640,155 @@ test('inventory: the src_dirs-unset note names shapes the API matcher actually a
     assert.match(note, /path route/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// #50: these two fields sat in .docgrad.yml since v1.0.0 and were read by nothing, while the rubric
+// applied its own hardcoded copy of the same numbers and init.md warned against editing them. These
+// tests are the wiring: the config must reach the output, and the output must say when it is not
+// the shipped ruler.
+test('inventory: economy_thresholds reports the shipped values and the arithmetic over them (#50)', () => {
+  const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
+  const e = out.economy_thresholds;
+  assert.deepEqual(e.entry_cost_tiers, [20000, 10000, 5000, 3000]);
+  assert.equal(e.pollution_max, 0.1);
+  assert.equal(e.customised, false, 'a config that never mentions economy: is not customised');
+  assert.equal(e.entry_cost_tokens_est, out.entry_cost.tokens_est, 'must cite the same number economy is rated on');
+  assert.equal(e.pollution_ratio, out.pollution.ratio);
+  assert.equal(e.cost_allows_star, 4);
+  assert.equal(e.pollution_caps_at, null);
+  assert.match(out.docgrad.thresholds_hash, /^[0-9a-f]{8}$/);
+});
+
+test('inventory: custom thresholds are honoured, flagged, and move thresholds_hash (#50)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-econ-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs/README.md'), '# index\n\nsome prose.\n');
+    fs.writeFileSync(path.join(tmp, 'ENTRY.md'), `# entry\n\n${'padding words here. '.repeat(40)}\n`);
+    const write = (economy) =>
+      fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `docs_dirs: [docs/]\nentry_files: [ENTRY.md]\n${economy}`);
+
+    write('');
+    const shipped = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(shipped.economy_thresholds.customised, false);
+    assert.equal(shipped.economy_thresholds.cost_allows_star, 4);
+
+    // Tiers tight enough that the same entry file now lands in the worst band: the config decides
+    // the boundary, which before v1.7.0 it demonstrably did not.
+    write('economy:\n  entry_cost_tiers: [50, 40, 30, 20]\n');
+    const tight = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(tight.economy_thresholds.customised, true);
+    assert.equal(tight.economy_thresholds.cost_allows_star, 1, 'the same file, a different ruler');
+    assert.equal(tight.economy_thresholds.star_5_cost_met, false);
+    assert.notEqual(tight.docgrad.thresholds_hash, shipped.docgrad.thresholds_hash);
+    assert.equal(tight.entry_cost.tokens_est, shipped.entry_cost.tokens_est, 'the measurement itself must not move');
+
+    // A partial economy block must keep the other key at its default (the missing deep-merge).
+    write('economy:\n  pollution_max: 0.9\n');
+    const partial = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.deepEqual(partial.economy_thresholds.entry_cost_tiers, [20000, 10000, 5000, 3000]);
+    assert.equal(partial.economy_thresholds.pollution_max, 0.9);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// #51: anchored_ratio was left behind when #40 taught the claim population to recognise API-shaped
+// coordinates. A library repo documents an API, not a file tree, so every rule line scored
+// unanchored *by construction* — and rubric.md's traceability note fires below 0.5, i.e. precisely
+// on repos where every rule does have a verifiable landing point.
+test('inventory: a rule line anchored on an API symbol counts as anchored (#51)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-anchored-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.mkdirSync(path.join(tmp, 'src'));
+    fs.writeFileSync(path.join(tmp, 'src/index.js'), 'export function parseAsync(argv) { return argv; }\n');
+    fs.writeFileSync(
+      path.join(tmp, 'docs/README.md'),
+      [
+        '# api',
+        '',
+        '- **MUST** await `parseAsync()` before reading the parsed result.',
+        '- **MUST** keep the callback synchronous.',
+        '',
+      ].join('\n')
+    );
+    const write = (srcDirs) =>
+      fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `docs_dirs: [docs/]\nindex_file: docs/README.md\n${srcDirs}`);
+
+    // With src_dirs set, the API span is guarded by symbol existence and counts.
+    write('src_dirs: [src/]\n');
+    const withSrc = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    const rules = withSrc.files.find((f) => f.path === 'docs/README.md').structure.rules;
+    assert.equal(rules.count, 2, 'both list items are rule lines');
+    assert.equal(rules.anchored_ratio, 0.5, 'the parseAsync() line is anchored, the other is not');
+
+    // Without src_dirs there is no symbol index, so the API shape stays inert — same guard the
+    // claim population uses, and the same degradation, rather than a silent free pass.
+    write('');
+    const withoutSrc = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(withoutSrc.files.find((f) => f.path === 'docs/README.md').structure.rules.anchored_ratio, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// #52: the note used to offer both causes as one disjunction ("git is unavailable or this is not a
+// git working tree"), while audit.md told the reader that the note says which. It did not, and the
+// two have different remedies: install git / run elsewhere, versus the check can never apply here.
+test('inventory: the untracked note names which git failure occurred (#52)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-nogit-'));
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-bin-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs/a.md'), '# a\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+
+    // Not a work tree: git runs and refuses.
+    const notATree = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(notATree.untracked.count, null);
+    assert.match(notATree.untracked.note, /not a git working tree/);
+    assert.doesNotMatch(notATree.untracked.note, /git is unavailable or/, 'the disjunction must not survive when the cause is known');
+
+    // No git binary: the spawn itself fails with ENOENT. A PATH holding only node keeps the script
+    // runnable while git genuinely cannot be found.
+    fs.symlinkSync(process.execPath, path.join(binDir, 'node'));
+    const noBinary = JSON.parse(
+      execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8', env: { PATH: binDir } })
+    );
+    assert.match(noBinary.untracked.note, /git is not installed/);
+    assert.notEqual(noBinary.untracked.note, notATree.untracked.note, 'the two causes must be distinguishable');
+
+    // Third cause, and the one the first version of this fix got wrong: git exists, runs, and fails
+    // for its own reasons *inside a real work tree*. Inferring "not a work tree" from "exited
+    // non-zero" produced the one message whose follow-up is the opposite of the right one. Found by
+    // running docgrad under `claude plugin eval`, where /usr/bin/git is macOS's xcrun shim and
+    // cannot write its cache.
+    const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-brokengit-'));
+    try {
+      fs.mkdirSync(path.join(tree, 'docs'));
+      fs.writeFileSync(path.join(tree, 'docs/a.md'), '# a\n');
+      fs.writeFileSync(path.join(tree, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+      gitInit(tree); // a genuine work tree
+      fs.writeFileSync(path.join(binDir, 'git'), "#!/bin/sh\necho \"git: error: Failed to locate 'git'.\" >&2\nexit 72\n");
+      fs.chmodSync(path.join(binDir, 'git'), 0o755);
+      const brokenGit = JSON.parse(
+        execFileSync(process.execPath, [SCRIPT, '--root', tree], { encoding: 'utf8', env: { PATH: binDir } })
+      );
+      assert.equal(brokenGit.untracked.count, null);
+      assert.match(brokenGit.untracked.note, /git is present but failed to run here/);
+      assert.doesNotMatch(
+        brokenGit.untracked.note,
+        /is not a git working tree/,
+        'a real work tree must never be reported as not a work tree just because git broke'
+      );
+      assert.match(brokenGit.untracked.note, /Failed to locate/, "git's own words are what make the cause actionable");
+    } finally {
+      fs.rmSync(tree, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(binDir, { recursive: true, force: true });
   }
 });

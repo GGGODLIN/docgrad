@@ -13,6 +13,7 @@ This process **does not modify any file** and writes no state — pure report. R
 - [Step 4/5. Freshness / Linkage](#4-freshness--5-linkage)
 - [Step 6. Consistency (across documents and carriers)](#6-consistency-across-documents-and-carriers)
 - [Step 7. Economy](#7-economy)
+- [Step 8b. The graduation gate, if the repo has one](#8b-the-graduation-gate-if-the-repo-has-one)
 - [Step 8. Token economy report](#8-token-economy-report)
 - [Step 9. Emit the scorecard](#9-emit-the-scorecard)
 - [Scoped audit (limited scope / single dimension)](#scoped-audit-limited-scope--single-dimension)
@@ -137,9 +138,42 @@ Steps 1–3 below build those three parts in order.
    Record into the ledger table. **`claim_hash` is the key; `file:line` is a locating column, not an identity** — copy both
    straight out of `claim_candidates`, and never invent a hash of your own:
 
-   | # | claim_hash | file:line | claim | verification method | result |
-   |---|---|---|---|---|---|
-   | 1 | `728d463bc0b4` | docs/x.md:75 | "Routing is defined in `src/router.ts`" | Read src/router.ts | pass / fail / stale |
+   | # | claim_hash | file:line | claim | verification method | result | borderline | rationale |
+   |---|---|---|---|---|---|---|---|
+   | 1 | `728d463bc0b4` | docs/x.md:75 | "Routing is defined in `src/router.ts`" | Read src/router.ts | pass / fail / stale | no / yes | required for every `fail` and every borderline `pass` |
+
+   **`rationale` is mandatory on every `fail` and on every borderline `pass`**: which sentence, which
+   code line, and why that adds up to the verdict. One or two sentences. The ledger already records
+   *what was checked* (`verify`); without `rationale` it does not record *why this result*, so the
+   next round can re-verify the claim but cannot re-verify the **judgement** — and a judgement is
+   exactly what turned out to be unstable (see the boundary rules below).
+
+   **`borderline: yes` means the verdict depended on reading a rule, not on reading the code.** Mark
+   it whenever you could write a defensible argument for the other verdict — including the case where
+   you applied one of the boundary rules below and the rule is the only reason the result came out
+   the way it did. It is not a confession of sloppiness and it costs the repo nothing: it is a
+   discount factor the reader needs in order to interpret a pass-rate change.
+
+   #### Boundary rules — apply these, don't re-derive them each round
+
+   The same claim, the same unmodified code, and two rounds reached opposite verdicts (#48). Both
+   verifiers described the code correctly; they disagreed about what a sentence was claiming. These
+   two shapes recur, so they are settled here rather than left to each round's judgement:
+
+   1. **A generalisation adjacent to a structured list is judged against every row of that list.**
+      When a sentence introduces or summarises a table or list — "subscribes to each table's
+      INSERT / UPDATE / DELETE", followed by an 11-row table in which two rows subscribe to `UPDATE`
+      only — the sentence is **`fail`**, not "a loose summary in tolerable range". A summary sitting
+      directly above the thing it summarises is read as a claim about it; that is the whole reason it
+      is there. Mark it `borderline: yes` and say in `rationale` which rows contradict it.
+   2. **An incomplete enumeration is not by itself a misstatement, but it is always borderline.**
+      A list that names four of five call sites is not *wrong* about the four. Record `pass`,
+      `borderline: yes`, and name the omission in `rationale` — so a later round can see the
+      omission was noticed and dispositioned, not missed. It flips to `fail` when the document
+      claims completeness ("the only place", "all of the", "exhaustively").
+
+   Where these rules leave real doubt, `rubric.md`'s scoring principle 4 still governs: **round down**.
+   These rules narrow what counts as doubt; they do not replace the tie-break.
 
    `claim_hash` is 12 hex characters derived from the claim's text with whitespace collapsed and the ends trimmed — nothing
    else is normalised, so a claim that **moves** keeps its hash and a claim that is **edited** gets a new one. The second half
@@ -149,6 +183,14 @@ Steps 1–3 below build those three parts in order.
 5. **Calculate two numbers, and put both in the report**:
    - **Pass rate** = pass ÷ total verified this round (all three parts of the verified set: outstanding fail/stale, re-verified passes, new draws)
      → assign a star rating against the rubric's correctness anchors.
+   - **Borderline count** = rows marked `borderline: yes` this round, written **on the same line as
+     the pass rate**: `pass rate 8/9, 2 borderline`. Without it a pass-rate move cannot be read.
+     Measured case: the same claim over unmodified code was `pass` in one round and `fail` in a later
+     one, because the two rounds' verifiers drew the generalisation-versus-list boundary differently.
+     The ledger recorded only the verdicts, so the drop looked exactly like documentation rotting.
+     A round with a high borderline share has a pass rate that is partly a report about its own
+     verifier, and the reader has to be able to see that. `0 borderline` is written out too — the
+     absence is information, and a field that appears only when inconvenient is not a disclosure.
    - **Cumulative coverage** = distinct `claim_hash` values in the ledger ÷ `totals.claims_total` → write it in the report as
      `Correctness ★4 (pass rate 8/8, cumulative coverage 23/68 = 34%)`.
      **A star rating alone means nothing** — the reader needs to see the sample size it's built on.
@@ -235,7 +277,7 @@ Read [placement.md](placement.md) first — the rules for judging placement and 
 4. Every deduction is tagged with a category: `[contradiction]`/`[duplication]`/`[placement]`; the latter two must fill in all four columns placement.md requires
    (information / current placement / suggested placement / which axis is the reason) — don't raise a suggestion with a missing column.
 5. Assign a star rating against the rubric's consistency anchors. **Only judge placement and duplication, never comment quality** — see the boundary in
-   [design.md](../docs/design.md) §Positioning and boundaries.
+   [design.md](../../../docs/design.md) §Positioning and boundaries.
 
 ### 7. Economy
 
@@ -262,8 +304,8 @@ Assign a star rating directly against the rubric's economy anchors using `invent
    - Never suggest moving a directory from `exclude` into `out_of_scope` to raise economy. That is re-labelling, not
      improvement, and [improve.md](improve.md) forbids it outright.
 3. **Check `inventory.untracked.count` before you write the rating down** — the corpus is collected off the filesystem, not out of git, so this rating can depend on whose checkout it was run in:
-   - **Non-zero** → the run collected N local files git does not track (`untracked.files` lists them, `untracked.tokens_est` is what they weigh). The pollution ratio and the token totals are **checkout-bound: another machine on the same commit gets a different number, and possibly a different star**. The scorecard must say so, quoting the count and token weight, and recommend `exclude_untracked: true` in `.docgrad.yml` to measure the clean-checkout corpus instead (see [init.md](init.md) questionnaire item 6). `inventory.pollution.note` carries the same warning when any *collected* file is untracked — pass it through, don't paraphrase it away.
-   - **`null`** → git was unavailable or this is not a git working tree (`untracked.note` says which), so tracked and untracked files cannot be told apart and the check **could not run at all**. State that in the report; `null` is not zero, and an unrun check must not be reported as a clean one.
+   - **Non-zero** → the run collected N local files git does not track (`untracked.files` lists them — **capped at the first 20 paths**, with a `note` saying so when it truncates, while `count` and `tokens_est` always cover all of them; the same discipline `out_of_scope` already documents). The pollution ratio and the token totals are **checkout-bound: another machine on the same commit gets a different number, and possibly a different star**. The scorecard must say so, quoting the count and token weight, and recommend `exclude_untracked: true` in `.docgrad.yml` to measure the clean-checkout corpus instead (see [init.md](init.md) questionnaire item 6). `inventory.pollution.note` carries the same warning when any *collected* file is untracked — pass it through, don't paraphrase it away.
+   - **`null`** → the check could not run. **`untracked.note` names which of three causes**, and they need different follow-ups: *git is not installed* → install it or run elsewhere; *not a git working tree* → the check can never apply here, so stop recommending it; *git is present but failed to run here* → the check does apply, this environment just broke it, and the note carries git's own words. That third one is the reason the first two are not enough: under an agent sandbox where `/usr/bin/git` is macOS's xcrun shim, git exits non-zero inside a directory that **is** a work tree. Pass the note through rather than paraphrasing it back into "git was unavailable", and never conclude "not a work tree" from a `null` alone. State that in the report; `null` is not zero, and an unrun check must not be reported as a clean one.
    - **Zero** → the collected corpus is exactly what the commit contains; nothing to note.
 
 ### 8. Token economy report
@@ -286,6 +328,56 @@ Also include a "Traceability" subsection (report-only, not rated, see rubric.md'
 `index_hotness` (call it out when `ratio` is noticeably high, with `top5` attached); files whose `inventory.mjs` per-file `structure.rules`
 have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_ratio` — suggest splitting into a contract layer and a detail layer.
 
+### 8b. The graduation gate, if the repo has one
+
+A graduated repo carries `.docgrad/graduation/docs-gate.mjs` + `docs-gate.yml`, produced by
+[improve.md](improve.md) §Graduation with its thresholds pinned to that round's state. Field
+evidence says producing the file solved "there is no deliverable" and not "nobody runs it": on one
+repo the gate went red four rounds before anyone noticed, and `.github/` never referenced it at all.
+A green promise sitting in version control while the real answer is red is worse than no gate, so
+**every audit and report says what state it is in**.
+
+**docgrad does not execute it.** Not when it looks unmodified, not behind a config flag. It is a
+Node module committed into the repo being graded, so running it would mean executing
+repository-controlled code with the operator's privileges — and this tool's documented use includes
+auditing clones of repos you did not write (see the commander.js case study). An executed gate also
+decides its own verdict, so a gate that always prints "passed" would be indistinguishable from a
+real one: execution carries the whole risk and buys no integrity. None of this costs anything,
+because the gate consumes exactly the three script outputs step 1 already produced.
+
+When `.docgrad/graduation/docs-gate.mjs` exists, report all four of these:
+
+1. **That it exists**, with its path and the literal command to run it:
+   `DOCGRAD_DIR=<docgrad install> node .docgrad/graduation/docs-gate.mjs --root .`
+2. **Whether anything actually runs it.** Grep `.github/workflows/**` (and any other CI config the
+   repo uses) for a reference to the gate. Nothing referencing it → report
+   **"produced but not installed: no workflow references it"**. That was the single highest-value
+   finding on the repo above, and it is a text search.
+3. **The declared thresholds against this round's numbers.** Read the `THRESHOLDS` object out of the
+   file — it is a literal block of `key: <number>` lines near the top — and compare each to what step
+   1 already measured: `max_dead_links` / `max_bad_anchors` / `max_orphans` against `links.mjs`,
+   `min_freshness_coverage` against `freshness.coverage_ratio`, `max_entry_cost_tokens` against
+   `inventory.entry_cost.tokens_est`. Report the verdict as the gate's, not as docgrad's:
+   *"the committed gate is red: freshness coverage 0.90 < its declared 0.93"*.
+   This is what catches the real failure mode, which is not that the gate is wrong but that it
+   **expires**: a ratio threshold pinned at graduation goes red by itself when the corpus grows, and
+   growing the corpus is something docgrad actively encourages. On the measured repo the denominator
+   went 46 → 50 as `docs_files` and two new specs came in, and 0.9348 became 0.90 against a pinned
+   0.93.
+4. **Whether the judging logic still matches the template docgrad ships.** Compare the file against
+   `$SKILL_DIR/templates/docs-gate.mjs` ignoring the `THRESHOLDS` block (that block is meant to be
+   edited). Differences elsewhere are worth one line of report — *"its judging logic differs from the
+   template docgrad ships"* — as information, not as a fault.
+
+**Fail closed.** If the `THRESHOLDS` block is not a plain list of `key: <number>` lines — a computed
+value, an interpolation, extra statements — do **not** guess at what it evaluates to, and do not
+partially parse it. Report *"the gate has been modified beyond its thresholds; docgrad cannot
+evaluate it — run it yourself with the command above"* and stop at that. Never `import` it, never
+evaluate it, never shell out to it.
+
+No gate file → say nothing. An absent gate is the normal state for a repo that has not graduated,
+and reporting its absence every round would be noise.
+
 ### 9. Emit the scorecard
 
 ```markdown
@@ -294,11 +386,11 @@ have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_
 | Dimension | Rating | Target | Main deductions |
 |---|---|---|---|
 | Completeness | ★x | ★y | … |
-| Correctness | ★x | ★y | …(pass rate n/N, cumulative coverage m/total = x%, docgrad-authored share x%; `n/a` when the corpus has 0 verifiable claims; add "API matching disabled — `src_dirs` unset" when `claim_population.api_matching` says so) |
+| Correctness | ★x | ★y | …(pass rate n/N, **N borderline**, cumulative coverage m/total = x%, docgrad-authored share x%; `n/a` when the corpus has 0 verifiable claims; add "API matching disabled — `src_dirs` unset" when `claim_population.api_matching` says so) |
 | Freshness | ★x | ★y | …(date concentration x%, call it out if high) |
 | Linkage | ★x | ★y | … |
 | Consistency | ★x | ★y | …(deductions tagged `[contradiction]`/`[duplication]`/`[placement]`) |
-| Economy | ★x | ★y | …(fixed cost N tokens, pollution surface x%, out_of_scope N files / ~M tokens — always stated; add "N untracked files — ratio is checkout-bound" when `untracked.count` is non-zero, "untracked not checked (no git)" when it is `null`) |
+| Economy | ★x | ★y | …(fixed cost N tokens, pollution surface x%, out_of_scope N files / ~M tokens — always stated; add "N untracked files — ratio is checkout-bound" when `untracked.count` is non-zero, "untracked not checked (no git)" when it is `null`; add "graded at custom thresholds: tiers […], pollution_max x" when `economy_thresholds.customised` is true) |
 
 ## Token economy (not rated)
 - Fixed cost: ~N tokens (entry_files: …) — already counted in economy
@@ -306,6 +398,11 @@ have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_
   code_pointer yes/no, churn_commits N — call out the one that taxes the most); without scenarios, fall back to scenario "…" LLM
   simulation: ~N tokens, required-reading path a.md → b.md → …
 - Pollution surface: x% (exclude: …) — already counted in economy
+- Thresholds in force: read them from `inventory.economy_thresholds`, never from memory or from the
+  rubric table. When `customised` is **false**, say `shipped defaults`. When it is **true**, print the
+  tiers and `pollution_max` and state plainly that this repo's ★ is not comparable with one graded at
+  the defaults — the reader cannot infer that from the star alone, and `thresholds_hash` only tells
+  them the ruler changed, not what it changed to
 - Out of scope (not charged to the pollution surface): N files / ~M tokens (…paths) — **always printed, `0 files / 0 tokens`
   when the field is unused**. Say what it is graded as instead, and call it out when M is a material share of the corpus
   token total above; pass `out_of_scope.note` through verbatim when it appears (list capped, or paths that match both
