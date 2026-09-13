@@ -344,7 +344,7 @@ Lowest-scoring dimension = <dimension> (ties broken by rubric order). Deductions
 Refuse even if the user asks to "log it while you're at it" — suggest running a full `audit` or `improve` instead.
 
 **How to run it**: pass the `--include <glob>` flag (repeatable or comma-separated) to the three scripts that accept it (inventory/links/freshness);
-`coverage.mjs`/`retrieval.mjs` deliberately don't take it and always run in full. With `--dim`, run only the scripts that dimension needs
+`coverage.mjs`/`retrieval.mjs` accept the flag but deliberately ignore it and always run in full; both report `scope: null` to say so, and `coverage.mjs` explains why in its `note`. With `--dim`, run only the scripts that dimension needs
 (cross-reference [rubric.md](rubric.md) §Mechanical signal → dimension map), skip the rest.
 
 **How each dimension behaves under scope** (skip this and you get a misleading star rating):

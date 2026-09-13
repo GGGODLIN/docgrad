@@ -78,7 +78,13 @@ try {
     : null;
   // Key order follows inventory.mjs — scope, then docgrad, then everything else — so a reader
   // comparing two scripts' JSON finds the same fingerprint in the same place.
-  const head = { scope: include.length ? include : null, docgrad: docgradMeta(undefined, config) };
+  //
+  // `scope` is always null here, even when --include was passed, because this script always
+  // compares the full corpus (the note above says why). Echoing the requested scope would
+  // contradict the note in the same object, and would break the one property that makes the five
+  // scripts' headers comparable field by field: `scope` must mean "what this output actually
+  // covers". retrieval.mjs, which also ignores --include, already reports null.
+  const head = { scope: null, docgrad: docgradMeta(undefined, config) };
 
   // src_dirs unset -> degrade: don't measure, hand it back to the LLM for a plain comparison.
   if (config.src_dirs.length === 0) {

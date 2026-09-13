@@ -159,7 +159,11 @@ test('coverage: --include is deliberately a no-op (scope + note explain the full
     writeBaseFiles(tmp);
     // docs/auth.md falls outside scope -- if scope took effect, src/auth would be misjudged as undocumented.
     const out = run(tmp, ['--include', 'docs/search.md']);
-    assert.deepEqual(out.scope, ['docs/search.md']);
+    // `scope` reports what the output actually covers, not what was asked for. This script always
+    // compares the full corpus, so it reports null -- echoing the requested scope would contradict
+    // its own note and break the cross-script comparability of the header. retrieval.mjs, which
+    // also ignores --include, behaves the same way.
+    assert.equal(out.scope, null);
     assert.match(out.note, /does not apply/);
     const auth = out.areas.find((a) => a.area === 'src/auth');
     assert.deepEqual(auth.mentioned_by, ['docs/auth.md']); // full comparison, mentions outside scope still count
