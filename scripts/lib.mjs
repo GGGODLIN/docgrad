@@ -461,9 +461,47 @@ export function extractCodeRefs(text, srcDirs = []) {
 // enough to distinguish (collision probability is negligible), and it keeps each history line
 // from getting too long.
 
+// corpus_hash is the counterpart fingerprint: rubric_hash answers "which ruler did this round
+// use", corpus_hash answers "which files did it measure". Editing docs_dirs / docs_files /
+// index_file / entry_files / exclude moves files_total, claims_total, the freshness denominator,
+// the orphan/reachability population and the pollution denominator all at once — every score in
+// that round becomes incomparable with the round before, while rubric_hash does not change a
+// single character. Same shape as rubric_hash (sha256, first 8 hex chars), so report's existing
+// comparability-break detection can be reused verbatim.
+//
+// Normalised before hashing, so cosmetic edits don't fake a break: entries trimmed, trailing
+// slashes dropped (`docs/` and `docs` are the same directory), duplicates removed, each list
+// sorted. Serialisation is an array of [field, value] pairs in a fixed order — a plain object
+// literal would make the digest depend on key insertion order.
+
+const CORPUS_LIST_FIELDS = ['docs_dirs', 'docs_files', 'entry_files', 'exclude'];
+
+function normalizeCorpusEntry(v) {
+  return String(v).trim().replace(/\/+$/, '');
+}
+
+export function corpusFingerprint(config) {
+  const pairs = CORPUS_LIST_FIELDS.map((field) => {
+    const raw = Array.isArray(config?.[field]) ? config[field] : [];
+    return [field, [...new Set(raw.map(normalizeCorpusEntry).filter(Boolean))].sort()];
+  });
+  pairs.push(['index_file', config?.index_file ? normalizeCorpusEntry(config.index_file) || null : null]);
+  return pairs;
+}
+
+// No config supplied (an older caller, or a run that never loaded one) -> null, never a crash and
+// never a hash of an empty corpus — report must be able to tell "unknown" from "genuinely empty".
+export function corpusHash(config) {
+  if (!config) return null;
+  return createHash('sha256')
+    .update(JSON.stringify(corpusFingerprint(config)), 'utf8')
+    .digest('hex')
+    .slice(0, 8);
+}
+
 const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-export function docgradMeta(skillRoot = SKILL_ROOT) {
+export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   let version = null;
   try {
     version = JSON.parse(fs.readFileSync(path.join(skillRoot, '.claude-plugin/plugin.json'), 'utf8')).version ?? null;
@@ -477,7 +515,7 @@ export function docgradMeta(skillRoot = SKILL_ROOT) {
   } catch {
     rubricHash = null;
   }
-  return { version, rubric_hash: rubricHash };
+  return { version, rubric_hash: rubricHash, corpus_hash: corpusHash(config) };
 }
 
 // --- Concrete claim candidates ------------------------------------------------------

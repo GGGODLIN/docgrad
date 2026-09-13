@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, extractClaimLines, rankClaimCandidates } from '../scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, extractClaimLines, rankClaimCandidates } from '../scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -93,6 +93,57 @@ test('loadConfig: unset fields get their defaults, nested maps deep-merge', () =
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// --- #36: corpus_hash -------------------------------------------------------------------------
+
+test('corpusHash: cosmetic differences that mean the same corpus hash the same', () => {
+  const base = {
+    docs_dirs: ['docs/', 'guides/'],
+    docs_files: ['PRODUCT.md', 'DESIGN.md'],
+    entry_files: ['CLAUDE.md'],
+    exclude: ['docs/archive/'],
+    index_file: 'docs/README.md',
+  };
+  const cosmetic = {
+    // reordered, trailing slashes flipped, whitespace, a duplicate entry
+    docs_dirs: ['guides', ' docs/ '],
+    docs_files: ['DESIGN.md', 'PRODUCT.md', 'PRODUCT.md'],
+    entry_files: ['CLAUDE.md'],
+    exclude: ['docs/archive'],
+    index_file: ' docs/README.md',
+  };
+  assert.equal(corpusHash(cosmetic), corpusHash(base));
+  assert.match(corpusHash(base), /^[0-9a-f]{8}$/, 'same shape as rubric_hash');
+});
+
+test('corpusHash: fields outside the corpus definition do not move it', () => {
+  const base = { docs_dirs: ['docs/'], docs_files: [], entry_files: [], exclude: [], index_file: null };
+  assert.equal(
+    corpusHash({ ...base, src_dirs: ['src/'], scenarios: ['src/a.ts'], correctness_sample: 20, targets: { economy: 5 } }),
+    corpusHash(base),
+    'a corpus fingerprint must not react to rubric/target/measurement settings'
+  );
+});
+
+test('corpusHash: every corpus-defining field genuinely changes it', () => {
+  const base = {
+    docs_dirs: ['docs/'], docs_files: [], entry_files: ['CLAUDE.md'], exclude: [], index_file: 'docs/README.md',
+  };
+  const before = corpusHash(base);
+  // the v1.4.0 case from #36: adding docs_files moved files_total 46->48 while rubric_hash stood still
+  assert.notEqual(corpusHash({ ...base, docs_files: ['PRODUCT.md'] }), before, 'docs_files');
+  assert.notEqual(corpusHash({ ...base, docs_dirs: ['docs/', 'guides/'] }), before, 'docs_dirs');
+  assert.notEqual(corpusHash({ ...base, entry_files: ['CLAUDE.md', 'AGENTS.md'] }), before, 'entry_files');
+  assert.notEqual(corpusHash({ ...base, exclude: ['docs/archive/'] }), before, 'exclude');
+  assert.notEqual(corpusHash({ ...base, index_file: 'README.md' }), before, 'index_file');
+  assert.notEqual(corpusHash({ ...base, index_file: null }), before, 'index_file unset');
+});
+
+test('corpusHash: no config -> null (never a hash of an empty corpus)', () => {
+  assert.equal(corpusHash(null), null);
+  assert.equal(corpusHash(undefined), null);
+  assert.notEqual(corpusHash({ docs_dirs: [] }), null, 'a genuinely empty config still hashes');
 });
 
 test('resolveRoot: --root wins, otherwise cwd', () => {
@@ -337,6 +388,13 @@ test('extractCodeRefs: skips backticks inside a code fence, skips non-path-shape
   assert.deepEqual(refs, []);
 });
 
+test('docgradMeta: corpus_hash is null without a config, and present with one (backward-compatible signature)', () => {
+  assert.equal(docgradMeta().corpus_hash, null, 'an old one-argument caller must not crash');
+  const cfg = loadConfig(FIXTURE);
+  assert.equal(docgradMeta(undefined, cfg).corpus_hash, corpusHash(cfg));
+  assert.match(docgradMeta(undefined, cfg).corpus_hash, /^[0-9a-f]{8}$/);
+});
+
 test('docgradMeta: returns version and rubric fingerprint; the hash changes when rubric changes', () => {
   const meta = docgradMeta();
   assert.match(meta.version, /^\d+\.\d+\.\d+$/);
@@ -360,7 +418,7 @@ test('docgradMeta: returns version and rubric fingerprint; the hash changes when
 test('docgradMeta: returns null instead of throwing when files cannot be read', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-meta-'));
   try {
-    assert.deepEqual(docgradMeta(tmp), { version: null, rubric_hash: null });
+    assert.deepEqual(docgradMeta(tmp), { version: null, rubric_hash: null, corpus_hash: null });
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -11,6 +11,19 @@ const RETRIEVAL_FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.
 const DOCS_FILES_FIXTURE = fileURLToPath(new URL('./fixtures/docs-files/', import.meta.url));
 const SCRIPT = fileURLToPath(new URL('../scripts/inventory.mjs', import.meta.url));
 
+test('inventory: docgrad carries corpus_hash alongside rubric_hash', () => {
+  const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
+  assert.match(out.docgrad.corpus_hash, /^[0-9a-f]{8}$/);
+  assert.match(out.docgrad.rubric_hash, /^[0-9a-f]{8}$/);
+  // #36: a corpus that genuinely differs must produce a different fingerprint, even though the
+  // rubric — and therefore rubric_hash — is identical.
+  const other = JSON.parse(
+    execFileSync(process.execPath, [SCRIPT, '--root', DOCS_FILES_FIXTURE], { encoding: 'utf8' })
+  );
+  assert.equal(other.docgrad.rubric_hash, out.docgrad.rubric_hash);
+  assert.notEqual(other.docgrad.corpus_hash, out.docgrad.corpus_hash);
+});
+
 test('inventory: entry_cost dedupes symlink aliases (the same real file only counted once)', () => {
   // kdan-bpm's CLAUDE.md -> AGENTS.md: an agent only loads one copy, summing by name would double the fixed cost.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-symlink-'));

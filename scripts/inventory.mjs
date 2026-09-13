@@ -135,7 +135,8 @@ try {
     `${JSON.stringify(
       {
         scope: include.length ? include : null,
-        docgrad: docgradMeta(), // history.jsonl's docgrad_version/rubric_hash come from here
+        // history.jsonl's docgrad_version/rubric_hash/corpus_hash all come from here
+        docgrad: docgradMeta(undefined, config),
         files,
         totals: {
           files: files.length,
