@@ -271,7 +271,7 @@ individual dimension did not).
 <details>
 <summary>Expand</summary>
 
-- **`corpus_hash` — the corpus scope now has a fingerprint of its own** (see CHANGELOG; issue #36)
+- **v1.5.0 — `corpus_hash`: the corpus scope now has a fingerprint of its own** (issue #36)
   (not an anchor change): no threshold and no anchor text moved, and no dimension changed how it is
   measured. What is new is a second fingerprint next to `rubric_hash` in `inventory.mjs`'s `docgrad`
   block, written into every `history.jsonl` line by improve (see [improve.md](improve.md) step 5).
@@ -285,7 +285,7 @@ individual dimension did not).
   either side of it is the thing that is incomparable, not one dimension. Rounds recorded before
   this field existed carry no `corpus_hash`: like the other version fields, that is treated as
   unknown and blocks nothing.
-- **Translation to English (see CHANGELOG)** (**anchor text changed; thresholds did not**): the
+- **v1.5.0 — translated to English** (**anchor text changed; thresholds did not**): the
   whole file was translated from Traditional Chinese to English. What survived unchanged: every
   numeric threshold (`≤ 10,000`, `≥90%`, `<50%`, the tier lists) and the dimension order that
   breaks ties. What did not: the qualitative anchor text itself, which is now different prose.
@@ -298,7 +298,7 @@ individual dimension did not).
   A structural hash — over the thresholds and the anchor ordering rather than the file bytes —
   would tell translations apart from real rubric changes and remove this whole class of false
   breakpoint. It is not implemented; see the repo's open issues.
-- **`correctness_sample` now means new draws per round, and the empty-sample case is defined**
+- **v1.5.0 — `correctness_sample` now means new draws per round, and the empty-sample case is defined**
   (see CHANGELOG; issue #37) (not an anchor change): the ★1–★5 thresholds (pass rate <50% / 50–79% /
   ≥80% / ≥90% / all pass) are unchanged word for word. Two things changed underneath them. First,
   what the number means: it used to be the *total* claims verified in a round, with re-verification

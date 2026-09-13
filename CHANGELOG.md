@@ -5,9 +5,11 @@ For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](doc
 
 ## 1.5.0 — 2026-09-13
 
-The repository's working language becomes English, and `case-studies/` is added. **No threshold and
-no dimension changed**; `rubric_hash` does change, and `report` will draw one comparability break at
-this version. Read the next paragraph before deciding whether that break matters to you.
+The repository's working language becomes English, `case-studies/` is added, and five measurement
+defects are fixed (#35-#39). **No ★1-★5 threshold moved and the set of dimensions is unchanged**, but
+`reference/rubric.md` did change in substance as well as in language, so `rubric_hash` moves and
+`report` draws a comparability break here. A second break signal, `corpus_hash`, is introduced. Read
+the comparability entry below before deciding what either break means for your history.
 
 - **Changed (language) the whole repo is now English**: `SKILL.md`, all five files under
   `reference/`, `docs/design.md`, `docs/how-to.md`, `evals/` prompts and grader criteria, this
@@ -22,12 +24,14 @@ this version. Read the next paragraph before deciding whether that break matters
     silently invalidate the baselines that make the evals meaningful.
   - **Machine-readable strings that tests assert on** (`note` fields, thrown-error text) were
     translated together with their assertions, in the same change. 71/71 unit tests pass.
-- **Changed (comparability) `rubric_hash` f46f90cc → 8b3de362**, because `reference/rubric.md` was
-  translated. What survived unchanged: every numeric threshold and the dimension order that breaks
-  ties. What did not: the qualitative anchor text, which is now different prose. That distinction is
-  the whole point — the qualitative anchors *are* the ruler that a model reads, and "same meaning in
-  another language" is an assertion nobody can mechanically check, so this is recorded as a **real**
-  break rather than papered over with a hash alias. Consequences:
+- **Changed (comparability) `rubric_hash` f46f90cc → 21e957e5.** Three things moved it, and they are
+  not equally serious. (1) The file was translated, so the qualitative anchor text is now different
+  prose. (2) #37 changed what `correctness_sample` means and added a rule for an unmeasurable
+  correctness dimension. (3) #35's evidence about the pollution surface was added under Economy. What
+  survived untouched: **every numeric threshold, every ★1-★5 band, and the dimension order that
+  breaks ties**. On (1) the honest position is that the qualitative anchors *are* the ruler a model
+  reads, and "the same meaning in another language" is an assertion nobody can mechanically check —
+  so this is recorded as a **real** break rather than papered over with a hash alias. Consequences:
   - **Mechanical dimensions are unaffected**: linkage, economy, and the mechanical part of freshness
     are computed by scripts, and no model reads the rubric to produce them. Scores across this
     version are directly comparable.
@@ -51,6 +55,76 @@ this version. Read the next paragraph before deciding whether that break matters
 - **Added (README) agent-executable install and update instructions**: blocks you can paste into any
   Claude Code session to have the agent install, update, or go from zero to a first scorecard, plus
   docgrad's own always-on and on-invoke token cost as reported by `claude plugin details docgrad`.
+- **Fixed (#39) `links.mjs` reported `orphans: []` when it had not computed orphans at all.**
+  `reachable_ratio` correctly returned `null` under the same condition; `orphans` returned a value
+  indistinguishable from "computed, and there are none". Measured on `tj/commander.js`: all seven of
+  its documents were mutually unreachable, `index_file` was unset, and the JSON said zero orphans.
+  `orphans` is now `null` whenever reachability was not computed — no `index_file`, or a scoped run —
+  which is what `reference/audit.md` already claimed for scoped audits. **This changes the output
+  type**: anything reading `orphans.length` must handle `null`. `templates/docs-gate.mjs` now treats
+  "not computed" as its own violation rather than a silent pass.
+- **Fixed (#38) `retrieval.mjs` counted entry files twice in `marginal_tokens`** when an entry file
+  also sat on the index chain, and again when the same path was listed twice in `entry_files`. Every
+  file is now counted once, which is what `reference/rubric.md` already specified — the code was
+  wrong, not the spec. Report-only: **no star rating changes**, but scenarios whose entry file is
+  reachable from the index will report a lower `marginal_tokens` than v1.4.0 did. `max_depth` was
+  examined and left alone; it is a per-document maximum with no summation, so it could not
+  double-count.
+- **Fixed (#38) misconfigured fields failed silently.** `docs_files: PRODUCT.md` — a scalar where a
+  list belongs — made `for…of` iterate the string character by character, every character failed
+  `existsSync`, and **no files were collected with no error raised**; the only symptom was that
+  `files_total` did not move. All list fields (`docs_dirs`, `docs_files`, `entry_files`, `exclude`,
+  `src_dirs`, `scenarios`), the new boolean, and single-path fields (`index_file`) now throw an error
+  that names the field and shows the correct form. `index_file: null` remains a legitimate answer; a
+  key with nothing after the colon does not, because that parses as an empty mapping rather than as
+  null. **Repos that have been quietly collecting nothing will now fail loudly** — that is the point.
+- **Fixed (#37) the claim ledger's coverage had a hard ceiling, and worse documentation sampled
+  less.** The old rule topped the round up to `correctness_sample` *total* verifications, so
+  re-verification crowded out new draws; the fixed point sat at `2 × correctness_sample − 1` distinct
+  claims and one real repo froze at 23 of 335 (≈7%) no matter how many rounds it ran. Because every
+  `fail` was re-verified while only half the passes were, a repo with more failures got *fewer* new
+  samples — the incentive pointed the wrong way. **`correctness_sample` now means new claims drawn
+  per round, not claims verified per round.** A round verifies: every outstanding `fail`/`stale` (no
+  cap, so the pass rate stays honest), up to `floor(correctness_sample / 2)` least-recently-verified
+  passes, plus `correctness_sample` new draws that re-verification can no longer reduce. Coverage now
+  grows by `correctness_sample` every round without a ceiling. **Comparability**: no threshold moved,
+  but old pass rates were increasingly dominated by claims already known to be correct, so they read
+  high — the more so the larger the ledger. Treat a pre-change ★4 as no stronger than a post-change
+  ★4, never the reverse; coverage *trajectories* across this change are not comparable at all.
+- **Added (#37) a rule for a correctness dimension that cannot be measured.** Every correctness anchor
+  is phrased as a pass rate, and a pass rate over zero claims is undefined — which is the normal case
+  for a library whose documentation describes an API rather than file paths. Four independent runs on
+  the same fixture rated it ★3, ★3, ★1 and ★2, each defensibly. Correctness is now reported as
+  `n/a (not measurable)`, recorded as `null` in `history.jsonl`, counted as met for targets and
+  removed from the loop's working set — the same handling as a design ceiling, for a different
+  reason. The report must say what to do about it: the corpus needs claims anchored to real code
+  coordinates, which is completeness and placement work, not correctness work.
+- **Added (#36) `corpus_hash`**, alongside `rubric_hash` in every `inventory.mjs` run and in each
+  `history.jsonl` round. Changing `docs_dirs`, `docs_files`, `entry_files`, `exclude`, `index_file`
+  or `exclude_untracked` moves `files_total`, `claims_total`, the freshness denominator and the
+  pollution denominator at once — every score across that round becomes incomparable while
+  `rubric_hash` does not move a character. Until now the only defence was a hand-written line in
+  `history.jsonl`'s `notes`, and a hand-written record is exactly what docgrad marks other repos down
+  for. `report` now draws a break on this field too. Rounds recorded before this version carry no
+  `corpus_hash` and are treated as unknown, which does not block anything.
+- **Added (#35) visibility for the pollution surface's irreproducibility, and an opt-in fix.** The
+  pollution ratio is a **rated** input, and it is computed by walking the filesystem rather than
+  asking git — so an untracked local draft inside an excluded directory changes a star rating.
+  Measured on one repo at a single commit: ratio 0.1066 in a working checkout against 0.0517 in a
+  clean worktree, with the `pollution_max: 0.1` downgrade threshold sitting between them. Two people
+  can rate the same commit differently, and nothing in the output said why. Now: `inventory.mjs`
+  reports an `untracked` block (count, tokens, paths — all `null` rather than zero when git is
+  unavailable), `pollution` carries a `note` whenever a collected file is untracked, and
+  `.docgrad.yml` accepts `exclude_untracked` to measure the clean-checkout corpus instead.
+  **The default is `false`, so no existing rating changes** — a silent change to everyone's economy
+  star is precisely the failure this tool exists to catch. Untracked files are detected as the
+  complement of `git ls-files`, deliberately **not** via `--exclude-standard`, which would have
+  filtered out the gitignored draft that motivated the whole issue.
+- **Known, not fixed**: `exclude` still cannot distinguish "WIP I am ashamed of" from "content I
+  deliberately scoped out of this run". On `tj/commander.js`, scoping out translated mirrors charged
+  40.6% pollution and capped economy at ★3 while the fixed cost was a perfect 0 — the one dimension
+  the convergence loop could not move. That needs a second field and a rubric decision about what the
+  pollution surface is actually measuring; it is not addressed here.
 
 ## 1.4.0 — 2026-09-13
 
