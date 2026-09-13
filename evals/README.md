@@ -54,12 +54,20 @@ claude plugin eval . --runs 5
 
 ## Current status: run by hand, not yet harnessed
 
-`claude plugin eval` still reports **early access** locally and can't be run:
+`claude plugin eval` still reports **early access** on the machine these were written on, and exits 1:
 
 ```
 $ claude plugin eval .
 `plugin eval` is currently in early access
 ```
+
+**That message means the CLI build predates the command's general availability — it is not an
+entitlement waiting to be granted**, which is how this file and `docs/how-to.md` both described it
+until v1.7.0. The remedy is `claude update` and a fresh session. The machine above is on a Homebrew
+install whose `claude-code` cask trails GA, so `claude update` reports "up to date" and changes
+nothing; the newer channel is the `claude-code@latest` cask. Getting this wrong cost real time: the
+suite sat unrun for a release cycle while the recorded reason pointed at Anthropic rather than at a
+version number.
 
 So all three cases were **executed by hand instead**, with their `prompt.md` text unchanged and each
 output scored against its `graders/criteria.md`: three fixtures x two language arms (the English

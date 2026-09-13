@@ -46,7 +46,11 @@ claude plugin eval . --runs 5
 
 `--runs` isn't about running multiple times and taking the mode: **the distribution of star ratings is itself the metric**. If the same fixture comes out ★2/★2/★3, that means there's still slack there, and it should be tracked as a defect.
 
-After changing a rubric anchor, the audit sampling flow, or the judgment semantics of any script, **this must run before release**. `claude plugin eval` is currently early access; until access is granted, the cases can only stay in a "written, not yet run" state — don't fill in scores that were never actually run in any report.
+After changing a rubric anchor, the audit sampling flow, or the judgment semantics of any script, **this must run before release**.
+
+If `claude plugin eval` answers `` `plugin eval` is currently in early access ``, that is **a stale CLI build, not a pending entitlement** — the [official troubleshooting](https://code.claude.com/docs/en/plugin-evals) says to run `claude update` and retry in a fresh session. On a Homebrew install `claude update` can be a no-op while the `claude-code` cask trails GA; `claude-code@latest` is the newer channel. (A different message, `` `plugin eval` is currently unavailable ``, means Anthropic switched it off server-side and nothing local helps.) Until v1.7.0 this file described the early-access message as access awaiting a grant, which sent anyone hitting it looking for the wrong remedy.
+
+Until it does run, the cases stay in a "written, not yet run" state — **don't fill in scores that were never actually run**, in any report, CHANGELOG or PR.
 
 ## Cut a release
 

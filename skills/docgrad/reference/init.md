@@ -35,9 +35,11 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
      defaults — and dropping economy from ★3 to ★1), and [audit.md](audit.md) §Economy will find `entry_cost.files` doesn't match reality and **log a
      separate** deduction. The reverse (putting a truly always-loaded file into `docs_files`) underreports fixed cost, which is
      equally false.
-   - **Files only**: listing a directory is a **hard error** — every script exits 1 with
+   - **Files only**: listing a directory is a **hard error** — every script that reaches corpus collection exits 1 with
      `docs_files may only list a single file, but <path> is a directory — put the whole directory in docs_dirs instead`.
-     A nonexistent file is a different case and *is* silently skipped. Files already scanned under `docs_dirs` don't need
+     A nonexistent file is a different case and *is* silently skipped. (`coverage.mjs` with `src_dirs` unset is the one
+     exception, and not a real one: it returns its "cannot measure" note and exits 0 before it ever collects the corpus, so
+     it never reads the bad field. Set `src_dirs` and it fails like the rest.) Files already scanned under `docs_dirs` don't need
      to be listed again (duplicates count once anyway).
    - **Not a reachability root**: it is subject to orphan detection like a regular document — some document must link to it, or
      linkage will log an orphan. This is deliberate — if a conditional document can't be reached by a link, the agent can only
