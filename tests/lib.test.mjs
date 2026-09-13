@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS } from '../scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored } from '../scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -659,6 +659,123 @@ test('claimHash: whitespace is normalised but markup and case are not (#41)', ()
   assert.notEqual(claimHash('routing lives in `src/router.ts`.'), base, 'case is not folded');
   assert.notEqual(claimHash('Routing lives in **`src/router.ts`**.'), base, 'markup is not stripped');
   assert.notEqual(claimHash('Routing lives in `src/routes.ts`.'), base, 'an edited claim is a new claim');
+});
+
+// #40: library documentation describes an API, not a file tree. Measured on tj/commander.js,
+// path-shaped matching found a claim on exactly zero lines.
+function apiRepo() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-api-'));
+  fs.mkdirSync(path.join(tmp, 'src'));
+  fs.writeFileSync(
+    path.join(tmp, 'src', 'command.js'),
+    'class Command {\n  option() {}\n  opts() {}\n}\nconst program = new Command();\nlet minWidthToWrap = 40;\n'
+  );
+  return tmp;
+}
+
+test('extractClaimLines: API-shaped inline code counts, but only when the symbol exists under src_dirs (#40)', () => {
+  const tmp = apiRepo();
+  try {
+    const { symbols, files_scanned } = buildSrcSymbolIndex(tmp, ['src/']);
+    assert.ok(files_scanned === 1 && symbols.has('option') && symbols.has('program'));
+    const text = [
+      '# Options',
+      '',
+      'Declare an option with `.option()`.',            // member call, leading dot
+      'Read the parsed values with `program.opts()`.',  // member call
+      'Call `opts()` on the command.',                  // bare call
+      'The `.mangle()` helper does not exist here.',    // shape matches, symbol does not exist
+      'Prose about a `sandwich` and a `program`.',      // bare identifiers: never accepted
+      'Wrapping is controlled by `minWidthToWrap`.',    // bare identifier, even though it exists
+      '```',
+      'fenced `.option()` does not count',
+      '```',
+    ].join('\n');
+    const claims = extractClaimLines(text, ['src/'], { symbols });
+    assert.deepEqual(claims.map((c) => c.line), [3, 4, 5]);
+    assert.ok(claims.every((c) => c.refs_path === 0 && c.refs_api === 1 && c.refs === 1));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('extractClaimLines: without a symbol index the API shape is inert, path shapes unchanged (#40)', () => {
+  const text = 'Declare an option with `.option()`, routing lives in `src/router.ts`.';
+  assert.deepEqual(extractClaimLines(text, ['src/']).map((c) => c.line), [1], 'path ref still counts');
+  const [claim] = extractClaimLines(text, ['src/']);
+  assert.equal(claim.refs, 1);
+  assert.equal(claim.refs_api, 0, 'no src_dirs index -> no existence check -> no API refs');
+  assert.deepEqual(extractClaimLines('Declare an option with `.option()`.', []), [], 'inert, not guessing');
+});
+
+test('buildSrcSymbolIndex: src_dirs unset returns null, so the caller can report the degradation (#40)', () => {
+  assert.equal(buildSrcSymbolIndex(process.cwd(), []), null);
+  assert.equal(buildSrcSymbolIndex(process.cwd(), undefined), null);
+  assert.equal(buildSrcSymbolIndex(process.cwd(), ['   ']), null, 'whitespace-only entries do not count');
+});
+
+test('extractClaimLines: a paren-less dotted span already counted as a path ref is not double counted (#40)', () => {
+  const tmp = apiRepo();
+  try {
+    const { symbols } = buildSrcSymbolIndex(tmp, ['src/']);
+    // `program.opts` has a basename-shaped tail, so extractCodeRefs already emits it. Counting it
+    // a second time would inflate refs and silently reorder the candidate list.
+    const [claim] = extractClaimLines('Use `program.opts` directly.', ['src/'], { symbols });
+    assert.equal(claim.refs, 1);
+    assert.equal(claim.refs_path, 1);
+    assert.equal(claim.refs_api, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('isDocgradAuthored: a docs(docgrad) subject is true, anything else false, no subject null (#40)', () => {
+  assert.equal(isDocgradAuthored('docs(docgrad): 第 2 輪收斂 — 完整性 ★3→★4'), true);
+  assert.equal(isDocgradAuthored('docs(docgrad) : spaced colon'), true);
+  assert.equal(isDocgradAuthored('docs: hand-written'), false);
+  assert.equal(isDocgradAuthored('feat(docgrad): a code change'), false);
+  assert.equal(isDocgradAuthored(undefined), null, 'unknown is never false');
+  assert.equal(isDocgradAuthored(null), null);
+});
+
+test('gitAddCommitSubjects: reports the oldest adding commit per path, null outside a git tree (#40)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-added-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'hand.md'), '# hand\n');
+    gitInit(tmp); // commits everything on disk with subject "fixture"
+    fs.writeFileSync(path.join(tmp, 'docs', 'written.md'), '# written\n');
+    const env = {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
+      GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com',
+      GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+    };
+    execFileSync('git', ['add', '-A'], { cwd: tmp, env });
+    execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'docs(docgrad): round 2'], { cwd: tmp, env });
+    // edit the hand-written file afterwards: the *adding* commit must still be the one reported
+    fs.writeFileSync(path.join(tmp, 'docs', 'hand.md'), '# hand\n\nmore\n');
+    execFileSync('git', ['add', '-A'], { cwd: tmp, env });
+    execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'docs(docgrad): round 3'], { cwd: tmp, env });
+
+    const subjects = gitAddCommitSubjects(tmp, ['docs/hand.md', 'docs/written.md']);
+    assert.equal(subjects.get('docs/hand.md'), 'fixture');
+    assert.equal(subjects.get('docs/written.md'), 'docs(docgrad): round 2');
+    assert.equal(isDocgradAuthored(subjects.get('docs/hand.md')), false);
+    assert.equal(isDocgradAuthored(subjects.get('docs/written.md')), true);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('gitAddCommitSubjects: outside a git work tree returns null, never an empty answer (#40)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-nogit-added-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'a.md'), '# a\n');
+    assert.equal(gitAddCommitSubjects(tmp, ['a.md']), null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('rankClaimCandidates: more refs comes first, ties broken by path then line (stable, reproducible)', () => {

@@ -7,6 +7,8 @@ import {
   loadConfig, collectFiles, estimateTokens, parseArgs, fail,
   extractCodeRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
   gitTrackedFiles, GIT_UNAVAILABLE_NOTE,
+  buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, AUTHORSHIP_UNAVAILABLE_NOTE,
+  MAX_SRC_SYMBOL_FILE_BYTES,
 } from './lib.mjs';
 
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+\.)\s+/;
@@ -100,12 +102,12 @@ function buildStructure(text, config) {
   };
 }
 
-function measure(rootDir, relPath, config) {
+function measure(rootDir, relPath, config, symbols) {
   const text = fs.readFileSync(path.join(rootDir, relPath), 'utf8');
   const structure = buildStructure(text, config);
   const ruleLines = structure._ruleLines;
   delete structure._ruleLines;
-  const claimLines = extractClaimLines(text, config.src_dirs);
+  const claimLines = extractClaimLines(text, config.src_dirs, { symbols });
   return {
     path: relPath,
     bytes: Buffer.byteLength(text),
@@ -124,17 +126,45 @@ try {
   // One git call, shared between collectFiles (exclude_untracked) and the untracked report below.
   const tracked = gitTrackedFiles(root);
   const { included, excluded } = collectFiles(root, config, { include, tracked });
-  const filesRaw = included.map((p) => measure(root, p, config));
-  const excludedFiles = excluded.map((p) => measure(root, p, config));
+  // One pass over src_dirs, reused by every file: the existence check that keeps API-shaped
+  // inline code a signal rather than noise. null when src_dirs is unset -> the extension is inert
+  // and claim_population.api_matching reports that (#40).
+  const symbolIndex = buildSrcSymbolIndex(root, config.src_dirs);
+  const symbols = symbolIndex ? symbolIndex.symbols : null;
+  const filesRaw = included.map((p) => measure(root, p, config, symbols));
+  const excludedFiles = excluded.map((p) => measure(root, p, config, symbols));
+
+  // Who wrote each document: the subject of the commit that added it. `docs(docgrad):` means
+  // docgrad produced the file during a convergence round, so a claim drawn from it is docgrad
+  // checking its own prose. Map|null — null means git could not answer, which is not "false".
+  const addSubjects = gitAddCommitSubjects(root, included);
+  const authorshipOf = (p) => (addSubjects === null ? null : isDocgradAuthored(addSubjects.get(p)));
+  for (const f of filesRaw) f.docgrad_authored = authorshipOf(f.path);
+
   const rulesTotal = filesRaw.reduce((s, f) => s + f._ruleLines.length, 0);
   const rulesAnchored = filesRaw.reduce((s, f) => s + f._ruleLines.filter((r) => r.anchored).length, 0);
   const claimsTotal = filesRaw.reduce((s2, f) => s2 + f._claimLines.length, 0);
+  // Claims that exist only because of the API matcher (no path-shaped ref on the line at all).
+  // On a library repo this equals claims_total; on docgrad itself it is the size of the addition.
+  const claimsApiOnly = filesRaw.reduce(
+    (s2, f) => s2 + f._claimLines.filter((c) => c.refs_path === 0).length,
+    0
+  );
+  // Aggregated over the **whole population**, not the capped candidate list, so the report can
+  // say "N% of this round's claim population comes from documents docgrad wrote" without the cap
+  // distorting the share.
+  const claimsDocgradAuthored =
+    addSubjects === null
+      ? null
+      : filesRaw.reduce((s2, f) => s2 + (f.docgrad_authored ? f._claimLines.length : 0), 0);
   // A stably-ordered candidate list: the order produced from the same corpus is always the same,
   // so claim-ledger sampling is reproducible. Only the first 60 entries are emitted — the
   // population size is totals.claims_total; this is the pick order for sampling.
   const claimCandidates = rankClaimCandidates(
     filesRaw.map((f) => ({ path: f.path, claims: f._claimLines }))
-  ).slice(0, 60);
+  )
+    .slice(0, 60)
+    .map((c) => ({ ...c, docgrad_authored: authorshipOf(c.path) }));
   const files = filesRaw.map(({ _ruleLines, _claimLines, ...f }) => f);
   const totalTokens = files.reduce((s, f) => s + f.tokens_est, 0);
   const excludedTokens = excludedFiles.reduce((s, f) => s + f.tokens_est, 0);
@@ -173,8 +203,38 @@ try {
           bytes: files.reduce((s, f) => s + f.bytes, 0),
           tokens_est: totalTokens,
           claims_total: claimsTotal,
+          // How much of the population the API matcher is carrying (#40). Equal to claims_total
+          // on a library repo, 0 when src_dirs is unset.
+          claims_api_only: claimsApiOnly,
+          // How much of it comes from documents docgrad itself wrote during a convergence round.
+          // null, never 0, when git cannot answer.
+          claims_docgrad_authored: claimsDocgradAuthored,
+          claims_docgrad_authored_ratio:
+            claimsDocgradAuthored === null || claimsTotal === 0
+              ? null
+              : Number((claimsDocgradAuthored / claimsTotal).toFixed(4)),
           rules_total: rulesTotal,
           rules_anchored_ratio: rulesTotal ? Number((rulesAnchored / rulesTotal).toFixed(4)) : 0,
+        },
+        // Where this round's claim population came from, in words. The numbers live in totals;
+        // this block says how they were obtained and what was degraded.
+        claim_population: {
+          api_matching: symbolIndex ? 'enabled' : 'disabled',
+          src_symbols: symbolIndex ? symbolIndex.symbols.size : null,
+          src_files_scanned: symbolIndex ? symbolIndex.files_scanned : null,
+          authorship: addSubjects === null ? 'unavailable' : 'git',
+          notes: [
+            ...(symbolIndex
+              ? []
+              : ['src_dirs is unset, so API-shaped inline code (`foo()`, `obj.method()`, `a.b`) cannot be existence-checked and contributes no claim candidates; on a library repo, whose documentation describes an API rather than a file tree, this can leave claims_total at 0 and the correctness dimension with no mechanical basis — set src_dirs in .docgrad.yml']),
+            ...(symbolIndex && symbolIndex.files_skipped
+              ? [`${symbolIndex.files_skipped} file(s) under src_dirs were skipped when building the symbol index (larger than ${Math.round(MAX_SRC_SYMBOL_FILE_BYTES / 1024)} KB, binary, or unreadable), so an identifier that only appears in one of them will not pass the existence check`]
+              : []),
+            ...(addSubjects === null ? [AUTHORSHIP_UNAVAILABLE_NOTE] : []),
+            ...(claimsDocgradAuthored
+              ? [`${Math.round((claimsDocgradAuthored / claimsTotal) * 100)}% of this round's claim population comes from documents docgrad itself wrote (their add commit's subject starts with "docs(docgrad):"); a correctness score built on the tool's own prose is not worthless, but it does not sample the repo's pre-existing documentation debt`]
+              : []),
+          ],
         },
         claim_candidates: claimCandidates,
         entry_cost: (() => {
