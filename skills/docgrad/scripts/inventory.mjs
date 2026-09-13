@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   loadConfig, collectFiles, estimateTokens, parseArgs, fail,
-  extractCodeRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
+  extractCodeRefs, extractApiRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
   gitTrackedFiles, GIT_UNAVAILABLE_NOTE, matchesPathPrefix,
   buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, AUTHORSHIP_UNAVAILABLE_NOTE,
   MAX_SRC_SYMBOL_FILE_BYTES, SHIPPED_TIERS, SHIPPED_POLLUTION_MAX,
@@ -69,8 +69,15 @@ function extractH2Sections(text) {
 
 // A rule line = a list item (an optional leading emoji is fine; the test is just whether it
 // contains the pattern substring) that also contains rules.pattern.
-// anchored = extractCodeRefs can extract coordinates from the line itself.
-function extractRuleLines(text, pattern, srcDirs) {
+//
+// anchored = the line carries code coordinates, using **the same definition as the claim
+// population**: path-shaped inline code, or API-shaped inline code whose every segment exists as a
+// symbol under src_dirs. Until v1.7.0 this counted path shapes only, so a library repo — whose
+// documentation describes an API, not a file tree — scored anchored_ratio 0 by construction, and
+// rubric.md's traceability note ("<0.5 means claims lack verifiable code landing points") fired on
+// repos where every single rule had one. #40 had already fixed exactly that definition for the
+// claim population; this is the same fix in the place that was left behind (#51).
+function extractRuleLines(text, pattern, srcDirs, symbols) {
   const lines = text.split(/\r?\n/);
   let inFence = false;
   const rules = [];
@@ -83,13 +90,15 @@ function extractRuleLines(text, pattern, srcDirs) {
     if (!LIST_ITEM_RE.test(line)) continue;
     if (!line.includes(pattern)) continue;
     const content = line.replace(LIST_ITEM_RE, '').trim();
-    rules.push({ chars: content.length, anchored: extractCodeRefs(line, srcDirs).length > 0 });
+    const anchored =
+      extractCodeRefs(line, srcDirs).length > 0 || extractApiRefs(line, symbols).length > 0;
+    rules.push({ chars: content.length, anchored });
   }
   return rules;
 }
 
-function buildStructure(text, config) {
-  const ruleLines = extractRuleLines(text, config.rules.pattern, config.src_dirs);
+function buildStructure(text, config, symbols) {
+  const ruleLines = extractRuleLines(text, config.rules.pattern, config.src_dirs, symbols);
   return {
     h2: extractH2Sections(text),
     rules: {
@@ -107,7 +116,7 @@ function buildStructure(text, config) {
 
 function measure(rootDir, relPath, config, symbols) {
   const text = fs.readFileSync(path.join(rootDir, relPath), 'utf8');
-  const structure = buildStructure(text, config);
+  const structure = buildStructure(text, config, symbols);
   const ruleLines = structure._ruleLines;
   delete structure._ruleLines;
   const claimLines = extractClaimLines(text, config.src_dirs, { symbols });

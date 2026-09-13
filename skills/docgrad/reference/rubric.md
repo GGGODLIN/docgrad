@@ -347,6 +347,11 @@ economy report. The mechanical basis is `retrieval.mjs` (`code_pointer_ratio` / 
   examples, which may be long) — long rule lines mixed with background narrative force the agent to
   read the whole passage every time to find the one sentence that is actually a MUST, and a low
   anchored ratio means the claims have no verifiable landing point in the code.
+  A coordinate is path-shaped **or** API-shaped, the same definition the claim population uses — so
+  on a library repo, whose rules land on functions rather than files, `anchored_ratio` measures what
+  it claims to. Before v1.7.0 it counted path shapes only, which made this signal fire on exactly
+  the repos where every rule did have a landing point (#51). Like the claim population, the API half
+  is inert when `src_dirs` is unset.
 
 ## Version history and comparability notes
 
@@ -397,6 +402,16 @@ individual dimension did not).
     repo grading itself at 365 days can no longer do so invisibly.
   - `inventory.economy_thresholds` reports the values in force on every run, with `customised` saying whether they are the
     shipped ones. The audit must state the thresholds whenever `customised` is true.
+  - **Two report-only numbers move once in this version and neither carries a star** (issue #51).
+    `structure.rules.anchored_ratio` now counts API-shaped coordinates as well as path-shaped ones,
+    so it rises on any repo that documents an API — on a library repo it was **0 by construction**
+    and the traceability note fired there for the one reason #40 had already retired. And
+    `retrieval.marginal_tokens` now deduplicates entry files on realpath, as `inventory.entry_cost`
+    has all along: a `CLAUDE.md -> AGENTS.md` symlink pair used to be charged twice in every
+    scenario (measured on a fixture: 348 tokens in `entry_cost` against 696 in `marginal_tokens`,
+    exactly double) while this file's Token economy section has always specified each file counted
+    once. Both figures are advisory, so nothing is regraded; a repo with either shape will simply
+    see a step in its trend at this version.
 - **v1.6.0 — the correctness sampling population now includes API-shaped claims, and discloses who wrote it**
   (issues #40, #41) (**not an anchor change**): the ★1–★5 thresholds (pass rate <50% / 50–79% / ≥80% / ≥90% / all pass) are
   unchanged word for word, and no dimension gained or lost a criterion. What changed is **which lines are eligible to be

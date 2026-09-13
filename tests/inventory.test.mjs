@@ -693,3 +693,43 @@ test('inventory: custom thresholds are honoured, flagged, and move thresholds_ha
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// #51: anchored_ratio was left behind when #40 taught the claim population to recognise API-shaped
+// coordinates. A library repo documents an API, not a file tree, so every rule line scored
+// unanchored *by construction* — and rubric.md's traceability note fires below 0.5, i.e. precisely
+// on repos where every rule does have a verifiable landing point.
+test('inventory: a rule line anchored on an API symbol counts as anchored (#51)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-anchored-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.mkdirSync(path.join(tmp, 'src'));
+    fs.writeFileSync(path.join(tmp, 'src/index.js'), 'export function parseAsync(argv) { return argv; }\n');
+    fs.writeFileSync(
+      path.join(tmp, 'docs/README.md'),
+      [
+        '# api',
+        '',
+        '- **MUST** await `parseAsync()` before reading the parsed result.',
+        '- **MUST** keep the callback synchronous.',
+        '',
+      ].join('\n')
+    );
+    const write = (srcDirs) =>
+      fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `docs_dirs: [docs/]\nindex_file: docs/README.md\n${srcDirs}`);
+
+    // With src_dirs set, the API span is guarded by symbol existence and counts.
+    write('src_dirs: [src/]\n');
+    const withSrc = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    const rules = withSrc.files.find((f) => f.path === 'docs/README.md').structure.rules;
+    assert.equal(rules.count, 2, 'both list items are rule lines');
+    assert.equal(rules.anchored_ratio, 0.5, 'the parseAsync() line is anchored, the other is not');
+
+    // Without src_dirs there is no symbol index, so the API shape stays inert — same guard the
+    // claim population uses, and the same degradation, rather than a silent free pass.
+    write('');
+    const withoutSrc = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(withoutSrc.files.find((f) => f.path === 'docs/README.md').structure.rules.anchored_ratio, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

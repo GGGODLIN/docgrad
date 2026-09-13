@@ -175,14 +175,35 @@ try {
     return chain;
   }
 
-  // Entry files are the fixed term of marginal_tokens (always loaded); listing the same file
-  // twice must still cost its tokens only once.
+  // Entry files are the fixed term of marginal_tokens (always loaded); the same file must cost its
+  // tokens only once. "The same file" means the same *file*, not the same spelling: deduplicating
+  // on the config string alone counted `CLAUDE.md -> AGENTS.md` twice, so a symlinked pair inflated
+  // every scenario's marginal_tokens by the whole entry file while inventory.mjs — which has
+  // deduplicated on realpath since the alias fix — charged it once. Measured on a fixture: 348
+  // tokens in entry_cost against 696 in marginal_tokens, exactly double. rubric.md defines
+  // marginal_tokens as counting each file once, so the script was contradicting its own spec and
+  // the other script's number at the same time (#51).
+  // The name list stays a plain string set: it is used further down to strike entry files off a
+  // chain, and chains are keyed by the config's own spellings, not by realpath.
   const entryFiles = [...new Set(config.entry_files)];
-  const entryTokens = entryFiles.reduce((sum, f) => {
-    const abs = path.join(root, f);
-    if (!fs.existsSync(abs)) return sum;
-    return sum + estimateTokens(fs.readFileSync(abs, 'utf8'));
-  }, 0);
+  const entryTokens = (() => {
+    const seen = new Set();
+    let sum = 0;
+    for (const f of config.entry_files) {
+      const abs = path.join(root, f);
+      if (!fs.existsSync(abs)) continue;
+      let key = abs;
+      try {
+        key = fs.realpathSync(abs);
+      } catch {
+        /* unreadable: fall back to the path, better to double-count than to drop a real cost */
+      }
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sum += estimateTokens(fs.readFileSync(abs, 'utf8'));
+    }
+    return sum;
+  })();
 
   // --- scenarios ---------------------------------------------------------------------
   const scenarioPaths = config.scenarios ?? [];
