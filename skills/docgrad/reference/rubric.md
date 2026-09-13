@@ -97,6 +97,14 @@ ascending), plus `correctness_sample` claims that have never entered the ledger.
 never reduces the new draws, so cumulative coverage grows by `correctness_sample` per round until
 the emitted window is exhausted; the ledger accumulates rather than resampling. The pass rate that
 sets the star rating is computed over that whole verified set.
+**The pass rate is a measurement with a rater in it, and the report must show that.** Every ledger
+row carries `borderline`, and the round's borderline count is printed beside the pass rate — because
+a pass rate moves when the documentation changes *and* when the reading changes, and those are not
+the same finding. A `fail`, and any borderline `pass`, also carries a `rationale`: which sentence,
+which code line, why. Without it a later round can re-verify the claim but not the judgement, and
+the judgement is the part that was demonstrably unstable (see [§Version history](#version-history-and-comparability-notes),
+v1.7.0). [audit.md](audit.md) step 4 settles the two recurring boundaries rather than leaving each
+round to re-derive them.
 
 > **The one ceiling that does exist is the emitted window, and it is a config setting, not a
 > property of the repo.** Coverage climbs by `correctness_sample` a round until the ledger holds
@@ -402,6 +410,22 @@ individual dimension did not).
     repo grading itself at 365 days can no longer do so invisibly.
   - `inventory.economy_thresholds` reports the values in force on every run, with `customised` saying whether they are the
     shipped ones. The audit must state the thresholds whenever `customised` is true.
+  - **Correctness pass rates are not comparable across this version** (issue #48). `reference/audit.md` gained two named
+    boundary rules, and one of them can only lower a pass rate: a generalisation adjacent to a structured list is now judged
+    against **every row** of that list, where before it was left to the round's verifier to decide whether such a sentence was
+    a claim about the list or a loose summary above it. The anchors are untouched — the thresholds are still <50% / 50–79% /
+    ≥80% / ≥90% / all pass — but the same documentation can produce a lower pass rate under the new rules, so a drop across
+    this version is **not** evidence the documentation decayed.
+    - **No fingerprint covers this.** `rubric_hash` is computed over *this file only* (`lib.mjs › docgradMeta()`), and the
+      rules live in `audit.md`, so `report` cannot draw the break mechanically the way it does for an anchor change. This
+      entry is the disclosure. Treat the first v1.7.0 round in any repo as a baseline for correctness rather than as a
+      continuation.
+    - The reason the rules exist is the failure they were drawn from: the **same claim over unmodified code** was judged
+      `pass` in one round and `fail` in a later one, both verifiers describing the code correctly and disagreeing only about
+      what the sentence claimed. The ledger recorded the verdicts and not the reasoning, so the change was indistinguishable
+      from documentation rot. Hence the ledger's new `rationale` (mandatory on every `fail` and every borderline `pass`) and
+      `borderline` fields, and the borderline count now printed beside the pass rate. Both are **forward-only**: a
+      pre-v1.7.0 round's borderline count is unrecorded, not zero.
   - **Two report-only numbers move once in this version and neither carries a star** (issue #51).
     `structure.rules.anchored_ratio` now counts API-shaped coordinates as well as path-shaped ones,
     so it rises on any repo that documents an API — on a library repo it was **0 by construction**

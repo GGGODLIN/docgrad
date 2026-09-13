@@ -103,7 +103,8 @@
      when re-verifying an old entry, append a new line (with the new `round`) rather than editing the old line, so you can still see when a given claim broke and when it got fixed:
 
      ```json
-     {"claim_hash": "728d463bc0b4", "round": 3, "doc": "docs/x.md", "line": 75, "claim": "Routing is defined in src/router.ts", "verify": "Read src/router.ts", "result": "pass", "verified_at": "2026-07-12"}
+     {"claim_hash": "728d463bc0b4", "round": 3, "doc": "docs/x.md", "line": 75, "claim": "Routing is defined in src/router.ts", "verify": "Read src/router.ts", "result": "pass", "borderline": false, "verified_at": "2026-07-12"}
+     {"claim_hash": "91ac07f2e5d1", "round": 3, "doc": "docs/y.md", "line": 29, "claim": "each group channel subscribes to INSERT / UPDATE / DELETE", "verify": "Read RealtimeProvider.tsx", "result": "fail", "borderline": true, "rationale": "the 11-row table below :29 has two rows (GroupBalance:107, OikosGroups:116) subscribing to UPDATE only; judged against every row per audit.md boundary rule 1", "verified_at": "2026-07-12"}
      ```
 
      **`claim_hash` is the key. Copy it from `inventory.claim_candidates`; never compute or invent one.** It is a
@@ -124,6 +125,22 @@
      > `claim_candidates` reports, and the claim is recognised as already covered. A row whose text no longer matches any
      > candidate is a claim that was edited or deleted since — leave it in the ledger as history and let the new wording be
      > drawn as the new claim it is. Once migrated, write `claim_hash` on every new row and stop writing `claim_id`.
+
+     > **`borderline` and `rationale` (added v1.7.0) are forward-only.** `borderline` is written on every row;
+     > `rationale` is mandatory on every `fail` and every borderline `pass` (see [audit.md](audit.md) step 4). Rows written
+     > before this version have neither, and are **not** to be back-filled — a rationale reconstructed now would be this
+     > round's reasoning wearing an older round's date, which is worse than an honest gap. Treat a missing `borderline` as
+     > unknown rather than as `false`: the borderline count for a pre-v1.7.0 round is not zero, it is unrecorded, and a
+     > report comparing across the boundary has to say so.
+
+     **Reading a pass-rate change.** A pass rate is `pass ÷ verified`, and both a documentation change and a verifier
+     change move it. Before attributing a move to the documentation, compare the borderline counts on the two rounds: a
+     drop from 8/8 to 7/9 alongside a rise from 0 to 3 borderline rows is at least as likely to be a stricter reading as
+     a decay. Measured case: the identical claim over unmodified code was `pass` in round 9 and `fail` in round 12,
+     because the two verifiers drew the generalisation-versus-list boundary differently — and nothing in the ledger or the
+     scorecard recorded that this had happened. When the borderline counts differ materially, say so in the round's notes
+     instead of reporting the delta as a documentation outcome; `loop` uses this dimension's pass rate to decide whether to
+     keep working on it, so an unstable verdict makes the stopping point unstable too.
    - Overwrite `.docgrad/scorecard-latest.md` (the full scorecard text from audit.md).
    - **Before committing the scorecard, check `inventory.untracked.count`.** Non-zero means the pollution surface — and
      therefore the economy rating — was measured against files that exist only on this machine, so the numbers you are about

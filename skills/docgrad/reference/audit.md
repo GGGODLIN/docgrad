@@ -137,9 +137,42 @@ Steps 1–3 below build those three parts in order.
    Record into the ledger table. **`claim_hash` is the key; `file:line` is a locating column, not an identity** — copy both
    straight out of `claim_candidates`, and never invent a hash of your own:
 
-   | # | claim_hash | file:line | claim | verification method | result |
-   |---|---|---|---|---|---|
-   | 1 | `728d463bc0b4` | docs/x.md:75 | "Routing is defined in `src/router.ts`" | Read src/router.ts | pass / fail / stale |
+   | # | claim_hash | file:line | claim | verification method | result | borderline | rationale |
+   |---|---|---|---|---|---|---|---|
+   | 1 | `728d463bc0b4` | docs/x.md:75 | "Routing is defined in `src/router.ts`" | Read src/router.ts | pass / fail / stale | no / yes | required for every `fail` and every borderline `pass` |
+
+   **`rationale` is mandatory on every `fail` and on every borderline `pass`**: which sentence, which
+   code line, and why that adds up to the verdict. One or two sentences. The ledger already records
+   *what was checked* (`verify`); without `rationale` it does not record *why this result*, so the
+   next round can re-verify the claim but cannot re-verify the **judgement** — and a judgement is
+   exactly what turned out to be unstable (see the boundary rules below).
+
+   **`borderline: yes` means the verdict depended on reading a rule, not on reading the code.** Mark
+   it whenever you could write a defensible argument for the other verdict — including the case where
+   you applied one of the boundary rules below and the rule is the only reason the result came out
+   the way it did. It is not a confession of sloppiness and it costs the repo nothing: it is a
+   discount factor the reader needs in order to interpret a pass-rate change.
+
+   #### Boundary rules — apply these, don't re-derive them each round
+
+   The same claim, the same unmodified code, and two rounds reached opposite verdicts (#48). Both
+   verifiers described the code correctly; they disagreed about what a sentence was claiming. These
+   two shapes recur, so they are settled here rather than left to each round's judgement:
+
+   1. **A generalisation adjacent to a structured list is judged against every row of that list.**
+      When a sentence introduces or summarises a table or list — "subscribes to each table's
+      INSERT / UPDATE / DELETE", followed by an 11-row table in which two rows subscribe to `UPDATE`
+      only — the sentence is **`fail`**, not "a loose summary in tolerable range". A summary sitting
+      directly above the thing it summarises is read as a claim about it; that is the whole reason it
+      is there. Mark it `borderline: yes` and say in `rationale` which rows contradict it.
+   2. **An incomplete enumeration is not by itself a misstatement, but it is always borderline.**
+      A list that names four of five call sites is not *wrong* about the four. Record `pass`,
+      `borderline: yes`, and name the omission in `rationale` — so a later round can see the
+      omission was noticed and dispositioned, not missed. It flips to `fail` when the document
+      claims completeness ("the only place", "all of the", "exhaustively").
+
+   Where these rules leave real doubt, `rubric.md`'s scoring principle 4 still governs: **round down**.
+   These rules narrow what counts as doubt; they do not replace the tie-break.
 
    `claim_hash` is 12 hex characters derived from the claim's text with whitespace collapsed and the ends trimmed — nothing
    else is normalised, so a claim that **moves** keeps its hash and a claim that is **edited** gets a new one. The second half
@@ -149,6 +182,14 @@ Steps 1–3 below build those three parts in order.
 5. **Calculate two numbers, and put both in the report**:
    - **Pass rate** = pass ÷ total verified this round (all three parts of the verified set: outstanding fail/stale, re-verified passes, new draws)
      → assign a star rating against the rubric's correctness anchors.
+   - **Borderline count** = rows marked `borderline: yes` this round, written **on the same line as
+     the pass rate**: `pass rate 8/9, 2 borderline`. Without it a pass-rate move cannot be read.
+     Measured case: the same claim over unmodified code was `pass` in one round and `fail` in a later
+     one, because the two rounds' verifiers drew the generalisation-versus-list boundary differently.
+     The ledger recorded only the verdicts, so the drop looked exactly like documentation rotting.
+     A round with a high borderline share has a pass rate that is partly a report about its own
+     verifier, and the reader has to be able to see that. `0 borderline` is written out too — the
+     absence is information, and a field that appears only when inconvenient is not a disclosure.
    - **Cumulative coverage** = distinct `claim_hash` values in the ledger ÷ `totals.claims_total` → write it in the report as
      `Correctness ★4 (pass rate 8/8, cumulative coverage 23/68 = 34%)`.
      **A star rating alone means nothing** — the reader needs to see the sample size it's built on.
@@ -294,7 +335,7 @@ have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_
 | Dimension | Rating | Target | Main deductions |
 |---|---|---|---|
 | Completeness | ★x | ★y | … |
-| Correctness | ★x | ★y | …(pass rate n/N, cumulative coverage m/total = x%, docgrad-authored share x%; `n/a` when the corpus has 0 verifiable claims; add "API matching disabled — `src_dirs` unset" when `claim_population.api_matching` says so) |
+| Correctness | ★x | ★y | …(pass rate n/N, **N borderline**, cumulative coverage m/total = x%, docgrad-authored share x%; `n/a` when the corpus has 0 verifiable claims; add "API matching disabled — `src_dirs` unset" when `claim_population.api_matching` says so) |
 | Freshness | ★x | ★y | …(date concentration x%, call it out if high) |
 | Linkage | ★x | ★y | … |
 | Consistency | ★x | ★y | …(deductions tagged `[contradiction]`/`[duplication]`/`[placement]`) |
