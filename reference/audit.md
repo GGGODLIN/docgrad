@@ -61,7 +61,7 @@ every outstanding fail/stale          (no cap)
 Steps 1–3 below build those three parts in order.
 
 1. **Re-verify every outstanding `fail` and `stale` entry — no cap.** If the target repo has `.docgrad/ledger.jsonl` → read it in and
-   **collapse it to the latest row per `claim_id` first** (the highest `round`; the ledger is append-only, so an old `fail` row that a later
+   **collapse it to the latest row per `claim_hash` first** (the highest `round`; the ledger is append-only, so an old `fail` row that a later
    round already recorded as `pass` is *not* outstanding). Every claim whose latest row is `fail` or `stale` gets re-verified, however many there are.
    Fixed ones get recorded as `pass`; still-wrong ones keep their original verdict and go into the deductions list.
    Why no cap: these entries decide whether the round's pass rate is honest. Letting them drop out of the denominator would make a repo's
@@ -71,12 +71,14 @@ Steps 1–3 below build those three parts in order.
    Re-verifying a claim that already passed is worth less than sampling one that has never been checked, and it is the growing pass set
    that used to crowd out new draws. Capping it at half a sample keeps a fixed, small cost no matter how large the ledger grows.
    **"Least recently verified" is read off the collapsed ledger's `round` field**, ascending; ties break on `verified_at` ascending, then on
-   `claim_id` ascending. (`round` is the primary key because it is monotonic within a repo and stays unambiguous when two rounds run on the
-   same date; `verified_at` alone cannot separate them. The `claim_id` tiebreak is what makes two independent runs pick the same set.)
+   `claim_hash` ascending. (`round` is the primary key because it is monotonic within a repo and stays unambiguous when two rounds run on the
+   same date; `verified_at` alone cannot separate them. The `claim_hash` tiebreak is what makes two independent runs pick the same set.)
    Take the first `min(floor(correctness_sample / 2), number of pass entries)` of that ordering.
 3. **Draw `correctness_sample` new claims** — and do not let steps 1 and 2 reduce that number.
    Consume `inventory.mjs`'s `claim_candidates` (already stably sorted by "ref count → path → line",
-   same order every time for the same corpus). Take candidates that **haven't entered the ledger yet**, front to back, until
+   same order every time for the same corpus). **"Already in the ledger" is decided by `claim_hash`, not by `path:line`** — a
+   candidate whose hash is in the ledger has been verified before, wherever its line number has drifted to since.
+   Take candidates that **haven't entered the ledger yet**, front to back, until
    you have `correctness_sample` of them; at most 2 per document (skip any over that quota and keep taking from further down).
    Cumulative coverage therefore grows by `correctness_sample` every round, with no ceiling, until the pool runs out.
    **When fewer than `correctness_sample` unseen candidates remain, the round draws what exists — possibly zero — and the report states the shortfall**,
@@ -84,25 +86,70 @@ Steps 1–3 below build those three parts in order.
    candidates all sit in documents that already hit this round's 2-per-document quota. Write it as
    `drew 7 of 12 (pool exhausted: 335/335 candidates already in the ledger)`. A round with no new draws is not an error — it means the corpus is
    fully covered; steps 1 and 2 still run and the pass rate is still computed over whatever was verified.
-   > `claim_candidates`'s population = `totals.claims_total` (non-heading lines outside fences that have a code coordinate).
+   > `claim_candidates`'s population = `totals.claims_total`: non-heading lines outside fences that carry a **code
+   > coordinate**, in either of two shapes —
+   > - **path-shaped** inline code (`lib/foo.js`, `src/a.ts › parse()`), counted per candidate as `refs_path`;
+   > - **API-shaped** inline code — a call (`foo()`, `.option()`, `program.opts()`), or a dotted symbol with no parens —
+   >   counted as `refs_api`, and admitted **only** when every segment of the span exists as an identifier somewhere under
+   >   `src_dirs`. That existence check is the entire guard against matching ordinary prose, so it is not optional and it
+   >   cannot be approximated. Two shapes are deliberately rejected even when the existence check would pass: a **bare
+   >   identifier** with neither dot nor parens (`minWidthToWrap`) — the symbol set contains `data`, `name`, `value`, and
+   >   inline code around those words is ordinary prose — and a **paren-less dotted span whose final segment is a short
+   >   run of alphanumerics** (`program.opts`, `lib.mjs`, `config.freshness`), which is already path-ref territory and
+   >   would otherwise be counted twice. In practice that second rule leaves the paren-less shape admitting only long or
+   >   underscore-bearing tails (`program.optsWithGlobals`, `obj.my_method`); if a claim about a short dotted symbol
+   >   matters, write it next to a call and it will be drawn.
+   >
    > Purely descriptive paragraphs have no coordinate to sample and were never meant to enter the ledger — consistent with the old
    > "don't sample pure narrative" rule, the only difference being the script decides it now instead of re-interpreting it every round.
+   >
+   > **Read `claim_population` before you read `claims_total`, and state what it says.** `api_matching: "disabled"` means
+   > `src_dirs` is unset, so the API shape contributed **nothing** — on a library repo, whose documentation describes an API
+   > rather than a file tree, that alone can leave `claims_total` at 0 and correctness with no mechanical basis (measured on
+   > `tj/commander.js`). That is a config finding, not a documentation finding: the report must say so and recommend setting
+   > `src_dirs`, rather than letting the corpus take the blame. `claim_population.notes` also carries the count of files
+   > skipped when building the symbol index (too large, binary, unreadable) — an identifier that only appears in one of those
+   > will not pass the existence check, so the population is a floor, not an exact figure.
+   >
+   > `totals.claims_api_only` is how much of the population the API matcher is carrying on its own (equal to `claims_total`
+   > on a library repo, 0 when `src_dirs` is unset). Because `refs` now counts API refs alongside path refs, the candidate
+   > **order** on a repo that has both shapes differs from the order the same corpus produced before this change. That is
+   > intended — the ranking is "most specific claim first" and an API reference is a code coordinate — but it does mean a
+   > round drawing across that boundary is not drawing from the same sequence the previous round did.
 4. **Verify each one against the code** (actually Read/Grep it, don't go from memory).
    **The scope of verification is the candidate's whole `section_lines` span, not just that one line** — contradictions are often written in the **sentence next to** the anchor line:
    oikos's balance sign issue sat in the sentence right after "settlement is handled by `src/balance.ts › settle()`",
-   and looking only at the anchor line would have missed the whole thing. Any sentence in the span that disagrees with the code gets recorded `fail`, with `claim_id` pointing at **the line that's wrong**.
-   Record into the ledger table:
+   and looking only at the anchor line would have missed the whole thing. Any sentence in the span that disagrees with the code gets recorded `fail`, against the `claim_hash` of **the line that's wrong**.
+   Record into the ledger table. **`claim_hash` is the key; `file:line` is a locating column, not an identity** — copy both
+   straight out of `claim_candidates`, and never invent a hash of your own:
 
-   | # | file:line | claim | verification method | result |
-   |---|---|---|---|---|
-   | 1 | docs/x.md:75 | "Routing is defined in `src/router.ts`" | Read src/router.ts | pass / fail / stale |
+   | # | claim_hash | file:line | claim | verification method | result |
+   |---|---|---|---|---|---|
+   | 1 | `728d463bc0b4` | docs/x.md:75 | "Routing is defined in `src/router.ts`" | Read src/router.ts | pass / fail / stale |
+
+   `claim_hash` is 12 hex characters derived from the claim's text with whitespace collapsed and the ends trimmed — nothing
+   else is normalised, so a claim that **moves** keeps its hash and a claim that is **edited** gets a new one. The second half
+   is deliberate: a rewritten claim needs re-verifying, and carrying an old `pass` forward onto new wording would be the bug,
+   not the feature.
 
 5. **Calculate two numbers, and put both in the report**:
    - **Pass rate** = pass ÷ total verified this round (all three parts of the verified set: outstanding fail/stale, re-verified passes, new draws)
      → assign a star rating against the rubric's correctness anchors.
-   - **Cumulative coverage** = distinct claims in the ledger ÷ `totals.claims_total` → write it in the report as
+   - **Cumulative coverage** = distinct `claim_hash` values in the ledger ÷ `totals.claims_total` → write it in the report as
      `Correctness ★4 (pass rate 8/8, cumulative coverage 23/68 = 34%)`.
      **A star rating alone means nothing** — the reader needs to see the sample size it's built on.
+   - **And on the same line, `totals.claims_docgrad_authored_ratio`**: the share of this round's claim population that comes
+     from documents **docgrad itself wrote** during a convergence round (detected mechanically — the commit that added the
+     file has a `docs(docgrad):` subject). Write it as
+     `Correctness ★4 (pass rate 8/8, cumulative coverage 23/68 = 34%, 34% of the population is docgrad-authored)`.
+     It belongs next to coverage for the same reason coverage belongs next to the star: a correctness score built on prose
+     the tool caused to exist is not worthless, but it is **not a measurement of the repo's pre-existing documentation
+     debt**, and the reader cannot tell the two apart from the star. Measured on `tj/commander.js` after five convergence
+     rounds, all 26 candidates came from the three documents docgrad had just written and none from the seven pre-existing
+     ones — the score went up while the repo's real debt was never sampled once. A ratio near 1.0 is a finding: say in the
+     report that the pre-existing corpus carries no verifiable claims and that anchoring it is the work that would change
+     the number. **`null` is not 0** — it means git could not tell who added the files, so the share is unknown for this
+     round (`claim_population.authorship: "unavailable"`); report it as unknown, never as clean.
 6. Record the nature of the error (detail vs. mechanism) into the deductions too.
 
 **Worked example** (`correctness_sample: 12`, oikos's 335 candidates, a ledger holding 12 distinct claims — all `pass` — at the start of round 8).
@@ -164,13 +211,28 @@ Read [placement.md](placement.md) first — the rules for judging placement and 
 
 ### 7. Economy
 
-Assign a star rating directly against the rubric's economy anchors using `inventory.mjs`'s `entry_cost.tokens_est` (fixed cost) and `pollution.ratio` (pollution surface) — **fully mechanical, no LLM judgment involved**. Two things must always be checked:
+Assign a star rating directly against the rubric's economy anchors using `inventory.mjs`'s `entry_cost.tokens_est` (fixed cost) and `pollution.ratio` (pollution surface) — **fully mechanical, no LLM judgment involved**. Three things must always be checked:
 
 1. Whether `entry_cost.files` is really loaded on every task. Listing a human-only landing page (like the `README.md` used on GitHub) in `entry_files` inflates the fixed cost; conversely, a file the agent must read every time but that isn't listed under-reports it.
    Finding a mismatch between the config and reality → record it as a deduction and suggest fixing `.docgrad.yml`, **don't** change the config yourself and then score.
    - **Conditionally-required files** (an entry file that says "read `DESIGN.md` before touching the UI") don't count as always-loaded:
      suggest moving them to `docs_files` instead — they still enter the corpus and the other five dimensions, but don't count toward the fixed cost (see [init.md](init.md) questionnaire item 3).
 2. When pollution surface ≥ 10%, this dimension is capped at ★3 (the rubric's downgrade rule), even if the fixed cost is low.
+   **Always print `inventory.out_of_scope.count` and `tokens_est` beside the pollution line — on every round, whether or not
+   the field is empty.** The pollution surface measures how much junk this repo contains; `out_of_scope` is how much content
+   was taken out of the surface because it is graded elsewhere (see [rubric.md](rubric.md) §Economy). The two numbers only
+   mean anything together, and printing the second one unconditionally is the property that stops the first from being
+   quietly launderable. Three rules for reading it:
+   - **`out_of_scope` that dwarfs the graded corpus is a finding in its own right**, even when every star is met. Compare
+     `out_of_scope.tokens_est` against `totals.tokens_est`: when the excused content outweighs the graded content, the
+     scorecard is rating a minority of the repo's documentation and must say so in the economy row. Record it as a deduction
+     when the excusing looks like scope laundering rather than a real second corpus — an `out_of_scope` entry that names a
+     whole `docs/` tree is not "graded elsewhere" unless you can point at where.
+   - **`out_of_scope.note`** appears when the list was capped at 20 paths, and when a path matches **both** fields. In the
+     second case the file is charged (`exclude` wins) — pass the note through verbatim, because the author who listed it in
+     `out_of_scope` is expecting the opposite and would otherwise only see a ratio that refused to move.
+   - Never suggest moving a directory from `exclude` into `out_of_scope` to raise economy. That is re-labelling, not
+     improvement, and [improve.md](improve.md) forbids it outright.
 3. **Check `inventory.untracked.count` before you write the rating down** — the corpus is collected off the filesystem, not out of git, so this rating can depend on whose checkout it was run in:
    - **Non-zero** → the run collected N local files git does not track (`untracked.files` lists them, `untracked.tokens_est` is what they weigh). The pollution ratio and the token totals are **checkout-bound: another machine on the same commit gets a different number, and possibly a different star**. The scorecard must say so, quoting the count and token weight, and recommend `exclude_untracked: true` in `.docgrad.yml` to measure the clean-checkout corpus instead (see [init.md](init.md) questionnaire item 6). `inventory.pollution.note` carries the same warning when any *collected* file is untracked — pass it through, don't paraphrase it away.
    - **`null`** → git was unavailable or this is not a git working tree (`untracked.note` says which), so tracked and untracked files cannot be told apart and the check **could not run at all**. State that in the report; `null` is not zero, and an unrun check must not be reported as a clean one.
@@ -179,7 +241,12 @@ Assign a star rating directly against the rubric's economy anchors using `invent
 ### 8. Token economy report
 
 Expand on the details of fixed cost and pollution surface per rubric.md's "Token economy report" section, with a break-even interpretation attached.
-Report `inventory.untracked` on the line right after the pollution surface (count, token weight, and the paths from `untracked.files` when there are few enough to name; `null` = the check could not run, see step 7) — it is the qualifier on the pollution number, so it belongs next to it rather than in a footnote.
+Report `inventory.out_of_scope` on the line right after the pollution surface — `count`, `tokens_est`, and the paths from
+`out_of_scope.files` when there are few enough to name. **Print it every round, including `0 files / 0 tokens`**: it is the
+qualifier that makes the pollution number readable, and a qualifier that only appears when it is large is a qualifier nobody
+can trust. Add the comparison against `totals.tokens_est` in words when the excused content is a material share of the tree
+("pollution 4% — but 31,400 tokens sit in `out_of_scope`, against 9,300 tokens graded").
+Then report `inventory.untracked` on the line after that (count, token weight, and the paths from `untracked.files` when there are few enough to name; `null` = the check could not run, see step 7) — it is the qualifier on the pollution number, so it belongs next to it rather than in a footnote.
 
 Marginal cost: when `.docgrad.yml` has `scenarios:` set (a list of representative code paths), consume `retrieval.mjs`'s
 `scenarios[]` output directly — list `marginal_tokens`/`max_depth`/`fan_in`/`code_pointer` for each entry, and use
@@ -199,11 +266,11 @@ have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_
 | Dimension | Rating | Target | Main deductions |
 |---|---|---|---|
 | Completeness | ★x | ★y | … |
-| Correctness | ★x | ★y | …(pass rate n/N, cumulative coverage m/total = x%; `n/a` when the corpus has 0 verifiable claims) |
+| Correctness | ★x | ★y | …(pass rate n/N, cumulative coverage m/total = x%, docgrad-authored share x%; `n/a` when the corpus has 0 verifiable claims; add "API matching disabled — `src_dirs` unset" when `claim_population.api_matching` says so) |
 | Freshness | ★x | ★y | …(date concentration x%, call it out if high) |
 | Linkage | ★x | ★y | … |
 | Consistency | ★x | ★y | …(deductions tagged `[contradiction]`/`[duplication]`/`[placement]`) |
-| Economy | ★x | ★y | …(fixed cost N tokens, pollution surface x%; add "N untracked files — ratio is checkout-bound" when `untracked.count` is non-zero, "untracked not checked (no git)" when it is `null`) |
+| Economy | ★x | ★y | …(fixed cost N tokens, pollution surface x%, out_of_scope N files / ~M tokens — always stated; add "N untracked files — ratio is checkout-bound" when `untracked.count` is non-zero, "untracked not checked (no git)" when it is `null`) |
 
 ## Token economy (not rated)
 - Fixed cost: ~N tokens (entry_files: …) — already counted in economy
@@ -211,6 +278,10 @@ have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_
   code_pointer yes/no, churn_commits N — call out the one that taxes the most); without scenarios, fall back to scenario "…" LLM
   simulation: ~N tokens, required-reading path a.md → b.md → …
 - Pollution surface: x% (exclude: …) — already counted in economy
+- Out of scope (not charged to the pollution surface): N files / ~M tokens (…paths) — **always printed, `0 files / 0 tokens`
+  when the field is unused**. Say what it is graded as instead, and call it out when M is a material share of the corpus
+  token total above; pass `out_of_scope.note` through verbatim when it appears (list capped, or paths that match both
+  `exclude` and `out_of_scope` and are therefore charged)
 - Untracked files in the corpus: N files / ~M tokens (…paths) — the ratio above is checkout-bound, another machine on this
   commit may rate economy differently; `exclude_untracked: true` measures the clean-checkout corpus instead.
   Write `0 — corpus matches the commit` when there are none, and `not checked (no git)` when `untracked.count` is `null`

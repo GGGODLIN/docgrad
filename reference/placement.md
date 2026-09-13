@@ -60,6 +60,32 @@ Three corollaries:
 issue is the carrier with the second-highest access cost and the highest drift risk in this table: putting a still-active
 constraint there means the agent can't reach a rule it has to follow.
 
+## A spec describes intent, not the current shortfall
+
+**Never write a known, temporary gap between the spec and the code into the spec as though it were the intended state.**
+Doing so books a future `stale` claim: the sentence is true on the day it is written, it passes verification for exactly as
+long as the defect survives, and the moment someone fixes the code — which is the outcome the gap was always headed
+for — the document becomes false, with nobody watching that sentence.
+
+Measured instance: a spec was edited to describe a known code shortfall as current behaviour, and the edit passed the round's
+claim verification precisely because it matched the code at the time. The code was fixed later. The claim went stale, and it
+took a re-verification round to notice, because nothing connects "we fixed the defect" to "a document was written in its
+shape".
+
+The failure is not an error of fact — it is a placement error, and it costs freshness and correctness rather than
+consistency. A shortfall is process, not intent, so it belongs where process belongs (rule 5): an issue, or
+`.docgrad/out-of-scope.jsonl` when it falls outside docgrad's remit (see [improve.md](improve.md) §Exit for findings outside
+docgrad's remit). The spec keeps the intended behaviour. If the gap has to be visible from the document at all, mark it as a
+gap and point at the issue — one line, obviously temporary, and easy to delete —
+
+```markdown
+> **Known gap:** `foo()` currently returns `null` on an empty input (#123). Intended behaviour is below.
+```
+
+— rather than rewriting the intended behaviour to match today's code. The test to apply before editing a spec is the same
+one rules 4 and 5 turn on: **will this sentence still be true once the thing it describes is working as intended?** If no,
+it is not a spec sentence.
+
 Rule 6 used in reverse is this policy's single most valuable piece of advice: **if an authoritative fact lives somewhere the
 agent can't reach, move it in before you even talk about scoring**
 (the boundary on unsupported wiki/remote sources: see [design.md](../docs/design.md) §Positioning and boundaries).

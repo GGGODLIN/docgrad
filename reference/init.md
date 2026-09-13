@@ -14,6 +14,7 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
 | single-file document (conditionally loaded) | Glob root's .md files, minus entry file/index file candidates | `PRODUCT.md`, `DESIGN.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md` |
 | index file | inside the docs directory | `README.md`, `index.md`, `TOC.md` |
 | excluded directories | name patterns + .gitignore | `archive/`, `deprecated/`, `generated` markers, gitignored WIP directories |
+| out-of-scope directories | translated mirrors, vendored trees, nested configs | `docs/zh-CN/`, `docs/ja/`, vendored handbooks, any subtree carrying its own `.docgrad.yml` |
 | src directory | Glob top-level directories | `src/`, `lib/`, `app/`, `packages/`; other top-level directories containing code |
 | freshness convention | sample 5 docs files, check the header | frontmatter date field / a "Last updated:"-style line / none |
 
@@ -41,11 +42,36 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
      find it by guessing.
 4. `index_file` (single-select; no candidate → set to `null` and note: linkage will be capped for lack of a reachability root;
    improve's first round can build an index for you)
-5. `exclude` (multi-select; scanned candidates + free text). Excluding a directory takes it out of the scored corpus but **not**
-   out of the pollution surface — that is the point of the field. Note what this means for files git doesn't track: a local
-   draft sitting inside an excluded directory (a gitignored WIP folder is the usual case) is still collected off the filesystem
-   and still counts toward the pollution surface, so a teammate on a clean checkout of the same commit measures a different
-   ratio. `exclude_untracked: true` (next item) is the only way to keep it out.
+5. `exclude` / `out_of_scope` — **ask this as one question with two answers, because the wrong half is the single most
+   expensive misfiling this questionnaire can produce.** For each candidate directory, the question is *not* "do you want it
+   scored". Both fields take it out of the scored corpus. The question is:
+
+   > **Is this content you would rather nobody read — or content that is perfectly fine, just graded somewhere else?**
+
+   | Answer | Field | Pollution surface |
+   |---|---|---|
+   | "It's in the repo and I'm not proud of it" — WIP drafts, `archive/`, `deprecated/`, generated dumps | `exclude` | **charged** |
+   | "It's real documentation, it just isn't what this run grades" — a translated mirror rated as its own corpus, a vendored handbook, a subproject with its own `.docgrad.yml` | `out_of_scope` | **not charged** |
+
+   Getting it wrong in the second direction is what broke `tj/commander.js`: the owner scoped out `docs/zh-CN/` because the
+   translations are graded as a separate corpus, the only field that existed was `exclude`, and docgrad charged **40.6%**
+   pollution and capped economy at ★3 while the fixed cost was a perfect 0 (see
+   [case-studies/01-commander-js.md](../case-studies/01-commander-js.md) finding 1). Nothing in the docs was wrong; the field
+   was.
+
+   Two properties to state when asking, so `out_of_scope` is not mistaken for a free pass:
+   - Its `count` and `tokens_est` are printed on **every** run, empty or not, right beside the pollution line. You may move
+     anything you like out of the surface; how much you moved is on the same page, in the same units.
+   - A path listed in **both** fields is charged — `exclude` wins, and `inventory.out_of_scope.note` names the overlapping
+     paths. A broad `out_of_scope` entry can never silently cancel an `exclude` someone already wrote.
+
+   `out_of_scope` joins `corpus_hash` only when it is non-empty, so a config that never uses the field hashes exactly as it
+   did before and draws no false comparability break.
+
+   Note separately what `exclude` means for files git doesn't track: a local draft sitting inside an excluded directory (a
+   gitignored WIP folder is the usual case) is still collected off the filesystem and still counts toward the pollution
+   surface, so a teammate on a clean checkout of the same commit measures a different ratio. `exclude_untracked: true` (next
+   item) is the only way to keep it out.
 6. `exclude_untracked` (yes/no; **default `false` = today's behavior**, every file on disk is collected whether git tracks it or
    not). Set it to `true` when the team wants CI and everyone's laptop to rate the same commit identically: the corpus then
    matches a clean checkout, and local drafts stop moving `pollution.ratio` and the token totals.
@@ -64,9 +90,18 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
 10. `correctness_sample`: **the number of claims drawn *new* each round** (re-verification of the existing ledger is a separate
     budget on top, see [audit.md](audit.md) step 3) — so it is also the rate at which cumulative coverage grows. Default 8; for a
     large docs system (>50 files), 12 is recommended
-11. `src_dirs` (multi-select, pre-filled with scan candidates; used by coverage drift detection and retrieval.mjs): leaving it
-    empty → completeness falls back to pure LLM comparison (coverage.mjs doesn't measure, it only emits a note); retrieval.mjs's
-    `areas`/`code_pointer_ratio` degrade the same way
+11. `src_dirs` (multi-select, pre-filled with scan candidates; used by coverage drift detection, retrieval.mjs, **and the
+    correctness dimension's claim population**). **Do not leave this empty if you can avoid it** — it now gates three things,
+    and the third is the one that silently costs a whole dimension:
+    - completeness falls back to pure LLM comparison (coverage.mjs doesn't measure, it only emits a note);
+    - retrieval.mjs's `areas`/`code_pointer_ratio` degrade the same way;
+    - **API-shaped inline code stops being a claim.** `inventory.mjs` recognises `foo()` / `.option()` / `program.opts()` as a
+      verifiable claim only when every segment exists as an identifier somewhere under `src_dirs` — that existence check is
+      the whole guard against matching ordinary prose, so with no `src_dirs` there is nothing to check against and the shape
+      contributes nothing. On a **library repo**, whose documentation describes an API rather than a file tree, that is the
+      difference between a claim population and none at all: measured on `tj/commander.js`, `claims_total` was **0** and
+      correctness had no mechanical basis whatsoever (see [audit.md](audit.md) step 3's not-measurable case).
+      `inventory.claim_population.api_matching` reports `disabled` with a note when this happens — it is never silent.
 12. `scenarios`: ask the user for 2-4 representative code paths (files or directories, e.g.
     `apps/api/src/contract/contract-approval.service.ts`, `apps/api/src/timesheet`) — retrieval.mjs uses them to mechanically
     compute marginal cost and traceability (see [rubric.md](rubric.md) §Token economy report / Traceability); leaving it empty
@@ -85,9 +120,10 @@ docs_dirs: [docs/]
 docs_files: [PRODUCT.md, DESIGN.md]   # single files outside docs_dirs, taken in as regular documents (not counted toward fixed cost); optional
 entry_files: [CLAUDE.md]
 index_file: docs/README.md
-exclude: [docs/archive/]
+exclude: [docs/archive/]      # "this repo contains this and I'm not proud of it": out of the corpus, CHARGED to the pollution surface
+out_of_scope: [docs/zh-CN/]   # "real docs, just not what this run grades": out of the corpus, NOT charged; count/tokens_est printed every run; optional
 exclude_untracked: false   # true = collect only files git tracks, so a clean checkout and a working one measure the same corpus (needs git)
-src_dirs: [src/]
+src_dirs: [src/]           # code roots: coverage drift + retrieval + the existence check that makes `foo()` a verifiable claim
 freshness:
   convention: frontmatter   # single value; when mixing both conventions: frontmatter,heading-line
   field: last_updated
@@ -113,7 +149,7 @@ rules:
 language: zh-TW
 ```
 
-Every list field (`docs_dirs`, `docs_files`, `entry_files`, `exclude`, `src_dirs`, `scenarios`) must be written as a list, even
+Every list field (`docs_dirs`, `docs_files`, `entry_files`, `exclude`, `out_of_scope`, `src_dirs`, `scenarios`) must be written as a list, even
 when it holds one item (`docs_files: [PRODUCT.md]`) — a bare scalar, or a key with nothing after the colon, is rejected with an
 error naming the field. So is a non-boolean `exclude_untracked`. The scripts do not repair a malformed value for you: a silent
 repair would leave the wrong thing standing in a version-controlled file.
