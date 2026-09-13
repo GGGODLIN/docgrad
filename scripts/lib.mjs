@@ -675,6 +675,45 @@ export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   return { version, rubric_hash: rubricHash, corpus_hash: corpusHash(config) };
 }
 
+// --- Claim identity ------------------------------------------------------------------
+//
+// `.docgrad/ledger.jsonl` keys a claim on `<path>:<line>`, and docgrad's own improve/loop
+// **rewrites documents** — "move content out of the entry file" is literally one of the two
+// prescribed economy fixes. Every such move silently repoints a batch of ledger keys at other
+// content: the next round re-verifies the wrong line, records a false `fail`, and because
+// failures are re-verified without a cap, that batch eats the following round's new-draw budget.
+// A harmless tidy-up therefore stops coverage from growing. The tool's core action destroys its
+// own state file (#41).
+//
+// claim_hash is the content-derived key that survives the move, handed to the agent writing the
+// ledger so it does not have to invent one. `path` and `line` stay in the output as locating
+// aids — they are still how a verifier finds the text to read.
+//
+// Normalisation is deliberately shallow: runs of whitespace collapsed, ends trimmed. Markdown
+// markup is **not** stripped and case is **not** folded, because an edited claim *should* hash
+// differently — a rewritten claim genuinely needs re-verification, and treating it as the same
+// claim would carry a stale `pass` forward. Moved-but-identical hashing the same is the point;
+// edited-but-identical would be the bug.
+export function normalizeClaimText(text) {
+  return String(text).replace(/\s+/gu, ' ').trim();
+}
+
+// sha256, first 12 hex chars — the same shape as rubric_hash/corpus_hash but longer than their 8.
+// Those two are a single value per round and only ever compared against the previous round, so
+// they have no birthday problem. claim_hash is a **key across a whole population**, and a realistic
+// repo carries hundreds to low thousands of claims. At 2,000 claims, 32 bits (8 hex chars) collides
+// with probability ~4.7e-4: roughly one repo in two thousand would silently merge two unrelated
+// claims into one ledger row — exactly the class of failure this field exists to remove. 48 bits
+// puts the same figure at ~7e-9 and still fits comfortably on one JSONL line.
+export const CLAIM_HASH_CHARS = 12;
+
+export function claimHash(text) {
+  return createHash('sha256')
+    .update(normalizeClaimText(text), 'utf8')
+    .digest('hex')
+    .slice(0, CLAIM_HASH_CHARS);
+}
+
 // --- Concrete claim candidates ------------------------------------------------------
 //
 // A "concrete claim" = a line outside a fence that has code coordinates to check against
@@ -722,9 +761,13 @@ export function extractClaimLines(text, srcDirs = []) {
     const refs = extractCodeRefs(line, srcDirs);
     if (!refs.length) continue;
     const sec = sectionOf(i + 1);
+    const text_ = line.trim();
     out.push({
       line: i + 1,
-      text: line.trim(),
+      text: text_,
+      // Stable across a move, different after an edit — see claimHash above. path/line remain as
+      // locating aids, they are just no longer the identity.
+      claim_hash: claimHash(text_),
       refs: refs.length,
       section: sec.title,
       // verification range: the whole section, not just this one line.

@@ -251,3 +251,39 @@ test('inventory: rules.pattern can be customized via .docgrad.yml', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// #41: the ledger keys a claim on `<path>:<line>`, and docgrad's own convergence loop moves
+// content between documents. claim_hash is the content-derived key handed to the agent writing
+// the ledger, so a move no longer silently repoints a batch of rows at unrelated content.
+test('inventory: claim_candidates carry a content-derived claim_hash; path/line stay as locating aids', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-claimhash-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.mkdirSync(path.join(tmp, 'src'));
+    fs.writeFileSync(path.join(tmp, 'src', 'balance.ts'), 'export function settle() {}\n');
+    const claim = 'Settlement is handled by `src/balance.ts`.';
+    // the same sentence, in another file at another line — the "moved" case
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), `# A\n\n${claim}\n`);
+    fs.writeFileSync(path.join(tmp, 'docs', 'b.md'), `# B\n\nfiller\n\nfiller\n\n${claim}\n`);
+    // one token different — the "edited" case, which must NOT key the same
+    fs.writeFileSync(path.join(tmp, 'docs', 'c.md'), '# C\n\nSettlement is handled by `src/ledger.ts`.\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nsrc_dirs: [src/]\n');
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    const byPath = Object.fromEntries(out.claim_candidates.map((c) => [c.path, c]));
+    assert.equal(byPath['docs/a.md'].line, 3);
+    assert.equal(byPath['docs/b.md'].line, 7);
+    assert.match(byPath['docs/a.md'].claim_hash, /^[0-9a-f]{12}$/);
+    assert.equal(
+      byPath['docs/a.md'].claim_hash,
+      byPath['docs/b.md'].claim_hash,
+      'moved-but-identical must key the same — that is the whole point'
+    );
+    assert.notEqual(
+      byPath['docs/c.md'].claim_hash,
+      byPath['docs/a.md'].claim_hash,
+      'an edited claim genuinely needs re-verification, so it must key differently'
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

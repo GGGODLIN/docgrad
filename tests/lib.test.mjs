@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates } from '../scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS } from '../scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -638,6 +638,27 @@ test('extractClaimLines: returns the section range it belongs to, so verificatio
   const [start, end] = claim.section_lines;
   assert.ok(start <= 5 && end >= 5, `the neighboring sentence on line 5 must fall inside section range [${start}, ${end}]`);
   assert.ok(end < 7, 'the section range must not cross the next heading');
+});
+
+// #41: the ledger keys claims on `<path>:<line>`, and docgrad's own convergence loop moves
+// content between documents. A content-derived key is what survives that move.
+test('claimHash: identical claim text hashes the same wherever it moves to (#41)', () => {
+  const moved = 'Settlement is handled by `src/balance.ts › settle()`.';
+  const a = extractClaimLines(`# A\n\n${moved}\n`, ['src/']);
+  const b = extractClaimLines(`# B\n\nfiller\n\nmore filler\n\n${moved}\n`, ['src/']);
+  assert.equal(a[0].line, 3);
+  assert.equal(b[0].line, 7, 'same text, different line');
+  assert.equal(a[0].claim_hash, b[0].claim_hash);
+  assert.equal(a[0].claim_hash.length, CLAIM_HASH_CHARS);
+  assert.match(a[0].claim_hash, /^[0-9a-f]+$/);
+});
+
+test('claimHash: whitespace is normalised but markup and case are not (#41)', () => {
+  const base = claimHash('Routing lives in `src/router.ts`.');
+  assert.equal(claimHash('   Routing   lives\tin  `src/router.ts`.  '), base, 'whitespace runs collapse');
+  assert.notEqual(claimHash('routing lives in `src/router.ts`.'), base, 'case is not folded');
+  assert.notEqual(claimHash('Routing lives in **`src/router.ts`**.'), base, 'markup is not stripped');
+  assert.notEqual(claimHash('Routing lives in `src/routes.ts`.'), base, 'an edited claim is a new claim');
 });
 
 test('rankClaimCandidates: more refs comes first, ties broken by path then line (stable, reproducible)', () => {
