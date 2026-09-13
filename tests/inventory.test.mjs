@@ -194,6 +194,126 @@ test('inventory: scope is null for a full run (unchanged existing behavior)', ()
   assert.equal(out.totals.files, 4);
 });
 
+// --- #44: out_of_scope leaves the corpus without being charged to the pollution surface ---------
+
+// The measured tj/commander.js shape: a translated mirror large enough to dominate the ratio (it
+// produced 40.6% pollution and capped economy at ★3), plus a small genuinely-embarrassing draft.
+function mirrorRepo(configTail) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-oos-inv-'));
+  fs.mkdirSync(path.join(tmp, 'docs', 'zh-CN'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, 'docs', 'wip'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), `# a\n${'x '.repeat(200)}`);
+  fs.writeFileSync(path.join(tmp, 'docs', 'zh-CN', 'a.md'), `# 甲\n${'中文鏡像 '.repeat(400)}`);
+  fs.writeFileSync(path.join(tmp, 'docs', 'wip', 'draft.md'), `# draft\n${'z '.repeat(50)}`);
+  fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `docs_dirs: [docs/]\n${configTail}`);
+  return tmp;
+}
+
+const runInventory = (root, ...args) =>
+  JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', root, ...args], { encoding: 'utf8' }));
+
+test('inventory: the same mirror moves pollution.ratio under exclude and does not under out_of_scope (#44)', () => {
+  const excluded = mirrorRepo('exclude: [docs/zh-CN/]\n');
+  const scopedOut = mirrorRepo('out_of_scope: [docs/zh-CN/]\n');
+  try {
+    const a = runInventory(excluded);
+    const b = runInventory(scopedOut);
+    // Same corpus on both sides: the mirror is out of the grading population either way.
+    assert.deepEqual(a.files.map((f) => f.path), ['docs/a.md', 'docs/wip/draft.md']);
+    assert.deepEqual(b.files.map((f) => f.path), ['docs/a.md', 'docs/wip/draft.md']);
+    assert.equal(a.totals.tokens_est, b.totals.tokens_est);
+    // Only the charge differs, and it is the difference between ★3 and a usable economy score.
+    assert.ok(a.pollution.ratio > 0.5, `exclude charges the mirror: ${a.pollution.ratio}`);
+    assert.equal(b.pollution.ratio, 0, 'out_of_scope charges nothing');
+    assert.deepEqual(b.pollution.excluded_files, []);
+    assert.equal(b.pollution.excluded_tokens, 0);
+    // ...and the size of what was moved is on the same page, exactly.
+    assert.equal(b.out_of_scope.count, 1);
+    assert.deepEqual(b.out_of_scope.files, ['docs/zh-CN/a.md']);
+    assert.equal(b.out_of_scope.tokens_est, a.pollution.excluded_tokens, 'same tokens, different charge');
+    // Moving a directory between the two fields changes every denominator -> #36's break detector.
+    assert.notEqual(b.docgrad.corpus_hash, a.docgrad.corpus_hash);
+  } finally {
+    fs.rmSync(excluded, { recursive: true, force: true });
+    fs.rmSync(scopedOut, { recursive: true, force: true });
+  }
+});
+
+test('inventory: the out_of_scope block is emitted even when the field is empty (#44)', () => {
+  // The anti-abuse property: if the block could be absent, out_of_scope would be a silent switch
+  // for zeroing your own pollution surface. It is always there, empty or not.
+  const out = runInventory(FIXTURE);
+  assert.deepEqual(out.out_of_scope, { count: 0, tokens_est: 0, files: [] });
+  assert.equal(out.pollution.ratio > 0, true, 'the existing pollution surface is untouched');
+  assert.deepEqual(out.pollution.excluded_files.map((f) => f.path), ['docs/archive/old.md']);
+});
+
+test('inventory: a path in both fields is charged to pollution, and the note says exclude won (#44)', () => {
+  const tmp = mirrorRepo('exclude: [docs/zh-CN/]\nout_of_scope: [docs/zh-CN/, docs/wip/]\n');
+  try {
+    const out = runInventory(tmp);
+    assert.deepEqual(out.pollution.excluded_files.map((f) => f.path), ['docs/zh-CN/a.md']);
+    assert.deepEqual(out.out_of_scope.files, ['docs/wip/draft.md']);
+    assert.match(out.out_of_scope.note, /both exclude and out_of_scope/);
+    assert.match(out.out_of_scope.note, /exclude wins/);
+    assert.match(out.out_of_scope.note, /docs\/zh-CN\/a\.md/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: a long out_of_scope list is capped, and the note says so (count/tokens stay exact) (#44)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-oos-cap-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs', 'zh-CN'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    for (let i = 0; i < 25; i++) fs.writeFileSync(path.join(tmp, 'docs', 'zh-CN', `f${i}.md`), `# ${i}\nxxxx\n`);
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nout_of_scope: [docs/zh-CN/]\n');
+    const out = runInventory(tmp);
+    assert.equal(out.out_of_scope.count, 25);
+    assert.equal(out.out_of_scope.files.length, 20);
+    assert.ok(out.out_of_scope.tokens_est > 0);
+    assert.match(out.out_of_scope.note, /capped: only the first 20 of 25/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: out_of_scope narrows under --include, like the pollution surface does (#44)', () => {
+  const tmp = mirrorRepo('out_of_scope: [docs/zh-CN/]\n');
+  try {
+    const out = runInventory(tmp, '--include', 'docs/a.md');
+    assert.deepEqual(out.out_of_scope, { count: 0, tokens_est: 0, files: [] });
+    assert.deepEqual(out.pollution.excluded_files, []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: an untracked file inside out_of_scope is not listed as untracked (#44)', () => {
+  // untracked exists to explain how two checkouts of one commit can rate differently. out_of_scope
+  // feeds no rated input, so a file in there cannot cause that divergence and does not belong in
+  // the block. An untracked file in the still-charged exclude bucket does, and still is.
+  const tmp = mirrorRepo('exclude: [docs/wip/]\nout_of_scope: [docs/zh-CN/]\n');
+  try {
+    gitInit(tmp);
+    fs.writeFileSync(path.join(tmp, 'docs', 'zh-CN', 'local.md'), '# untracked mirror page\n');
+    fs.writeFileSync(path.join(tmp, 'docs', 'wip', 'local.md'), '# untracked draft\n');
+    const out = runInventory(tmp);
+    assert.deepEqual(out.untracked.files, ['docs/wip/local.md']);
+    assert.equal(out.untracked.count, 1);
+    assert.equal(out.out_of_scope.count, 2, 'the untracked mirror page is still counted, and reported, here');
+
+    // exclude_untracked runs above the split, so out_of_scope's tally is on the same clean-checkout basis.
+    fs.appendFileSync(path.join(tmp, '.docgrad.yml'), 'exclude_untracked: true\n');
+    const clean = runInventory(tmp);
+    assert.equal(clean.out_of_scope.count, 1);
+    assert.equal(clean.untracked.count, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('inventory: no .docgrad.yml -> exit 1 + stderr points at init', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-'));
   const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });

@@ -97,6 +97,7 @@ test('loadConfig: unset fields get their defaults, nested maps deep-merge', () =
     assert.deepEqual(cfg.docs_dirs, ['documentation/']);
     assert.deepEqual(cfg.entry_files, []);
     assert.deepEqual(cfg.docs_files, []); // v1.4.0 new field: must default to an empty array even when an old config omits it (otherwise collectFiles crashes)
+    assert.deepEqual(cfg.out_of_scope, []); // #44's new field: same requirement, and [] is what keeps every pre-#44 config's ratings and corpus_hash exactly where they were
     assert.equal(cfg.index_file, null);
     assert.equal(cfg.targets.completeness, 4);
     assert.equal(cfg.targets.economy, 4); // v1.0.0's sixth dimension: an old config that omits it must still get the default target
@@ -118,6 +119,7 @@ const SCALAR_CASES = [
   ['docs_files', 'PRODUCT.md', 'PRODUCT.md'],
   ['entry_files', 'CLAUDE.md', 'CLAUDE.md'],
   ['exclude', 'docs/archive/', 'docs/archive/'],
+  ['out_of_scope', 'docs/zh-CN/', 'docs/zh-CN/'],
   ['src_dirs', 'src/', 'src/'],
   ['scenarios', 'src/foo/bar.ts', 'src/foo/bar.ts'],
 ];
@@ -397,6 +399,113 @@ test('collectFiles: docs_files dedupes, silently skips missing files, exclude st
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// --- #44: out_of_scope is a second, differently-charged way out of the corpus -------------------
+
+// A repo shaped like the measured tj/commander.js case: English docs, a translated mirror that is
+// graded as its own corpus, and a genuinely embarrassing draft.
+function scopeRepo(configTail) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-oos-'));
+  fs.mkdirSync(path.join(tmp, 'docs', 'zh-CN'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, 'docs', 'wip'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+  fs.writeFileSync(path.join(tmp, 'docs', 'zh-CN', 'a.md'), '# 甲\n');
+  fs.writeFileSync(path.join(tmp, 'docs', 'wip', 'draft.md'), '# draft\n');
+  fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `docs_dirs: [docs/]\n${configTail}`);
+  return tmp;
+}
+
+test('collectFiles: out_of_scope leaves the corpus without landing in the pollution bucket; exclude still does', () => {
+  const tmp = scopeRepo('exclude: [docs/wip/]\nout_of_scope: [docs/zh-CN/]\n');
+  try {
+    const { included, excluded, outOfScope } = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(included, ['docs/a.md'], 'both fields take their files out of the corpus');
+    assert.deepEqual(excluded, ['docs/wip/draft.md'], 'only exclude feeds the pollution surface');
+    assert.deepEqual(outOfScope, ['docs/zh-CN/a.md']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: exclude wins when a path matches both fields', () => {
+  // Deterministic and one-directional on purpose: a broad out_of_scope entry must never silently
+  // cancel an exclude entry somebody already wrote. Getting out of the pollution surface always
+  // costs a visible deletion from exclude.
+  const tmp = scopeRepo('exclude: [docs/zh-CN/]\nout_of_scope: [docs/zh-CN/, docs/wip/]\n');
+  try {
+    const { included, excluded, outOfScope } = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(included, ['docs/a.md']);
+    assert.deepEqual(excluded, ['docs/zh-CN/a.md'], 'still charged: exclude wins the overlap');
+    assert.deepEqual(outOfScope, ['docs/wip/draft.md'], 'the non-overlapping entry is unaffected');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: an old config with no out_of_scope behaves exactly as before', () => {
+  const tmp = scopeRepo('exclude: [docs/wip/]\n');
+  try {
+    const { included, excluded, outOfScope } = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(included, ['docs/a.md', 'docs/zh-CN/a.md']);
+    assert.deepEqual(excluded, ['docs/wip/draft.md']);
+    assert.deepEqual(outOfScope, [], 'the new bucket exists and is empty, it does not take anything');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: out_of_scope narrows under --include exactly like exclude does', () => {
+  const tmp = scopeRepo('exclude: [docs/wip/]\nout_of_scope: [docs/zh-CN/]\n');
+  try {
+    const cfg = loadConfig(tmp);
+    const narrow = collectFiles(tmp, cfg, { include: ['docs/a.md'] });
+    assert.deepEqual(narrow.outOfScope, [], 'outside the scope, so out of this run entirely');
+    assert.deepEqual(narrow.excluded, [], 'same as the pollution surface already behaves');
+    const wide = collectFiles(tmp, cfg, { include: ['docs/**'] });
+    assert.deepEqual(wide.outOfScope, ['docs/zh-CN/a.md']);
+    assert.deepEqual(wide.excluded, ['docs/wip/draft.md']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: a prefix entry only matches on a path boundary, in both fields', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-oos-prefix-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs', 'arch'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'docs', 'architecture.md'), '# arch\n');
+    fs.writeFileSync(path.join(tmp, 'docs', 'arch', 'old.md'), '# old\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nout_of_scope: [docs/arch]\n');
+    const { included, outOfScope } = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(included, ['docs/architecture.md'], 'docs/arch must not swallow architecture.md');
+    assert.deepEqual(outOfScope, ['docs/arch/old.md']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('corpusHash: out_of_scope is corpus-defining, but an absent field still hashes as it did before #44', () => {
+  const base = {
+    docs_dirs: ['docs/'], docs_files: [], entry_files: ['CLAUDE.md'], exclude: ['docs/archive/'],
+    index_file: 'docs/README.md',
+  };
+  // Pinned to the digest the pre-#44 implementation produced for this config. Adding the field
+  // must not stamp a comparability break on every repo that never uses it: a config without
+  // out_of_scope and a config with `out_of_scope: []` select the same corpus, so they hash alike.
+  assert.equal(corpusHash(base), 'ea564869', 'pre-#44 digest preserved');
+  assert.equal(corpusHash({ ...base, out_of_scope: [] }), 'ea564869');
+  assert.notEqual(corpusHash({ ...base, out_of_scope: ['docs/zh-CN/'] }), corpusHash(base), 'out_of_scope');
+  // The case the field exists for: moving a directory between the two fields changes every
+  // denominator while files_total stays put, so report has to draw a comparability break on it.
+  const excluded = { ...base, exclude: ['docs/zh-CN/'], out_of_scope: [] };
+  const scopedOut = { ...base, exclude: [], out_of_scope: ['docs/zh-CN/'] };
+  assert.notEqual(corpusHash(scopedOut), corpusHash(excluded), 'exclude -> out_of_scope is a break');
+  // Same normalisation as every other corpus list: trailing slash, order and duplicates are cosmetic.
+  assert.equal(
+    corpusHash({ ...base, out_of_scope: ['docs/zh-CN', 'guides/', 'docs/zh-CN/'] }),
+    corpusHash({ ...base, out_of_scope: ['guides', 'docs/zh-CN/'] })
+  );
 });
 
 test('collectFiles: docs_files pointing at a directory -> throws explicitly (instead of letting inventory blow up with EISDIR)', () => {
