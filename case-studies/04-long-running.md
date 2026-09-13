@@ -111,11 +111,23 @@ grounds that the section's own premise is that users do not do things on their o
 
 Measured on this repo, not asserted:
 
-- **The coverage ceiling (#37) was real and is gone.** With `correctness_sample: 12`, round 11 closed
-  at 24 distinct claims and round 12 at 36 — **exactly +12**, the full new-draw quota. Under the old
-  rule, re-verifying half of a growing pass set would have consumed the entire budget and left the
-  count where it was. The ceiling's arithmetic said a repo freezes near `2 × correctness_sample`; this
-  one had reached 24 with `correctness_sample` at 12.
+- **The coverage ceiling (#37) was real and is gone — and writing this case study uncovered a second
+  one.** With `correctness_sample: 12`, round 11 closed at 24 distinct claims and round 12 at 36 —
+  **exactly +12**, the full new-draw quota. Under the old rule, re-verifying half of a growing pass
+  set would have consumed the entire budget and left the count where it was. The ceiling's arithmetic
+  said a repo freezes near `2 × correctness_sample`; this one had reached 24 with `correctness_sample`
+  at 12.
+
+  The second ceiling is further out and was undocumented: `inventory.mjs` emits only the top
+  `claim_candidates_cap` candidates (default **60**), and a round can only draw from what is emitted.
+  Once a ledger covers all of them, every later round draws zero and coverage freezes — while
+  `claims_total` still reads in the hundreds. v1.5.0's rewritten sampling rule said coverage grows
+  "with no ceiling", which was true of the mechanism it changed and false of the pipeline as a whole.
+  Repo P is at 36 of a 60-wide window: **three more rounds and it would have hit a wall the
+  documentation said could not exist.** v1.6.0 makes the window configurable and makes truncation
+  visible in `claim_population`; the rule now says where the limit is and how to raise it. The
+  finding is recorded here rather than quietly fixed because it is the same defect class this case
+  study is about — a mechanical signal that reads as complete when it is a window.
 - **The pollution surface is checkout-bound (#35), by a margin that crosses the downgrade
   threshold.** The same commit measures **0.1064** in the maintainer's working checkout and **0.0516**
   in a clean `git archive` extract. `pollution_max` is 0.1 — *between the two*. One untracked
