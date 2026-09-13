@@ -1,8 +1,9 @@
-# .docgrad.yml — docgrad 設定（進版控，團隊共用）
-# 本 repo 是 Claude Code skill：
-#   entry = SKILL.md（技能觸發時唯一自動載入的檔；README.md 是給人看的 GitHub 落地頁，
-#           不進 agent context，故不列為 entry_file——列了會把固定成本灌水 1,807 tokens）
-#   index = README.md（人類導覽入口，連結度可達性的起點）
+# .docgrad.yml — docgrad configuration (version-controlled, shared by the team)
+# This repo is a Claude Code skill:
+#   entry = SKILL.md (the only file auto-loaded when the skill triggers; README.md is the
+#           human-facing GitHub landing page, not loaded into agent context, so it is not
+#           listed as an entry_file — listing it would inflate the fixed cost by 1,807 tokens)
+#   index = README.md (the human navigation entry point, the starting point for linkage reachability)
 docs_dirs: [docs/, reference/]
 entry_files: [SKILL.md]
 index_file: README.md
@@ -20,5 +21,5 @@ targets:
   consistency: 4
   economy: 4
 correctness_sample: 8
-scenario: "為 docgrad 新增一個評分維度"
-language: zh-TW
+scenario: "add a new scoring dimension to docgrad"
+language: en

@@ -1,4 +1,4 @@
-在 docgrad plugin 目錄下的 `evals/fixtures/linkage-known/` 這個 repo 上跑一次 docgrad 的
-全量 audit（`/docgrad audit`），把該 fixture 的路徑當成目標 repo 根目錄。
+Run a full docgrad audit (`/docgrad audit`) on the repo at `evals/fixtures/linkage-known/`
+under the docgrad plugin directory, treating that fixture's path as the target repo root.
 
-輸出完整的 scorecard，六個維度都要給星等與失分點。
+Output the complete scorecard, with a star rating and deductions for all six dimensions.

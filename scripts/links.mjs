@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// links.mjs — 死鏈/壞錨/孤兒（可達性從 index_file＋entry_files 起算 transitive）
-// 用法: node links.mjs [--root <repo>] [--config <file>] [--include <glob>]；JSON → stdout。
-// scope 限定時只出死鏈/壞錨：孤兒與可達率是「全量索引」概念,範圍一縮就失真,一律不計。
+// links.mjs — dead links/bad anchors/orphans (reachability computed transitively from index_file + entry_files)
+// Usage: node links.mjs [--root <repo>] [--config <file>] [--include <glob>]; JSON -> stdout.
+// When scope-limited, only dead links/bad anchors are emitted: orphans and reachable ratio are
+// full-index concepts that go wrong once scope narrows, so they're never computed under scope.
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -47,7 +48,7 @@ try {
       const anchor = hashIndex === -1 ? null : safeDecode(target.slice(hashIndex + 1));
       const resolved =
         rawPath === ''
-          ? rel // 純錨點連結指向自身
+          ? rel // a pure anchor link points at itself
           : rawPath.startsWith('/')
             ? path.posix.normalize(rawPath.slice(1))
             : path.posix.normalize(path.posix.join(path.posix.dirname(rel), rawPath));
@@ -81,7 +82,7 @@ try {
       {
         scope: scoped ? include : null,
         ...(scoped
-          ? { note: 'scope 限定:孤兒/可達率不計(可達性是全量索引概念),只採計死鏈與壞錨' }
+          ? { note: 'scope-limited: orphans/reachable ratio not computed (reachability is a full-index concept), only dead links and bad anchors are counted' }
           : {}),
         total_links,
         dead_links,

@@ -9,9 +9,9 @@ import { fileURLToPath } from 'node:url';
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
 const DOCS_FILES_FIXTURE = fileURLToPath(new URL('./fixtures/docs-files/', import.meta.url));
 
-test('parseYamlSubset: 解析 .docgrad.yml 全樣板', () => {
+test('parseYamlSubset: parse a full .docgrad.yml template', () => {
   const doc = `
-# 註解行
+# comment line
 docs_dirs: [docs/]
 entry_files: [CLAUDE.md, AGENTS.md]
 index_file: docs/README.md
@@ -23,7 +23,7 @@ targets:
   completeness: 4
   correctness: 3
 correctness_sample: 8
-scenario: "在 core 加一個典型新功能"  # 行尾註解
+scenario: "Add a typical new feature to core"  # trailing comment
 language: zh-TW
 `;
   const got = parseYamlSubset(doc);
@@ -35,11 +35,11 @@ language: zh-TW
   assert.equal(got.targets.completeness, 4);
   assert.equal(got.targets.correctness, 3);
   assert.equal(got.correctness_sample, 8);
-  assert.equal(got.scenario, '在 core 加一個典型新功能');
+  assert.equal(got.scenario, 'Add a typical new feature to core');
   assert.equal(got.language, 'zh-TW');
 });
 
-test('parseYamlSubset: block list 與引號內的 #、:', () => {
+test('parseYamlSubset: block list, and # and : inside quotes', () => {
   const got = parseYamlSubset(
     'exclude:\n  - docs/archive/\n  - "docs/#wip/"\nfreshness:\n  field: "Last updated:"\n'
   );
@@ -47,20 +47,20 @@ test('parseYamlSubset: block list 與引號內的 #、:', () => {
   assert.equal(got.freshness.field, 'Last updated:');
 });
 
-test('parseYamlSubset: 非法縮排丟錯', () => {
-  assert.throws(() => parseYamlSubset('  orphan_indent: 1\n'), /縮排/);
+test('parseYamlSubset: illegal indentation throws', () => {
+  assert.throws(() => parseYamlSubset('  orphan_indent: 1\n'), /indentation/);
 });
 
-test('loadConfig: 缺檔丟導向 init 的錯誤', () => {
+test('loadConfig: missing config file throws an error pointing at init', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-'));
   try {
-    assert.throws(() => loadConfig(tmp), /請先執行 \/docgrad init/);
+    assert.throws(() => loadConfig(tmp), /Run \/docgrad init first/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('loadConfig: convention 需要 field 而未設定時丟錯', () => {
+test('loadConfig: throws when convention requires field but field is unset', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-'));
   try {
     fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'freshness:\n  convention: heading-line\n');
@@ -70,7 +70,7 @@ test('loadConfig: convention 需要 field 而未設定時丟錯', () => {
   }
 });
 
-test('loadConfig: 未填欄位補預設值、巢狀深合併', () => {
+test('loadConfig: unset fields get their defaults, nested maps deep-merge', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-'));
   try {
     fs.writeFileSync(
@@ -80,14 +80,14 @@ test('loadConfig: 未填欄位補預設值、巢狀深合併', () => {
     const cfg = loadConfig(tmp);
     assert.deepEqual(cfg.docs_dirs, ['documentation/']);
     assert.deepEqual(cfg.entry_files, []);
-    assert.deepEqual(cfg.docs_files, []); // v1.4.0 新欄位：舊設定沒寫也要補上空陣列（否則 collectFiles 會炸）
+    assert.deepEqual(cfg.docs_files, []); // v1.4.0 new field: must default to an empty array even when an old config omits it (otherwise collectFiles crashes)
     assert.equal(cfg.index_file, null);
     assert.equal(cfg.targets.completeness, 4);
-    assert.equal(cfg.targets.economy, 4); // v1.0.0 第六維：舊設定沒寫也要補上預設 target
+    assert.equal(cfg.targets.economy, 4); // v1.0.0's sixth dimension: an old config that omits it must still get the default target
     assert.deepEqual(cfg.economy.entry_cost_tiers, [20000, 10000, 5000, 3000]);
     assert.equal(cfg.economy.pollution_max, 0.1);
     assert.equal(cfg.freshness.convention, 'frontmatter');
-    assert.equal(cfg.freshness.stale_after_days, 60); // 預設值沒被 freshness 覆寫吃掉
+    assert.equal(cfg.freshness.stale_after_days, 60); // the default isn't swallowed by the freshness override
     assert.equal(cfg.correctness_sample, 8);
     assert.equal(cfg.language, 'zh-TW');
   } finally {
@@ -95,32 +95,32 @@ test('loadConfig: 未填欄位補預設值、巢狀深合併', () => {
   }
 });
 
-test('resolveRoot: --root 優先，否則 cwd', () => {
+test('resolveRoot: --root wins, otherwise cwd', () => {
   assert.equal(resolveRoot(['--root', '/tmp/x']), path.resolve('/tmp/x'));
   assert.equal(resolveRoot([]), process.cwd());
 });
 
-test('parseArgs: --root/--config/--include（可重複＋逗號分隔）', () => {
+test('parseArgs: --root/--config/--include (repeatable + comma-separated)', () => {
   const a = parseArgs(['--root', '/tmp/x', '--include', 'docs/infra/', '--include', 'docs/a/**,docs/b.md']);
   assert.equal(a.root, path.resolve('/tmp/x'));
   assert.equal(a.configFile, path.join(path.resolve('/tmp/x'), '.docgrad.yml'));
   assert.deepEqual(a.include, ['docs/infra/', 'docs/a/**', 'docs/b.md']);
 });
 
-test('parseArgs: --config 外置；未給旗標時用 <root>/.docgrad.yml、include 為空', () => {
+test('parseArgs: --config external; defaults to <root>/.docgrad.yml with no flags, include is empty', () => {
   assert.equal(parseArgs(['--config', '/tmp/cfg.yml']).configFile, path.resolve('/tmp/cfg.yml'));
   const bare = parseArgs([]);
   assert.equal(bare.configFile, path.join(process.cwd(), '.docgrad.yml'));
   assert.deepEqual(bare.include, []);
 });
 
-test('parseArgs: 缺值與未知參數丟錯（不靜默吞掉）', () => {
-  assert.throws(() => parseArgs(['--include']), /--include 需要一個參數值/);
-  assert.throws(() => parseArgs(['--root', '--include', 'x']), /--root 需要一個參數值/);
-  assert.throws(() => parseArgs(['--dim', 'freshness']), /未知參數/);
+test('parseArgs: missing value and unknown argument throw (not swallowed silently)', () => {
+  assert.throws(() => parseArgs(['--include']), /--include requires a value/);
+  assert.throws(() => parseArgs(['--root', '--include', 'x']), /--root requires a value/);
+  assert.throws(() => parseArgs(['--dim', 'freshness']), /Unknown argument/);
 });
 
-test('matchesScope: 空＝全量；目錄前綴對齊路徑分段；* 不跨層、** 跨層', () => {
+test('matchesScope: empty = full scope; directory prefix aligns with path segments; * does not cross levels, ** does', () => {
   assert.equal(matchesScope('docs/a/b.md', []), true);
   assert.equal(matchesScope('docs/infra/x.md', ['docs/infra']), true);
   assert.equal(matchesScope('docs/infra/x.md', ['docs/infra/']), true);
@@ -129,45 +129,46 @@ test('matchesScope: 空＝全量；目錄前綴對齊路徑分段；* 不跨層�
   assert.equal(matchesScope('docs/a.md', ['docs/*.md']), true);
   assert.equal(matchesScope('docs/a/b.md', ['docs/*.md']), false);
   assert.equal(matchesScope('docs/a/b.md', ['docs/**/*.md']), true);
-  assert.equal(matchesScope('docs/b.md', ['docs/**/*.md']), true); // ** 可吃零層
+  assert.equal(matchesScope('docs/b.md', ['docs/**/*.md']), true); // ** can match zero levels
   assert.equal(matchesScope('docs/ab.md', ['docs/?b.md']), true);
   assert.equal(matchesScope('docs/aab.md', ['docs/?b.md']), false);
 });
 
-test('loadConfig: --config 指向 root 外的設定檔（文件源本身不落檔）', () => {
+test('loadConfig: --config points at a config file outside root (the doc source itself takes no written file)', () => {
   const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-cfg-'));
   const docsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-src-'));
   try {
     const cfgFile = path.join(cfgDir, 'exported.yml');
     fs.writeFileSync(cfgFile, 'docs_dirs: [pages/]\nentry_files: []\n');
-    const cfg = loadConfig(docsRoot, cfgFile); // docsRoot 內沒有 .docgrad.yml
+    const cfg = loadConfig(docsRoot, cfgFile); // docsRoot has no .docgrad.yml of its own
     assert.deepEqual(cfg.docs_dirs, ['pages/']);
-    assert.throws(() => loadConfig(docsRoot), /請先執行 \/docgrad init/);
+    assert.throws(() => loadConfig(docsRoot), /Run \/docgrad init first/);
   } finally {
     fs.rmSync(cfgDir, { recursive: true, force: true });
     fs.rmSync(docsRoot, { recursive: true, force: true });
   }
 });
 
-test('collectFiles: 排除 exclude、含 entry_files、路徑排序', () => {
+test('collectFiles: excludes exclude, includes entry_files, paths sorted', () => {
   const cfg = loadConfig(FIXTURE);
   const { included, excluded } = collectFiles(FIXTURE, cfg);
   assert.deepEqual(included, ['CLAUDE.md', 'docs/README.md', 'docs/guide.md', 'docs/orphan.md']);
   assert.deepEqual(excluded, ['docs/archive/old.md']);
 });
 
-test('collectFiles: include 縮到 scope 內；exclude 仍優先於 scope', () => {
+test('collectFiles: include narrows to scope; exclude still wins over scope', () => {
   const cfg = loadConfig(FIXTURE);
   const { included, excluded } = collectFiles(FIXTURE, cfg, { include: ['docs/guide.md', 'docs/archive/**'] });
   assert.deepEqual(included, ['docs/guide.md']);
-  assert.deepEqual(excluded, ['docs/archive/old.md']); // 落在 scope 內，但仍被 exclude 擋下
+  assert.deepEqual(excluded, ['docs/archive/old.md']); // inside scope, but still blocked by exclude
   assert.deepEqual(collectFiles(FIXTURE, cfg, { include: ['docs/*.md'] }).included, [
     'docs/README.md', 'docs/guide.md', 'docs/orphan.md',
   ]);
 });
 
-test('collectFiles: docs_files 把 docs_dirs 之外的單檔納入語料', () => {
-  // 這條就是 docs_files 的守門員：欄位被拿掉時 PRODUCT.md／DESIGN.md 收不到，此處立刻紅。
+test('collectFiles: docs_files pulls a single file outside docs_dirs into the corpus', () => {
+  // This is docs_files' guard rail: if the field were removed, PRODUCT.md/DESIGN.md wouldn't be
+  // picked up and this test would go red immediately.
   const cfg = loadConfig(DOCS_FILES_FIXTURE);
   const { included } = collectFiles(DOCS_FILES_FIXTURE, cfg);
   assert.deepEqual(included, [
@@ -175,7 +176,7 @@ test('collectFiles: docs_files 把 docs_dirs 之外的單檔納入語料', () =>
   ]);
 });
 
-test('collectFiles: docs_files 去重、缺檔靜默略過、exclude 仍優先', () => {
+test('collectFiles: docs_files dedupes, silently skips missing files, exclude still wins', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-docsfiles-'));
   try {
     fs.mkdirSync(path.join(tmp, 'docs'));
@@ -188,15 +189,15 @@ test('collectFiles: docs_files 去重、缺檔靜默略過、exclude 仍優先',
         'exclude: [DROPPED.md]\nfreshness:\n  convention: none\n'
     );
     const { included, excluded } = collectFiles(tmp, loadConfig(tmp));
-    // docs/a.md 已被 docs_dirs 掃到 → 不重複；GONE.md 不存在 → 靜默略過（同 entry_files）
+    // docs/a.md is already picked up by docs_dirs -> not duplicated; GONE.md doesn't exist -> silently skipped (same as entry_files)
     assert.deepEqual(included, ['ROOT.md', 'docs/a.md']);
-    assert.deepEqual(excluded, ['DROPPED.md']); // 列在 docs_files 也擋不住 exclude
+    assert.deepEqual(excluded, ['DROPPED.md']); // listing it in docs_files doesn't block exclude
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('collectFiles: docs_files 指到目錄 → 明確丟錯（不留給 inventory 爆 EISDIR）', () => {
+test('collectFiles: docs_files pointing at a directory -> throws explicitly (instead of letting inventory blow up with EISDIR)', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-docsfiles-dir-'));
   try {
     fs.mkdirSync(path.join(tmp, 'docs'));
@@ -205,35 +206,36 @@ test('collectFiles: docs_files 指到目錄 → 明確丟錯（不留給 invento
       path.join(tmp, '.docgrad.yml'),
       'docs_dirs: [docs/]\ndocs_files: [docs/]\nfreshness:\n  convention: none\n'
     );
-    assert.throws(() => collectFiles(tmp, loadConfig(tmp)), /docs_files 只能列單一檔案.*docs_dirs/s);
+    assert.throws(() => collectFiles(tmp, loadConfig(tmp)), /docs_files may only list a single file.*docs_dirs/s);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('estimateTokens: ASCII 每 4 字元 1 token', () => {
+test('estimateTokens: ASCII is 1 token per 4 characters', () => {
   assert.equal(estimateTokens('a'.repeat(40)), 10);
 });
 
-test('estimateTokens: CJK 每字 1.1 token', () => {
+test('estimateTokens: CJK is 1.1 tokens per character', () => {
   assert.equal(estimateTokens('中文字'), 3); // round(3.3)
   assert.equal(estimateTokens('中'.repeat(10)), 11);
 });
 
-test('githubSlug: 小寫、去標點、空白轉連字號、CJK 保留', () => {
+test('githubSlug: lowercase, strip punctuation, spaces to dashes, CJK preserved', () => {
   assert.equal(githubSlug('Docs index'), 'docs-index');
   assert.equal(githubSlug('中文標題'), '中文標題');
   assert.equal(githubSlug('API v2.0 (beta)'), 'api-v20-beta');
 });
 
-test('githubSlug: 逐個空白各換一個 dash（標點移除後的相鄰空白產生雙 dash）', () => {
-  // GitHub 的行為：先去標點再逐空白換 dash，故 `a / b` -> `a--b`。舊實作用 \s+ 收成單 dash。
+test('githubSlug: each individual space becomes its own dash (adjacent spaces left by stripped punctuation give a double dash)', () => {
+  // GitHub's actual behavior: strip punctuation first, then turn each space into a dash, so
+  // `a / b` -> `a--b`. The old implementation collapsed with \s+ into a single dash.
   assert.equal(githubSlug('狀態圖例 (status / sot_level legend)'), '狀態圖例-status--sot_level-legend');
   assert.equal(githubSlug('5. 業務動作 → 呼叫對應'), '5-業務動作--呼叫對應');
   assert.equal(githubSlug('a  b'), 'a--b');
 });
 
-test('extractHeadings: 詞內底線是字面值，只有強調用的底線才移除', () => {
+test('extractHeadings: a word-internal underscore is literal; only an emphasis underscore is stripped', () => {
   assert.ok(extractHeadings('## snake_case_name here\n').has('snake_case_name-here'));
   assert.ok(extractHeadings('## _italic_ title\n').has('italic-title'));
   assert.ok(extractHeadings('## __bold__ x\n').has('bold-x'));
@@ -241,20 +243,20 @@ test('extractHeadings: 詞內底線是字面值，只有強調用的底線才移
   assert.ok(extractHeadings('## 狀態圖例 (status / sot_level legend)\n').has('狀態圖例-status--sot_level-legend'));
 });
 
-test('extractHeadings: 顯式錨 <a id>／<a name> 也要納入 slug 集', () => {
+test('extractHeadings: explicit anchors <a id>/<a name> are also indexed into the slug set', () => {
   const slugs = extractHeadings('# T\n\n<a id="canonical-contracts"></a>\n## 內容\n');
-  assert.ok(slugs.has('canonical-contracts'), '<a id> 應被索引');
-  assert.ok(slugs.has('t') && slugs.has('內容'), '一般標題不受影響');
-  assert.ok(extractHeadings("<a name='legacy-anchor'></a>\n").has('legacy-anchor'), '單引號 name= 也認');
-  assert.ok(extractHeadings('<a class="x" id="with-attrs"></a>\n').has('with-attrs'), '前面有其他屬性也認');
+  assert.ok(slugs.has('canonical-contracts'), '<a id> should be indexed');
+  assert.ok(slugs.has('t') && slugs.has('內容'), 'a normal heading is unaffected');
+  assert.ok(extractHeadings("<a name='legacy-anchor'></a>\n").has('legacy-anchor'), 'single-quoted name= is also recognized');
+  assert.ok(extractHeadings('<a class="x" id="with-attrs"></a>\n').has('with-attrs'), 'other attributes before it are also fine');
 });
 
-test('extractHeadings: 重複標題加序號後綴', () => {
+test('extractHeadings: repeated headings get a numeric suffix', () => {
   const slugs = extractHeadings('# A\n## Setup\n## Setup\n');
   assert.ok(slugs.has('a') && slugs.has('setup') && slugs.has('setup-1'));
 });
 
-test('extractLinks: 抓 inline link、跳過 code fence', () => {
+test('extractLinks: captures inline links, skips code fences', () => {
   const links = extractLinks('[a](x.md)\n```\n[no](skip.md)\n```\n![img](p.png)\n');
   assert.deepEqual(links, [
     { target: 'x.md', line: 1 },
@@ -271,7 +273,7 @@ test('extractClaimedDate: frontmatter / heading-line / none', () => {
   assert.equal(extractClaimedDate(hl, { convention: 'none', field: null }), null);
 });
 
-test('parseFreshnessConventions: 單值/逗號/加號分隔/空值 → none', () => {
+test('parseFreshnessConventions: single value / comma / plus separated / empty -> none', () => {
   assert.deepEqual(parseFreshnessConventions('frontmatter'), ['frontmatter']);
   assert.deepEqual(parseFreshnessConventions('frontmatter,heading-line'), ['frontmatter', 'heading-line']);
   assert.deepEqual(parseFreshnessConventions('frontmatter+heading-line'), ['frontmatter', 'heading-line']);
@@ -280,16 +282,16 @@ test('parseFreshnessConventions: 單值/逗號/加號分隔/空值 → none', ()
   assert.deepEqual(parseFreshnessConventions('none'), ['none']);
 });
 
-test('extractClaimedDate: 多值依序嘗試，第一個抽到的為準', () => {
+test('extractClaimedDate: multiple values tried in order, first extracted wins', () => {
   const fm = '---\nlast_updated: 2026-07-01\n---\n# T\n';
   const hl = '# T\n\n> Last updated: 2026-06-15\n';
   const freshness = { convention: 'frontmatter,heading-line', field: 'last_updated', heading_field: 'Last updated:' };
-  assert.equal(extractClaimedDate(fm, freshness), '2026-07-01'); // 只有 frontmatter 命中
-  assert.equal(extractClaimedDate(hl, freshness), '2026-06-15'); // frontmatter 找不到 → fallback heading-line
-  assert.equal(extractClaimedDate('# T\n', freshness), null); // 兩者都沒有
+  assert.equal(extractClaimedDate(fm, freshness), '2026-07-01'); // only frontmatter matches
+  assert.equal(extractClaimedDate(hl, freshness), '2026-06-15'); // frontmatter finds nothing -> falls back to heading-line
+  assert.equal(extractClaimedDate('# T\n', freshness), null); // neither matches
 });
 
-test('extractClaimedDate: heading-line 只設 field 時 fallback 當 heading_field（相容舊設定）', () => {
+test('extractClaimedDate: heading-line falls back to field as heading_field when only field is set (compatible with old configs)', () => {
   const hl = '# T\n\n> Last updated: 2026-06-15\n';
   assert.equal(
     extractClaimedDate(hl, { convention: 'heading-line', field: 'Last updated:', heading_field: null }),
@@ -297,7 +299,7 @@ test('extractClaimedDate: heading-line 只設 field 時 fallback 當 heading_fie
   );
 });
 
-test('extractCodeRefs: 單一 backtick 內、以 srcDirs 前綴開頭的路徑', () => {
+test('extractCodeRefs: a path inside a single backtick span, starting with an srcDirs prefix', () => {
   const text = '參考 `apps/api/src/contract/contract-approval.service.ts` 的實作。';
   const refs = extractCodeRefs(text, ['apps/api/src']);
   assert.deepEqual(refs, [
@@ -305,7 +307,7 @@ test('extractCodeRefs: 單一 backtick 內、以 srcDirs 前綴開頭的路徑',
   ]);
 });
 
-test('extractCodeRefs: `path › symbol` 單一 backtick 形式（how-to.md 慣例）', () => {
+test('extractCodeRefs: the `path › symbol` single-backtick form (how-to.md convention)', () => {
   const text = '見 `scripts/lib.mjs › DEFAULTS.targets` 與 `scripts/lib.mjs › parseYamlSubset()`。';
   const refs = extractCodeRefs(text, ['scripts']);
   assert.deepEqual(refs, [
@@ -314,7 +316,7 @@ test('extractCodeRefs: `path › symbol` 單一 backtick 形式（how-to.md 慣�
   ]);
 });
 
-test('extractCodeRefs: 裸檔名（無路徑前綴）比 basename，含兩個 backtick span 夾 ›', () => {
+test('extractCodeRefs: a bare filename (no path prefix) matched by basename, including two backtick spans joined by ›', () => {
   const text = '寫入點＝`contract-approval.service.ts` submit；另見 `contract-approval.service.ts` › `approve()`。';
   const refs = extractCodeRefs(text, ['apps/api/src']);
   assert.deepEqual(refs, [
@@ -323,19 +325,19 @@ test('extractCodeRefs: 裸檔名（無路徑前綴）比 basename，含兩個 ba
   ]);
 });
 
-test('extractCodeRefs: 目錄本身（不含檔名）也算路徑錨點，且 contractx 不誤中 contract 前綴', () => {
+test('extractCodeRefs: a bare directory (no filename) also counts as a path anchor, and contractx does not falsely match the contract prefix', () => {
   const text = '`apps/api/src/timesheet` 整個模組；`apps/api/src/contractx/foo.ts` 不該被當成 contract 前綴命中。';
   const refs = extractCodeRefs(text, ['apps/api/src/timesheet', 'apps/api/src/contract']);
   assert.deepEqual(refs.map((r) => r.path), ['apps/api/src/timesheet']);
 });
 
-test('extractCodeRefs: 跳過 code fence 內的 backtick、跳過非路徑形狀的行內 code', () => {
+test('extractCodeRefs: skips backticks inside a code fence, skips non-path-shaped inline code', () => {
   const text = '```\n`apps/api/src/skip.ts`\n```\n一般 `npm install` 不是路徑。';
   const refs = extractCodeRefs(text, ['apps/api/src']);
   assert.deepEqual(refs, []);
 });
 
-test('docgradMeta: 回傳版本與 rubric 指紋；rubric 一改 hash 就變', () => {
+test('docgradMeta: returns version and rubric fingerprint; the hash changes when rubric changes', () => {
   const meta = docgradMeta();
   assert.match(meta.version, /^\d+\.\d+\.\d+$/);
   assert.match(meta.rubric_hash, /^[0-9a-f]{8}$/);
@@ -345,17 +347,17 @@ test('docgradMeta: 回傳版本與 rubric 指紋；rubric 一改 hash 就變', (
     fs.mkdirSync(path.join(tmp, '.claude-plugin'));
     fs.mkdirSync(path.join(tmp, 'reference'));
     fs.writeFileSync(path.join(tmp, '.claude-plugin/plugin.json'), '{"version":"9.9.9"}');
-    fs.writeFileSync(path.join(tmp, 'reference/rubric.md'), '★4 錨點 A');
+    fs.writeFileSync(path.join(tmp, 'reference/rubric.md'), '★4 anchor A');
     const before = docgradMeta(tmp);
     assert.equal(before.version, '9.9.9');
-    fs.writeFileSync(path.join(tmp, 'reference/rubric.md'), '★4 錨點 B');
+    fs.writeFileSync(path.join(tmp, 'reference/rubric.md'), '★4 anchor B');
     assert.notEqual(docgradMeta(tmp).rubric_hash, before.rubric_hash);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('docgradMeta: 讀不到檔案時回 null 而不是丟錯', () => {
+test('docgradMeta: returns null instead of throwing when files cannot be read', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-meta-'));
   try {
     assert.deepEqual(docgradMeta(tmp), { version: null, rubric_hash: null });
@@ -364,7 +366,7 @@ test('docgradMeta: 讀不到檔案時回 null 而不是丟錯', () => {
   }
 });
 
-test('extractClaimLines: 只收 fence 外、帶得到 code 座標的非標題行', () => {
+test('extractClaimLines: only keeps non-heading lines outside a fence that have code coordinates', () => {
   const text = [
     '# 標題含 `src/a.ts` 但不算宣稱',
     '',
@@ -380,8 +382,9 @@ test('extractClaimLines: 只收 fence 外、帶得到 code 座標的非標題行
   assert.equal(claims[0].refs, 1);
 });
 
-test('extractClaimLines: 帶回所屬 section 範圍，讓驗證涵蓋錨點行的鄰句', () => {
-  // oikos 那條 balance 正負號就寫在錨點行的下一句——只驗錨點行會整條漏掉。
+test('extractClaimLines: returns the section range it belongs to, so verification covers the sentence next to the anchor', () => {
+  // The oikos balance sign was written in the sentence right after the anchor line — checking
+  // only the anchor line would have missed the whole thing.
   const text = [
     '# 結算設計',
     '',
@@ -397,11 +400,11 @@ test('extractClaimLines: 帶回所屬 section 範圍，讓驗證涵蓋錨點行�
   assert.equal(claim.line, 3);
   assert.equal(claim.section, '結算設計');
   const [start, end] = claim.section_lines;
-  assert.ok(start <= 5 && end >= 5, `鄰句第 5 行必須落在 section 範圍 [${start}, ${end}] 內`);
-  assert.ok(end < 7, 'section 範圍不可越過下一個標題');
+  assert.ok(start <= 5 && end >= 5, `the neighboring sentence on line 5 must fall inside section range [${start}, ${end}]`);
+  assert.ok(end < 7, 'the section range must not cross the next heading');
 });
 
-test('rankClaimCandidates: ref 多者優先，同分依 path 再依 line（穩定可重現）', () => {
+test('rankClaimCandidates: more refs comes first, ties broken by path then line (stable, reproducible)', () => {
   const ranked = rankClaimCandidates([
     { path: 'b.md', claims: [{ line: 2, text: 'x', refs: 1 }] },
     { path: 'a.md', claims: [{ line: 9, text: 'y', refs: 1 }, { line: 1, text: 'z', refs: 3 }] },

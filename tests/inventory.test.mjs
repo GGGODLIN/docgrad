@@ -11,8 +11,8 @@ const RETRIEVAL_FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.
 const DOCS_FILES_FIXTURE = fileURLToPath(new URL('./fixtures/docs-files/', import.meta.url));
 const SCRIPT = fileURLToPath(new URL('../scripts/inventory.mjs', import.meta.url));
 
-test('inventory: entry_cost 對 symlink 別名去重（同一實體只計一次）', () => {
-  // kdan-bpm 的 CLAUDE.md -> AGENTS.md：agent 只載入一份，逐名相加會讓固定成本翻倍。
+test('inventory: entry_cost dedupes symlink aliases (the same real file only counted once)', () => {
+  // kdan-bpm's CLAUDE.md -> AGENTS.md: an agent only loads one copy, summing by name would double the fixed cost.
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-symlink-'));
   try {
     fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
@@ -23,15 +23,15 @@ test('inventory: entry_cost 對 symlink 別名去重（同一實體只計一次�
     fs.symlinkSync('AGENTS.md', path.join(root, 'CLAUDE.md'));
     const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', root], { encoding: 'utf8' }));
     const solo = out.files.find((f) => f.path === 'AGENTS.md').tokens_est;
-    assert.deepEqual(out.entry_cost.files, ['AGENTS.md', 'CLAUDE.md'], '兩個名稱都要列出');
-    assert.equal(out.entry_cost.tokens_est, solo, '只計一次，不是兩倍');
+    assert.deepEqual(out.entry_cost.files, ['AGENTS.md', 'CLAUDE.md'], 'both names must be listed');
+    assert.equal(out.entry_cost.tokens_est, solo, 'counted once, not doubled');
     assert.deepEqual(out.entry_cost.symlink_aliases, [{ path: 'CLAUDE.md', same_file_as: 'AGENTS.md' }]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('inventory: 清單/型別/entry_cost/pollution', () => {
+test('inventory: listing/type/entry_cost/pollution', () => {
   const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
   assert.equal(out.totals.files, 4);
   assert.equal(out.files.find((f) => f.path === 'CLAUDE.md').type, 'entry');
@@ -44,8 +44,9 @@ test('inventory: 清單/型別/entry_cost/pollution', () => {
   assert.ok(out.pollution.ratio > 0 && out.pollution.ratio < 1);
 });
 
-test('inventory: docs_files 是一般文件（type doc），不灌水固定成本', () => {
-  // 這正是 docs_files 存在的理由：改列 entry_files 也收得到檔，但會被算成每次任務都付的稅。
+test('inventory: docs_files are regular documents (type doc), do not inflate the fixed cost', () => {
+  // This is the whole reason docs_files exists: listing it as entry_files would also pick up the
+  // file, but it would get counted as a tax paid on every single task.
   const out = JSON.parse(
     execFileSync(process.execPath, [SCRIPT, '--root', DOCS_FILES_FIXTURE], { encoding: 'utf8' })
   );
@@ -56,36 +57,36 @@ test('inventory: docs_files 是一般文件（type doc），不灌水固定成�
   assert.equal(
     out.entry_cost.tokens_est,
     out.files.find((f) => f.path === 'CLAUDE.md').tokens_est,
-    'entry_cost 只能是 entry_files 的量，docs_files 不得計入'
+    'entry_cost may only reflect entry_files; docs_files must not be counted in'
   );
 });
 
-test('inventory: --include 限定範圍（scope 標明、entry 不在範圍則固定成本為 0）', () => {
+test('inventory: --include limits scope (scope is labeled, fixed cost is 0 when entry is outside it)', () => {
   const out = JSON.parse(
     execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE, '--include', 'docs/guide.md'], { encoding: 'utf8' })
   );
   assert.deepEqual(out.scope, ['docs/guide.md']);
   assert.deepEqual(out.files.map((f) => f.path), ['docs/guide.md']);
   assert.equal(out.totals.files, 1);
-  assert.deepEqual(out.entry_cost.files, []); // CLAUDE.md 不在 scope → 固定成本不可引用
+  assert.deepEqual(out.entry_cost.files, []); // CLAUDE.md is outside scope -> fixed cost cannot be cited
   assert.equal(out.entry_cost.tokens_est, 0);
-  assert.deepEqual(out.pollution.excluded_files, []); // 污染面也跟著 scope 收斂
+  assert.deepEqual(out.pollution.excluded_files, []); // pollution surface narrows along with scope
 });
 
-test('inventory: 全量時 scope 為 null（既有行為不變）', () => {
+test('inventory: scope is null for a full run (unchanged existing behavior)', () => {
   const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
   assert.equal(out.scope, null);
   assert.equal(out.totals.files, 4);
 });
 
-test('inventory: 無 .docgrad.yml → exit 1＋stderr 導向 init', () => {
+test('inventory: no .docgrad.yml -> exit 1 + stderr points at init', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-'));
   const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /請先執行 \/docgrad init/);
+  assert.match(r.stderr, /Run \/docgrad init first/);
 });
 
-test('inventory: 無 H2 的檔 structure 仍存在但為空', () => {
+test('inventory: a file with no H2 still gets a structure, just empty', () => {
   const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
   const claude = out.files.find((f) => f.path === 'CLAUDE.md');
   assert.deepEqual(claude.structure.h2, []);
@@ -94,7 +95,7 @@ test('inventory: 無 H2 的檔 structure 仍存在但為空', () => {
   assert.equal(out.totals.rules_anchored_ratio, 0);
 });
 
-test('inventory: structure.h2 段落級 tokens、rules 中位數/anchored_ratio（retrieval fixture）', () => {
+test('inventory: structure.h2 per-section tokens, rules median/anchored_ratio (retrieval fixture)', () => {
   const out = JSON.parse(
     execFileSync(process.execPath, [SCRIPT, '--root', RETRIEVAL_FIXTURE], { encoding: 'utf8' })
   );
@@ -104,7 +105,7 @@ test('inventory: structure.h2 段落級 tokens、rules 中位數/anchored_ratio�
     ['Overview', 'Rules']
   );
   assert.ok(guide.structure.h2.every((s) => s.tokens_est > 0));
-  // guide.md 有兩條 **MUST** 規則行：一條帶 `src/foo/bar.ts` 座標、一條沒有 → anchored_ratio 0.5
+  // guide.md has two **MUST** rule lines: one has a `src/foo/bar.ts` anchor, one doesn't -> anchored_ratio 0.5
   assert.equal(guide.structure.rules.count, 2);
   assert.equal(guide.structure.rules.anchored_ratio, 0.5);
   assert.ok(guide.structure.rules.median_chars > 0);
@@ -117,7 +118,7 @@ test('inventory: structure.h2 段落級 tokens、rules 中位數/anchored_ratio�
   assert.equal(out.totals.rules_anchored_ratio, 0.5);
 });
 
-test('inventory: rules.pattern 可透過 .docgrad.yml 自訂', () => {
+test('inventory: rules.pattern can be customized via .docgrad.yml', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-rules-'));
   try {
     fs.mkdirSync(path.join(tmp, 'docs'));

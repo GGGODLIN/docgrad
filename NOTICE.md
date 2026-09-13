@@ -1,10 +1,12 @@
 # NOTICE
 
-docgrad 的方法論與部分機制借鑑以下先行者，特此致謝：
+docgrad's methodology and some mechanisms draw on the following prior work, with thanks:
 
-- **claim-ledger 正確性抽查**：借鑑 [ln-21-documentation-auditor](https://github.com/levnikolaevich/claude-code-skills)
-  （Lev Nikolaevich）的宣稱逐條驗證做法；本 skill 為獨立實作。
-- **文件類型學**：參照 [Diátaxis](https://diataxis.fr/)（tutorial / how-to / reference / explanation）。
-- **Entry-file token 經濟**：參照 HumanLayer〈Writing a Good CLAUDE.md〉的 always-loaded 成本觀點。
-- **五維星等與 loop 方法論**：沉澱自 2026-07-10/11 兩個實際文件系統的多輪實戰評比。
-- **skill 骨架（routing／reference／blocker 模式）**：參照 impeccable skill 的組織方式。
+- **claim-ledger correctness sampling**: draws on the claim-by-claim verification approach of
+  [ln-21-documentation-auditor](https://github.com/levnikolaevich/claude-code-skills)
+  (Lev Nikolaevich); this skill is an independent implementation.
+- **Document typology**: follows [Diátaxis](https://diataxis.fr/) (tutorial / how-to / reference / explanation).
+- **Entry-file token economy**: follows the always-loaded cost perspective of HumanLayer's "Writing a Good CLAUDE.md".
+- **Six-dimension star rating and loop methodology**: distilled from multiple rounds of hands-on
+  evaluation across two real documentation systems on 2026-07-10/11.
+- **Skill skeleton (routing / reference / blocker pattern)**: follows the impeccable skill's organization.

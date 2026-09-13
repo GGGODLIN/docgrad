@@ -1,4 +1,4 @@
-// scripts/lib.mjs — docgrad 量測腳本共用模組（零依賴，Node ≥18）
+// scripts/lib.mjs — shared module for docgrad's measurement scripts (zero dependencies, Node >=18)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 export const CONFIG_FILENAME = '.docgrad.yml';
 
-// --- YAML 子集解析 ---------------------------------------------------------
-// 只支援 .docgrad.yml 需要的兩層結構：頂層 scalar / inline list / block list /
-// 一層 nested map。不是通用 YAML parser。
+// --- YAML subset parser ---------------------------------------------------------
+// Only supports the two-level structure .docgrad.yml needs: top-level scalar / inline list /
+// block list / one level of nested map. Not a general-purpose YAML parser.
 
 function stripComment(s) {
   let inSingle = false;
@@ -41,7 +41,7 @@ function parseInlineList(v) {
 
 export function parseYamlSubset(text) {
   const root = {};
-  let nestedKey = null; // 目前展開中的頂層 key（nested map 或 block list）
+  let nestedKey = null; // the top-level key currently being expanded (nested map or block list)
   for (const raw of text.split(/\r?\n/)) {
     if (!raw.trim() || raw.trim().startsWith('#')) continue;
     const indent = raw.match(/^ */)[0].length;
@@ -49,24 +49,24 @@ export function parseYamlSubset(text) {
     if (!content) continue;
     if (indent === 0) {
       const m = content.match(/^([^:]+):\s*(.*)$/);
-      if (!m) throw new Error(`無法解析設定行: ${raw}`);
+      if (!m) throw new Error(`Could not parse config line: ${raw}`);
       const key = m[1].trim();
       const rest = m[2].trim();
       if (rest === '') {
         nestedKey = key;
-        root[key] = {}; // 遇到 "- " 時轉成 array
+        root[key] = {}; // becomes an array once a "- " line is encountered
       } else {
         nestedKey = null;
         root[key] = rest.startsWith('[') ? parseInlineList(rest) : parseScalar(rest);
       }
     } else {
-      if (nestedKey === null) throw new Error(`縮排層級錯誤: ${raw}`);
+      if (nestedKey === null) throw new Error(`Bad indentation level: ${raw}`);
       if (content.startsWith('- ')) {
         if (!Array.isArray(root[nestedKey])) root[nestedKey] = [];
         root[nestedKey].push(parseScalar(content.slice(2)));
       } else {
         const m = content.match(/^([^:]+):\s*(.*)$/);
-        if (!m) throw new Error(`無法解析設定行: ${raw}`);
+        if (!m) throw new Error(`Could not parse config line: ${raw}`);
         const rest = m[2].trim();
         root[nestedKey][m[1].trim()] = rest.startsWith('[') ? parseInlineList(rest) : parseScalar(rest);
       }
@@ -75,35 +75,39 @@ export function parseYamlSubset(text) {
   return root;
 }
 
-// --- 設定載入 --------------------------------------------------------------
+// --- Config loading --------------------------------------------------------------
 
 const DEFAULTS = {
   docs_dirs: ['docs/'],
-  // docs_files：docs_dirs 之外的**單一** markdown 檔，以一般文件（type: 'doc'）納入語料。
-  // 與 entry_files 的差別是「載入時機」不是「重要性」——見 reference/init.md 問卷第 3 項。
+  // docs_files: a **single** markdown file outside docs_dirs, included in the corpus as a regular
+  // document (type: 'doc'). It differs from entry_files in "when it's loaded", not "how important
+  // it is" — see item 3 of the questionnaire in reference/init.md.
   docs_files: [],
   entry_files: [],
   index_file: null,
   exclude: [],
   src_dirs: [],
-  // convention 可為單值或逗號/`+` 分隔的多值（見 parseFreshnessConventions）；
-  // heading_field 是 heading-line 用的行內關鍵字，未設時 fallback 用 field（相容舊設定）。
+  // convention can be a single value or a comma/`+`-separated list of values (see
+  // parseFreshnessConventions); heading_field is the inline keyword used for a heading-line;
+  // falls back to field when unset (compatibility with older configs).
   freshness: { convention: 'none', field: null, heading_field: null, stale_after_days: 60 },
   coverage: { drift_after_days: 30, min_commits: 3 },
   targets: { completeness: 4, correctness: 4, freshness: 4, linkage: 4, consistency: 4, economy: 4 },
-  // 經濟性錨點的門檻（v1.0.0 新增）。改這裡＝改 rubric 錨點語意＝major，見 reference/rubric.md。
+  // Thresholds for the economy anchors (added in v1.0.0). Changing these = changing the meaning
+  // of a rubric anchor = major, see reference/rubric.md.
   economy: { entry_cost_tiers: [20000, 10000, 5000, 3000], pollution_max: 0.1 },
   correctness_sample: 8,
   scenario: null,
-  scenarios: [], // retrieval.mjs 用：代表性 code 路徑（檔案或目錄）清單，report-only
-  rules: { pattern: '**MUST' }, // inventory.mjs structure.rules 用：規則行判定字串
+  scenarios: [], // used by retrieval.mjs: list of representative code paths (files or dirs), report-only
+  rules: { pattern: '**MUST' }, // used by inventory.mjs structure.rules: the string that marks a rule line
   language: 'zh-TW',
 };
 
-// configFile 可外置（--config）：文件源本身不能落檔時（匯出目錄、唯讀掛載）指定別處的設定檔。
+// configFile can be external (--config): for when the doc source itself can't take a written file
+// (an export directory, a read-only mount) and you want to point at a config file elsewhere.
 export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILENAME)) {
   if (!fs.existsSync(configFile)) {
-    throw new Error(`找不到 ${configFile}（root: ${rootDir}），請先執行 /docgrad init`);
+    throw new Error(`Could not find ${configFile} (root: ${rootDir}). Run /docgrad init first.`);
   }
   const parsed = parseYamlSubset(fs.readFileSync(configFile, 'utf8'));
   const config = {
@@ -118,14 +122,15 @@ export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILEN
     (c) => c === 'frontmatter' || c === 'heading-line'
   );
   if (needsField && !config.freshness.field) {
-    throw new Error(`freshness.convention 為 ${config.freshness.convention} 時必須設定 freshness.field`);
+    throw new Error(`freshness.field must be set when freshness.convention is ${config.freshness.convention}`);
   }
   return config;
 }
 
-// --- CLI 共用 ---------------------------------------------------------------
+// --- CLI shared -------------------------------------------------------------------
 
-// 只認 --root、缺值退回 cwd 的舊介面；四支 CLI 一律改用 parseArgs()。
+// Legacy interface that only recognizes --root and falls back to cwd when it's missing;
+// all four CLIs now use parseArgs() instead.
 export function resolveRoot(argv = process.argv.slice(2)) {
   const i = argv.indexOf('--root');
   return path.resolve(i >= 0 && argv[i + 1] ? argv[i + 1] : process.cwd());
@@ -133,14 +138,14 @@ export function resolveRoot(argv = process.argv.slice(2)) {
 
 function takeValue(argv, i, flag) {
   const v = argv[i + 1];
-  if (v === undefined || v.startsWith('--')) throw new Error(`${flag} 需要一個參數值`);
+  if (v === undefined || v.startsWith('--')) throw new Error(`${flag} requires a value`);
   return v;
 }
 
-// 四支腳本共用旗標：
-//   --root <dir>      目標 repo 根（預設 cwd）
-//   --config <file>   設定檔路徑（預設 <root>/.docgrad.yml）
-//   --include <glob>  限定範圍（scoped audit），可重複或逗號分隔；不給＝全量
+// Flags shared by all four scripts:
+//   --root <dir>      target repo root (default: cwd)
+//   --config <file>   config file path (default: <root>/.docgrad.yml)
+//   --include <glob>  limit scope (scoped audit), repeatable or comma-separated; omit = full scope
 export function parseArgs(argv = process.argv.slice(2)) {
   let rootArg = null;
   let configArg = null;
@@ -151,7 +156,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
     else if (a === '--config') configArg = takeValue(argv, i++, '--config');
     else if (a === '--include') {
       include.push(...takeValue(argv, i++, '--include').split(',').map((s) => s.trim()).filter(Boolean));
-    } else throw new Error(`未知參數 ${a}（支援 --root / --config / --include）`);
+    } else throw new Error(`Unknown argument ${a} (supported: --root / --config / --include)`);
   }
   const root = path.resolve(rootArg ?? process.cwd());
   return {
@@ -166,7 +171,7 @@ export function fail(message) {
   process.exit(1);
 }
 
-// --- 檔案盤點 ----------------------------------------------------------------
+// --- File inventory ----------------------------------------------------------
 
 const MD_EXTENSIONS = new Set(['.md', '.mdx', '.markdown']);
 const ALWAYS_SKIP_DIRS = new Set(['node_modules', '.git']);
@@ -186,9 +191,10 @@ function walkMarkdown(absDir, rootDir, out) {
   }
 }
 
-// --- scope 過濾（--include）--------------------------------------------------
-// 支援 `**`（跨層）、`*`（同層）、`?`（單字元）；不含這些字元的 pattern 視為路徑前綴
-// （`docs/infra` ⇒ 該檔本身與其下所有檔案）。scope 為空＝全量，不過濾。
+// --- scope filtering (--include) --------------------------------------------------
+// Supports `**` (crosses levels), `*` (same level), `?` (single character); a pattern without
+// these characters is treated as a path prefix (`docs/infra` => the file itself and everything
+// under it). An empty scope = full scope, no filtering.
 
 const GLOB_CHARS = /[*?]/;
 
@@ -201,7 +207,7 @@ export function globToRegExp(pattern) {
         i += 1;
         if (pattern[i + 1] === '/') {
           i += 1;
-          re += '(?:.*/)?'; // a/**/b 也要匹配 a/b
+          re += '(?:.*/)?'; // a/**/b must also match a/b
         } else {
           re += '.*';
         }
@@ -227,17 +233,20 @@ export function matchesScope(relPath, include = []) {
   });
 }
 
-// 單檔入口（docs_files／entry_files／index_file）共用的收錄規則：
-//   - 不存在 → 靜默略過（`.docgrad.yml` 進版控、跨 branch 共用，檔案暫時缺席不該讓整支腳本掛掉）。
-//   - 指到目錄 → 明確丟錯。否則錯誤會延到 inventory.mjs 讀檔時才爆成看不出原因的
-//     `EISDIR: illegal operation on a directory`（`docs_dirs` 誤放單檔時的 ENOTDIR 的鏡像）。
-//   - 已收錄 → 不重複 push（同一檔同時列在 docs_dirs 掃到的結果與本清單時只算一次）。
+// Shared inclusion rule for single-file entries (docs_files / entry_files / index_file):
+//   - doesn't exist -> silently skip (`.docgrad.yml` is version-controlled and shared across
+//     branches; a temporarily missing file shouldn't crash the whole script).
+//   - points at a directory -> throw explicitly. Otherwise the error would surface later, when
+//     inventory.mjs reads the file, as an unhelpful `EISDIR: illegal operation on a directory`
+//     (the mirror image of the ENOTDIR you get when a single file is mistakenly put in docs_dirs).
+//   - already included -> don't push a duplicate (when the same file is listed both in this field
+//     and in what docs_dirs scanned up, it only counts once).
 function pushSingleFile(rootDir, rel, field, out) {
   if (!rel) return;
   const abs = path.join(rootDir, rel);
   if (!fs.existsSync(abs)) return;
   if (fs.statSync(abs).isDirectory()) {
-    throw new Error(`${field} 只能列單一檔案，但 ${rel} 是目錄——整個目錄請改放 docs_dirs`);
+    throw new Error(`${field} may only list a single file, but ${rel} is a directory — put the whole directory in docs_dirs instead`);
   }
   if (!out.includes(rel)) out.push(rel);
 }
@@ -248,15 +257,19 @@ export function collectFiles(rootDir, config, { include = [] } = {}) {
     const abs = path.join(rootDir, dir);
     if (fs.existsSync(abs)) walkMarkdown(abs, rootDir, all);
   }
-  // docs_files：落在 docs_dirs 之外、但語意上是**一般文件**的單檔（典型是 repo 根的
-  // PRODUCT.md／DESIGN.md——條件式載入的必讀文件）。它們沒有被 docs_dirs 的目錄掃描收到，
-  // 而 docs_dirs 放單檔會炸（ENOTDIR）；改列 entry_files 雖收得到，卻會被 inventory.mjs 的
-  // fileType() 標成 'entry' 而灌水固定成本（oikos 實測 9,037 → 21,474，經濟性 ★3→★1），
-  // 且與 audit.md 的「entry_cost.files 必須真的每次任務都載入」相矛盾。故獨立一個欄位。
+  // docs_files: single files outside docs_dirs that are semantically **regular documents**
+  // (typically a repo-root PRODUCT.md/DESIGN.md — a must-read that's conditionally loaded).
+  // They aren't picked up by docs_dirs' directory scan, and putting a single file in docs_dirs
+  // would blow up (ENOTDIR); listing them as entry_files would get them in, but inventory.mjs's
+  // fileType() would tag them as 'entry' and inflate the fixed cost (measured on oikos:
+  // 9,037 -> 21,474 tokens, economy ★3 -> ★1), which also contradicts audit.md's requirement
+  // that entry_cost.files really be loaded on every single task. Hence a separate field.
   for (const f of config.docs_files) pushSingleFile(rootDir, f, 'docs_files', all);
-  // entry_files 與 index_file 可能落在 docs_dirs 之外（如 repo 根的 SKILL.md／README.md），
-  // 兩者都是文件體系的一部分，必須納入語料——index_file 漏收會讓它被 links.mjs 的
-  // roots 過濾掉（roots 只認 includedSet 內的路徑），整棵只從索引可達的子樹被誤判成孤兒。
+  // entry_files and index_file may fall outside docs_dirs (e.g. a repo-root SKILL.md/README.md);
+  // both are part of the documentation system and must be included in the corpus — missing
+  // index_file would get it filtered out of links.mjs's roots (roots only recognizes paths
+  // within includedSet), and the whole subtree reachable only from the index would be
+  // misjudged as orphans.
   for (const f of config.entry_files) pushSingleFile(rootDir, f, 'entry_files', all);
   pushSingleFile(rootDir, config.index_file, 'index_file', all);
   const isExcluded = (p) =>
@@ -268,7 +281,7 @@ export function collectFiles(rootDir, config, { include = [] } = {}) {
   };
 }
 
-// --- token 估算（啟發式係數：CJK 每字 1.1、其餘每 4 字元 1）------------------
+// --- Token estimation (heuristic coefficients: CJK 1.1 tokens/char, everything else 1 token/4 chars) ------------------
 
 export const CJK_TOKENS_PER_CHAR = 1.1;
 export const NON_CJK_CHARS_PER_TOKEN = 4;
@@ -280,13 +293,15 @@ export function estimateTokens(text) {
   return Math.round(cjk * CJK_TOKENS_PER_CHAR + (text.length - cjk) / NON_CJK_CHARS_PER_TOKEN);
 }
 
-// --- markdown 解析 ------------------------------------------------------------
+// --- markdown parsing ------------------------------------------------------------
 
-// GitHub 的 slug 是**逐個空白**換成一個 dash，不是把連續空白收成一個。
-// 兩者只在「標點被移除後留下相鄰空白」時分歧，而中文標題最常這樣寫：
-// `## 狀態圖例 (status / sot_level legend)` → GitHub 給 `狀態圖例-status--sot_level-legend`（雙 dash）。
-// 舊實作用 `\s+` 收成單 dash，於是所有這型連結都被誤報成壞錨（2026-09-05 在 kdan-bpm 量到 18 筆 bad_anchors
-// 有 5 筆屬此類）。與 github-slugger 的行為對齊即可消除。
+// GitHub's slug turns **each individual space** into one dash — it doesn't collapse a run of
+// spaces into one. The two only diverge when stripping punctuation leaves adjacent spaces
+// behind, and that's exactly how Chinese headings are most often written:
+// `## 狀態圖例 (status / sot_level legend)` -> GitHub gives `狀態圖例-status--sot_level-legend`
+// (double dash). The old implementation collapsed `\s+` into a single dash, so every link of
+// this shape was falsely reported as a bad anchor (5 of the 18 bad_anchors measured on kdan-bpm
+// on 2026-09-05 were of this kind). Matching github-slugger's behavior fixes it.
 export function githubSlug(heading) {
   return heading
     .trim()
@@ -295,9 +310,11 @@ export function githubSlug(heading) {
     .replace(/\s/g, '-');
 }
 
-// 顯式錨點 `<a id="x"></a>` / `<a name="x"></a>`——標題會隨改寫而變 slug，長期連結因此
-// 常改用顯式錨。舊實作只認 `#` 標題，於是指向顯式錨的連結一律被誤報成壞錨
-// （2026-09-05 在 kdan-bpm 量到 18 筆 bad_anchors 有 13 筆屬此類）。
+// Explicit anchors `<a id="x"></a>` / `<a name="x"></a>` — a heading's slug changes when the
+// heading is rewritten, so long-lived links often switch to an explicit anchor instead. The old
+// implementation only recognized `#` headings, so every link pointing at an explicit anchor was
+// falsely reported as a bad anchor (13 of the 18 bad_anchors measured on kdan-bpm on 2026-09-05
+// were of this kind).
 const EXPLICIT_ANCHOR_RE = /<a\s[^>]*\b(?:id|name)\s*=\s*["']([^"']+)["']/gi;
 
 export function extractHeadings(text) {
@@ -307,10 +324,12 @@ export function extractHeadings(text) {
     for (const m of line.matchAll(EXPLICIT_ANCHOR_RE)) slugs.add(m[1].trim());
     const m = line.match(/^#{1,6}\s+(.+?)\s*#*\s*$/);
     if (!m) continue;
-    // 去掉標題裡的 markdown 強調符號後才算 slug。`_` 要分兩種：GFM 的**詞內底線不是強調**
-    // （`sot_level` 是字面值，GitHub 的 slug 會保留），只有兩側非文數字的 `_` 才是分隔符。
-    // 舊實作一律移除，於是 `## 狀態圖例 (status / sot_level legend)` 被算成 `…-sotlevel-…`，
-    // 指向該節的連結全被誤報成壞錨。
+    // Strip markdown emphasis markers from the heading before computing the slug. `_` needs two
+    // cases: GFM's word-internal underscore is not emphasis (`sot_level` is literal, and GitHub's
+    // slug keeps it) — only an `_` with non-alphanumeric characters on both sides is a delimiter.
+    // The old implementation stripped it unconditionally, so
+    // `## 狀態圖例 (status / sot_level legend)` was computed as `…-sotlevel-…`, and every link
+    // pointing at that section was falsely reported as a bad anchor.
     const base = githubSlug(
       m[1].replace(/[*`]/g, '').replace(/_(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])_/gu, '')
     );
@@ -337,12 +356,12 @@ export function extractLinks(text) {
   return links;
 }
 
-// --- 新鮮度日期抽取 --------------------------------------------------------
+// --- Freshness date extraction --------------------------------------------------
 
 const DATE_RE = /(\d{4}-\d{2}-\d{2})/;
 
-// convention 接受單值或逗號/`+` 分隔的多值（"frontmatter,heading-line" 或
-// "frontmatter+heading-line"）；未設定/假值一律視為 'none'。
+// convention accepts a single value or a comma/`+`-separated list of values
+// ("frontmatter,heading-line" or "frontmatter+heading-line"); unset/falsy is always treated as 'none'.
 export function parseFreshnessConventions(convention) {
   if (!convention) return ['none'];
   return String(convention)
@@ -360,7 +379,8 @@ function extractClaimedDateOne(text, convention, freshness) {
     return m ? m[1] : null;
   }
   if (convention === 'heading-line') {
-    // heading_field 未設時 fallback 用 field（只設 field 就想吃 heading-line 的舊設定）。
+    // Falls back to field when heading_field is unset (an old config that only sets field but
+    // wants heading-line behavior).
     const field = freshness.heading_field ?? freshness.field;
     if (!field) return null;
     for (const line of text.split(/\r?\n/).slice(0, 30)) {
@@ -373,7 +393,7 @@ function extractClaimedDateOne(text, convention, freshness) {
   return null;
 }
 
-// 依 convention 清單依序嘗試，第一個抽到的日期為準。
+// Tries each convention in the list in order; the first date extracted wins.
 export function extractClaimedDate(text, freshness) {
   for (const convention of parseFreshnessConventions(freshness.convention)) {
     const date = extractClaimedDateOne(text, convention, freshness);
@@ -382,14 +402,15 @@ export function extractClaimedDate(text, freshness) {
   return null;
 }
 
-// --- code 錨點抽取（retrieval.mjs／inventory.mjs 用）------------------------------
-// docs/how-to.md §引用 code 的錨點慣例：backtick 內用 `path › symbol()`，不用行號。
-// 兩種形式都認：
-//   1. 單一 backtick 內、以任一 srcDirs 前綴開頭的路徑，可選 " › symbol"：
-//      `apps/api/src/foo/bar.ts`、`scripts/lib.mjs › DEFAULTS.targets`
-//   2. 裸檔名（無路徑前綴，靠呼叫端以實際檔案 basename 比對）：`bar.ts`，
-//      也認兩個 backtick span 中間夾 "›" 的寫法：`bar.ts` › `sym()`
-// 只在非 code fence 內抽取，避免命中範例程式碼。不寫死目錄名——srcDirs 由呼叫端傳入。
+// --- code anchor extraction (used by retrieval.mjs / inventory.mjs) ------------------------------
+// The convention in docs/how-to.md §citing code: inside a backtick span, use `path › symbol()`,
+// never a line number. Both forms are recognized:
+//   1. Inside a single backtick span, a path starting with any of srcDirs' prefixes, with an
+//      optional " › symbol": `apps/api/src/foo/bar.ts`, `scripts/lib.mjs › DEFAULTS.targets`
+//   2. A bare filename (no path prefix; the caller matches it against a real file's basename):
+//      `bar.ts`, also recognizing two backtick spans joined by "›": `bar.ts` › `sym()`
+// Only extracted outside code fences, to avoid matching example code. Directory names aren't
+// hardcoded — srcDirs is passed in by the caller.
 const CODE_REF_RE = /`([^`\n]+)`/g;
 const TWO_SPAN_ARROW_RE = /`([^`\n]+)`\s*›\s*`([^`\n]+)`/g;
 
@@ -405,7 +426,8 @@ export function extractCodeRefs(text, srcDirs = []) {
     }
     if (!inFence) lines.push(line);
   }
-  // 兩個 backtick span 夾 "›" 先正規化成單一 span，統一走同一套解析。
+  // Normalize two backtick spans joined by "›" into a single span first, then run everything
+  // through the same parsing path.
   const body = lines.join('\n').replace(TWO_SPAN_ARROW_RE, (_, p, s) => `\`${p} › ${s}\``);
 
   const refs = [];
@@ -420,7 +442,7 @@ export function extractCodeRefs(text, srcDirs = []) {
       symbol = raw.slice(arrowIdx + 1).trim() || null;
     }
     pathPart = pathPart.replace(/^['"]|['"]$/g, '');
-    if (!pathPart || /\s/.test(pathPart)) continue; // 不是路徑形狀的 token（一般行內 code）
+    if (!pathPart || /\s/.test(pathPart)) continue; // not a path-shaped token (ordinary inline code)
     const hasPrefix = prefixes.some((p) => pathPart === p || pathPart.startsWith(`${p}/`));
     const looksLikeFile = /\.[A-Za-z0-9]{1,10}$/.test(pathPart);
     if (hasPrefix) {
@@ -432,10 +454,12 @@ export function extractCodeRefs(text, srcDirs = []) {
   return refs;
 }
 
-// --- docgrad 自身的版本指紋（history.jsonl 的可比性欄位用）----------------------
+// --- docgrad's own version fingerprint (used for history.jsonl's comparability fields) ----------------
 //
-// rubric_hash 是「這一輪用的尺」的指紋：rubric.md 一改，hash 就變，report 據此畫
-// 可比性斷點。取前 8 碼夠分辨（碰撞機率可忽略），也讓 history 每行不至於太長。
+// rubric_hash is the fingerprint of "the ruler this round used": every edit to rubric.md changes
+// the hash, and the report draws a comparability break based on it. The first 8 characters are
+// enough to distinguish (collision probability is negligible), and it keeps each history line
+// from getting too long.
 
 const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -444,7 +468,7 @@ export function docgradMeta(skillRoot = SKILL_ROOT) {
   try {
     version = JSON.parse(fs.readFileSync(path.join(skillRoot, '.claude-plugin/plugin.json'), 'utf8')).version ?? null;
   } catch {
-    version = null; // 從 source tree 以外的方式執行時允許缺，不讓整支腳本炸掉
+    version = null; // allowed to be missing when run from outside the source tree; don't let it crash the script
   }
   let rubricHash = null;
   try {
@@ -456,19 +480,23 @@ export function docgradMeta(skillRoot = SKILL_ROOT) {
   return { version, rubric_hash: rubricHash };
 }
 
-// --- 具體宣稱（claim）候選 ------------------------------------------------------
+// --- Concrete claim candidates ------------------------------------------------------
 //
-// 「具體宣稱」＝fence 外、帶得到 code 座標的那些行（extractCodeRefs 抽得到 ref）。
-// 純敘述句抽不到座標，本來就不該進 claim-ledger——rubric 正確性的加權抽樣規則
-// （優先抽含路徑/符號者）於是變成機械可重現的，而不是每輪由 LLM 重新自由挑。
-// 標題行排除：標題是導航不是宣稱。
+// A "concrete claim" = a line outside a fence that has code coordinates to check against
+// (extractCodeRefs can extract a ref from it). A plain descriptive sentence has no coordinates
+// to extract and shouldn't enter the claim ledger in the first place — the rubric's weighted
+// sampling rule for correctness (prefer sampling lines with a path/symbol) becomes mechanically
+// reproducible this way, instead of being freely re-picked by an LLM each round. Heading lines
+// are excluded: a heading is navigation, not a claim.
 export function extractClaimLines(text, srcDirs = []) {
   const lines = text.split(/\r?\n/);
 
-  // 先切段：每個標題開一段，段落範圍用來給驗證者「該讀到哪裡」。
-  // 這一步是必要的，不是方便——矛盾常出現在**錨點行的鄰句**而不是錨點行本身：
-  // oikos 那條 balance 正負號寫在「結算由 `src/balance.ts › settle()` 負責」的下一句，
-  // 只驗錨點行會整條漏掉（2026-07-13 收官後重驗 ★4→★2 的形態）。
+  // Split into sections first: each heading opens a new section, and the section range tells a
+  // verifier "how far to read". This step is necessary, not just convenient — contradictions
+  // often show up **in the sentence next to the anchor line**, not the anchor line itself: on
+  // oikos, that balance sign was written in the sentence right after "settlement is handled by
+  // `src/balance.ts › settle()`", and checking only the anchor line missed the whole thing
+  // entirely (the pattern behind the ★4->★2 re-verification after wrap-up on 2026-07-13).
   const sections = [];
   let inFence = false;
   let current = { title: null, start: 1, end: lines.length };
@@ -477,7 +505,7 @@ export function extractClaimLines(text, srcDirs = []) {
     if (inFence) continue;
     const m = lines[i].match(/^\s*#{1,6}\s+(.+?)\s*#*\s*$/);
     if (!m) continue;
-    current.end = i; // 前一段收在標題行之前
+    current.end = i; // the previous section ends right before the heading line
     sections.push(current);
     current = { title: m[1].replace(/[*_`]/g, '').trim(), start: i + 2, end: lines.length };
   }
@@ -504,15 +532,17 @@ export function extractClaimLines(text, srcDirs = []) {
       text: line.trim(),
       refs: refs.length,
       section: sec.title,
-      // 驗證範圍：整段，不是只有這一行。
+      // verification range: the whole section, not just this one line.
       section_lines: [sec.start, sec.end],
     });
   }
   return out;
 }
 
-// 跨檔彙總 claim 候選並給一個**穩定**排序：ref 多的優先（宣稱越具體越該驗），
-// 同分依 path、再依 line——同一份語料每次跑出來的順序一定相同，抽樣才可重現。
+// Aggregates claim candidates across files with a **stable** ordering: more refs comes first
+// (the more specific the claim, the more it deserves verification), ties broken by path, then by
+// line — the order this produces from the same corpus is always the same, so sampling is
+// reproducible.
 export function rankClaimCandidates(perFile) {
   return perFile
     .flatMap(({ path: p, claims }) => claims.map((c) => ({ path: p, ...c })))

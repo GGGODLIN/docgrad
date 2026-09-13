@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-// retrieval.mjs — 可回溯性＋邊際成本（新量測腳本，report-only，見 reference/rubric.md §Token 經濟）
-// 用法: node retrieval.mjs [--root <repo>] [--config <file>] [--include <glob 不生效見 note>]；JSON → stdout。
+// retrieval.mjs — traceability + marginal cost (a newer measurement script, report-only, see reference/rubric.md §Token economy)
+// Usage: node retrieval.mjs [--root <repo>] [--config <file>] [--include <glob, see note below for why it's a no-op>]; JSON -> stdout.
 //
-// 量的兩件事：
-//   1. scenarios（.docgrad.yml 新欄位：代表性 code 路徑清單）——每條算「從 code 回到管它的 spec」
-//      要幾跳（depth_from_index）、邊際 token 成本（marginal_tokens）、有沒有反向指針（code_pointer）。
-//   2. areas／index_hotness——不靠 scenarios 也能給的通用訊號：各 src_dirs 子目錄有沒有 code→doc
-//      指針（code_pointer_ratio）、索引/入口檔是不是比它索引的東西還常改（index_hotness）。
+// Measures two things:
+//   1. scenarios (a new .docgrad.yml field: a list of representative code paths) — for each one,
+//      how many hops it takes to get from the code back to the spec that governs it
+//      (depth_from_index), the marginal token cost (marginal_tokens), and whether there's a
+//      reverse pointer (code_pointer).
+//   2. areas/index_hotness — general-purpose signals available even without scenarios: whether
+//      each src_dirs subdirectory has a code->doc pointer (code_pointer_ratio), and whether the
+//      index/entry files churn more often than what they index (index_hotness).
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -27,7 +30,7 @@ function isGitRepo(root) {
   }
 }
 
-// 近 N 天 commit 數；失敗（非 git／路徑不存在於歷史）→ null。
+// Number of commits in the last N days; failure (not git / path not in history) -> null.
 function commitsSince(root, rel, days) {
   try {
     const sinceIso = new Date(Date.now() - days * 86400000).toISOString();
@@ -60,14 +63,15 @@ function walkFiles(absDir, out) {
 function readTextSafe(absPath) {
   try {
     const buf = fs.readFileSync(absPath);
-    if (buf.includes(0)) return null; // 二進位跳過（粗略判斷：含 NUL byte）
+    if (buf.includes(0)) return null; // skip binary (rough heuristic: contains a NUL byte)
     return buf.toString('utf8');
   } catch {
     return null;
   }
 }
 
-// path 底下的實際檔案清單（檔案本身，或目錄遞迴、跳過 node_modules/.git）；不存在 → []。
+// The actual file listing under path (the file itself, or a directory walked recursively, skipping
+// node_modules/.git); doesn't exist -> [].
 function resolveFiles(root, relPath) {
   const abs = path.join(root, relPath);
   if (!fs.existsSync(abs)) return [];
@@ -78,11 +82,14 @@ function resolveFiles(root, relPath) {
   return out.map((a) => path.relative(root, a).split(path.sep).join('/'));
 }
 
-// 雙向目錄前綴比對：a 是 b 的祖先目錄、b 是 a 的祖先目錄，或完全相等。
-// 沿用 coverage.mjs 的「contractx 不誤中 contract」原則——沒有 '/' 邊界不算命中。
-// ref 是 query 的**祖先**時另加一條：ref 必須嚴格深於它所屬的 src_dir。`apps/api/src` 這種泛指
-// 整個 app 的提及（講 gate 射程、部署單位）不是「管這個檔的規則」，放進來會讓同一份 doc 變成
-// 每條 scenario／每個 area 的固定命中（kdan-workforce 實測：WF24 對任何路徑都 6 hits）。
+// Bidirectional directory-prefix comparison: a is an ancestor directory of b, b is an ancestor of
+// a, or they're exactly equal. Follows coverage.mjs's "contractx doesn't falsely match contract"
+// principle — without a '/' boundary it doesn't count as a hit. When ref is an **ancestor** of
+// query, there's one more condition: ref must be strictly deeper than the src_dir it belongs to.
+// A catch-all mention like `apps/api/src` (referring to the whole app, when discussing gate
+// coverage or deployment units) is not "the rule governing this file" — letting it in would turn
+// the same doc into a fixed hit for every scenario/area (measured on kdan-workforce: WF24 hit 6
+// times for any path).
 function refCovers(ref, query, prefixes) {
   if (ref === query || ref.startsWith(`${query}/`)) return true;
   if (!query.startsWith(`${ref}/`)) return false;
@@ -90,7 +97,7 @@ function refCovers(ref, query, prefixes) {
   return owner === undefined ? ref.includes('/') : ref.length > owner.length;
 }
 
-// path 底下任一檔案的內容有沒有指向 docsDirs 或某份 doc 的 basename（code→doc 反向指針）。
+// Whether any file under path contains a pointer back to docsDirs or a doc's basename (a code->doc reverse pointer).
 function hasCodePointer(root, files, docsDirs, docBasenames) {
   const dirPrefixes = docsDirs.map((d) => d.replace(/\/+$/, ''));
   for (const rel of files) {
@@ -111,17 +118,17 @@ try {
   const notes = [];
   if (include.length) {
     notes.push(
-      '--include 對本腳本不生效：可回溯性與邊際成本是全量索引/檢索概念，範圍一縮會漏掉指路鏈與跨檔錨點（同 coverage.mjs 的理由）'
+      '--include is a no-op for this script: traceability and marginal cost are full-index/retrieval concepts, and narrowing scope would drop the routing chain and cross-file anchors (same reasoning as coverage.mjs)'
     );
   }
 
   const docTexts = included.map((rel) => ({ rel, text: fs.readFileSync(path.join(root, rel), 'utf8') }));
   const tokensOf = new Map(docTexts.map((d) => [d.rel, estimateTokens(d.text)]));
   const docBasenames = included.map((rel) => path.posix.basename(rel));
-  // 每份 doc 的 code refs 只抽一次，scenarios/areas 兩段都重用。
+  // Each doc's code refs are extracted only once, reused by both the scenarios and areas sections.
   const docRefs = docTexts.map((d) => ({ rel: d.rel, refs: extractCodeRefs(d.text, config.src_dirs) }));
 
-  // --- markdown 連結圖 ＋ 從 index_file 的 BFS 深度（沿用 links.mjs 的連結解析邏輯）--------
+  // --- markdown link graph + BFS depth from index_file (reuses links.mjs's link-parsing logic) --------
   const includedSet = new Set(included);
   const graph = new Map(included.map((p) => [p, new Set()]));
   for (const { rel, text } of docTexts) {
@@ -152,9 +159,10 @@ try {
       }
     }
   } else {
-    notes.push('index_file 未設定或不在 included 範圍內：depth_from_index／marginal_tokens 的索引鏈一律視為不可達');
+    notes.push('index_file is unset or outside the included scope: depth_from_index/marginal_tokens treat the index chain as entirely unreachable');
   }
-  // doc 回 index 的最短路徑（含 doc 自己）；不可達（未連上索引鏈）就只算它自己。
+  // Shortest path from a doc back to the index (including the doc itself); unreachable (not
+  // connected to the index chain) just counts itself.
   function chainToIndex(doc) {
     if (!depthFromIndex.has(doc)) return [doc];
     const chain = [];
@@ -219,13 +227,13 @@ try {
     };
   });
   if (scenarioPaths.length === 0) {
-    notes.push('scenarios 未設定（.docgrad.yml）：邊際成本無法機械模擬（退回 LLM 依 scenario 模擬），仍給 areas 與 index_hotness');
+    notes.push('scenarios is unset (.docgrad.yml): marginal cost cannot be mechanically simulated (falls back to an LLM simulating a scenario), but areas and index_hotness are still given');
   }
 
-  // --- areas（src_dirs 第一層子目錄；定義同 coverage.mjs）--------------------------------
+  // --- areas (src_dirs first-level subdirectories; same definition as coverage.mjs) --------------------------------
   let areas = [];
   if (config.src_dirs.length === 0) {
-    notes.push('src_dirs 未設定，無法量測 areas／code_pointer_ratio');
+    notes.push('src_dirs is unset, areas/code_pointer_ratio cannot be measured');
   } else {
     const areaList = [];
     for (const srcDir of config.src_dirs) {
@@ -273,7 +281,7 @@ try {
       top5: [...perDoc].sort((a, b) => b.commits_90d - a.commits_90d || a.path.localeCompare(b.path)).slice(0, 5),
     };
   } else {
-    notes.push('無 git，index_hotness 無法量測');
+    notes.push('no git, index_hotness cannot be measured');
   }
 
   const out = {
@@ -283,7 +291,7 @@ try {
     code_pointer_ratio,
     index_hotness,
   };
-  if (notes.length) out.note = notes.join('；');
+  if (notes.length) out.note = notes.join('; ');
 
   process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
 } catch (err) {

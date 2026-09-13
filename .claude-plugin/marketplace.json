@@ -3,12 +3,12 @@
   "owner": {
     "name": "Ray Lee"
   },
-  "description": "單一 plugin 的 marketplace：docgrad —— 把 repo 的文件體系當成 AI agent 的 context 來源評分並逐輪收斂。",
+  "description": "A single-plugin marketplace: docgrad — grades a repo's documentation system as an AI agent's context source and converges it round by round.",
   "plugins": [
     {
       "name": "docgrad",
       "source": "./",
-      "description": "文件體系評分與收斂：六維計星（含經濟性／入口檔 token 稅）＋loop 逐輪修到達標。"
+      "description": "Documentation system grading and convergence: six-dimension star rating (including economy / entry-file token cost) plus a loop that fixes docs round by round until targets are met."
     }
   ]
 }
