@@ -175,7 +175,10 @@ try {
     return chain;
   }
 
-  const entryTokens = config.entry_files.reduce((sum, f) => {
+  // Entry files are the fixed term of marginal_tokens (always loaded); listing the same file
+  // twice must still cost its tokens only once.
+  const entryFiles = [...new Set(config.entry_files)];
+  const entryTokens = entryFiles.reduce((sum, f) => {
     const abs = path.join(root, f);
     if (!fs.existsSync(abs)) return sum;
     return sum + estimateTokens(fs.readFileSync(abs, 'utf8'));
@@ -212,6 +215,11 @@ try {
     for (const d of docs) {
       for (const node of chainToIndex(d.doc)) marginalSet.add(node);
     }
+    // Entry files are already in entryTokens, so any of them landing on a chain would be counted
+    // a second time (rubric.md, Token economy: "each file counted once"). Two routes lead there:
+    // (a) the entry file is a waypoint between the index and an anchoring doc; (b) the entry file
+    // IS an anchoring doc the index cannot reach — chainToIndex then returns [doc], i.e. itself.
+    for (const f of entryFiles) marginalSet.delete(f);
     const marginal_tokens =
       entryTokens + [...marginalSet].reduce((s, rel) => s + (tokensOf.get(rel) ?? 0), 0);
     const depths = docs.map((d) => d.depth_from_index).filter((d) => d !== null);

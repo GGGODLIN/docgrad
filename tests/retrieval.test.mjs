@@ -5,14 +5,25 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { estimateTokens } from '../scripts/lib.mjs';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.meta.url));
+const ENTRY_CHAIN_FIXTURE = fileURLToPath(new URL('./fixtures/retrieval-entry-chain/', import.meta.url));
 const SCRIPT = fileURLToPath(new URL('../scripts/retrieval.mjs', import.meta.url));
 
-function copyFixture() {
+function copyFixture(src = FIXTURE) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-retrieval-'));
-  fs.cpSync(FIXTURE, tmp, { recursive: true });
+  fs.cpSync(src, tmp, { recursive: true });
   return tmp;
+}
+
+// Token total for these files with each file counted once — the definition of marginal_tokens
+// (see reference/rubric.md, Token economy).
+function tokensOfFiles(root, rels) {
+  return [...new Set(rels)].reduce(
+    (sum, rel) => sum + estimateTokens(fs.readFileSync(path.join(root, rel), 'utf8')),
+    0
+  );
 }
 
 function gitInit(tmp) {
@@ -122,6 +133,50 @@ test('retrieval: --include is a no-op, note explains why (scope still returns nu
     assert.equal(out.scope, null);
     assert.equal(out.scenarios.length, 1); // not narrowed by --include
     assert.match(out.note, /--include is a no-op for this script/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// #38 part 1: marginal_tokens = entry_files + the index chain + the anchoring docs, with each
+// file counted once. Before the fix an entry file went into both entryTokens and marginalSet.
+test('retrieval: marginal_tokens does not double-count an entry file that sits on the index chain', () => {
+  const tmp = copyFixture(ENTRY_CHAIN_FIXTURE);
+  try {
+    const out = run(tmp);
+    const [scenario] = out.scenarios;
+    assert.deepEqual(scenario.docs.map((d) => d.doc), ['docs/guide.md', 'docs/loose.md']);
+    // Index chain: README(0) -> entry(1) -> guide(2); loose.md is unreachable, so it only counts itself.
+    assert.equal(scenario.docs.find((d) => d.doc === 'docs/guide.md').depth_from_index, 2);
+    assert.equal(scenario.docs.find((d) => d.doc === 'docs/loose.md').depth_from_index, null);
+
+    const distinct = ['EXTRA.md', 'docs/entry.md', 'docs/README.md', 'docs/guide.md', 'docs/loose.md'];
+    const expected = tokensOfFiles(tmp, distinct);
+    assert.equal(scenario.marginal_tokens, expected);
+    // If docs/entry.md were counted twice the difference would be exactly its tokens — pin the old behaviour out.
+    assert.notEqual(scenario.marginal_tokens, expected + tokensOfFiles(tmp, ['docs/entry.md']));
+    // EXTRA.md is on no chain and must still be counted once (guards against over-correcting by
+    // dropping entryTokens altogether).
+    assert.ok(scenario.marginal_tokens > tokensOfFiles(tmp, distinct.slice(1)));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('retrieval: an entry file that is itself an unreachable anchoring doc (chainToIndex -> [doc]) is also counted once', () => {
+  const tmp = copyFixture(ENTRY_CHAIN_FIXTURE);
+  fs.writeFileSync(
+    path.join(tmp, '.docgrad.yml'),
+    'docs_dirs: [docs/]\nentry_files: [docs/loose.md, EXTRA.md]\nindex_file: docs/README.md\nsrc_dirs: [src/]\nscenarios: [src/foo/bar.ts]\nfreshness:\n  convention: none\n'
+  );
+  try {
+    const out = run(tmp);
+    const [scenario] = out.scenarios;
+    // Same five files, each once — which file plays the entry role must not change the total.
+    assert.equal(
+      scenario.marginal_tokens,
+      tokensOfFiles(tmp, ['EXTRA.md', 'docs/entry.md', 'docs/README.md', 'docs/guide.md', 'docs/loose.md'])
+    );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
