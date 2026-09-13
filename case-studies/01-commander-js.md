@@ -147,6 +147,15 @@ English filler to dilute the ratio. **The rubric cannot distinguish "WIP I'm ash
 and it is what ended the loop at "needs a human". *Verified: `pollution.ratio` 0.4059 → 0.2891 with
 `entry_cost.tokens_est` 0 throughout.*
 
+> **Fixed** in the release this case study ships with (issue #44): `.docgrad.yml` gains a second narrowing field,
+> `out_of_scope:`. Both it and `exclude` take files out of the graded corpus; only `exclude` is charged to the pollution
+> surface. `docs/zh-CN/` belongs in `out_of_scope` — it is real documentation graded as its own corpus, not junk this repo
+> should answer for — and listing it there leaves economy free to follow the fixed cost. The field is not a free pass:
+> `inventory.out_of_scope.count` and `tokens_est` are printed on **every** run, empty or not, so how much was excused is
+> always on the same page as the ratio, and a path listed in both fields stays charged (`exclude` wins). It joins
+> `corpus_hash` only when non-empty, so configs that never use it hash exactly as before. The measurement above was taken
+> before the fix and is left as recorded.
+
 **2. On a library repo, correctness has no mechanical basis — and after convergence it grades only
 docgrad's own prose.** `extractClaimLines()` recognises a claim by an inline code span shaped like a
 file path. commander's documentation describes an *API* (`.option()`, `program.opts()`,
@@ -167,6 +176,27 @@ All 26 candidates then come from files docgrad created:
 The sampler now verifies only the prose the tool caused to exist, while the repository's actual
 documentation debt stays permanently unsampleable — and the correctness score goes **up**.
 *Verified: `claim_candidates` in the saved before/after JSON.*
+
+> **Half fixed** in the release this case study ships with (issue #40), and the half that is not is worth naming precisely.
+>
+> **Fixed — the first sentence.** `extractClaimLines()` now also recognises API-shaped inline code, so a call span like
+> `.option()` or `program.opts()` is a claim, not invisible prose. The guard against matching ordinary English is existence:
+> every segment of the span must occur as an identifier somewhere under `src_dirs`, which this repo's config sets to
+> `lib/`. A library repo that documents an API rather than a file tree therefore has a sampling population where it
+> previously had none, and the "no mechanical basis at all" defect is gone. Two limits are deliberate and still stand: a
+> **bare** identifier with neither dot nor parens (`minWidthToWrap`, exactly as named above) is still not a claim — the
+> symbol set contains `data`, `name` and `value`, so that shape cannot be existence-checked without matching prose — and
+> with `src_dirs` unset the whole extension is inert, reported as `claim_population.api_matching: "disabled"` rather than
+> left silent.
+>
+> **Not fixed — the second sentence.** Nothing stops the sampler drawing mostly from documents docgrad itself wrote; a
+> converged repo can still have its correctness score rest on the tool's own prose. What changed is that this is now
+> **measured and must be reported**: `inventory.mjs` marks each file and each candidate `docgrad_authored` (read from the
+> subject of the commit that added the file) and emits `totals.claims_docgrad_authored_ratio`, which
+> [reference/audit.md](../reference/audit.md) step 3 and [reference/rubric.md](../reference/rubric.md) §Correctness now
+> require beside cumulative coverage, with a high ratio named as a finding in its own right. A ★4 built on a population
+> that is 100% docgrad-authored is still available — it just can no longer be reported without saying so. The measurements
+> above were taken before the fix and are left as recorded.
 
 **3. `orphans: []` is a lie when `index_file` is null.** In `scripts/links.mjs`, the same condition
 produces two different degrees of honesty:
@@ -204,6 +234,14 @@ To get a clean mechanical number the runner added an explicit `<a id="cmd_args">
 `docs/deprecated.md`. The stripping exists to fix a *different* false positive (a CJK heading
 containing `sot_level`, per the comment in `scripts/lib.mjs`); it handles word-internal underscores
 and still mangles ones preceded by punctuation. *Verified by running both functions.*
+
+> **Fixed** in the release this case study ships with (issue #42): `stripHeadingEmphasis()` now removes an underscore only
+> when it forms a **matched emphasis pair** the way GFM defines one, instead of whenever a neighbour is non-alphanumeric.
+> `### cmd._args` slugs to `cmd_args` and `### _private` to `_private`, both matching GitHub, while `__init__` and
+> `_emphasis_` are still stripped because GitHub renders those as emphasis. The `sot_level` false positive the old rule
+> existed to fix stays fixed. This was a pure false positive: the anchor `docs/deprecated.md` already linked to was correct
+> all along, and the `<a id="cmd_args">` the runner added to clear it was never needed. It is still in arm B and was not
+> reverted — see the threats-to-validity note below. The measurement above was taken before the fix and is left as recorded.
 
 **5. `hasCodePointer()` substring-matches the bare docs directory name.** `lib/command.js` scores
 `code_pointer: true` because it contains the comment `// see configureOutput() for docs`. *Verified
@@ -246,6 +284,13 @@ files outside `docs_dirs` are never scanned, so they can be neither excluded nor
 (`docs_files: PRODUCT.md`) makes `for…of` iterate the string character by character, every character
 fails `existsSync`, and the result is that **no files are collected, with no error at all** — the
 only symptom is that `files_total` does not move, which nobody associates with a malformed config.
+
+> **The trap in the second paragraph is fixed** (issue #38, already shipped): `scripts/lib.mjs › validateConfigTypes()`
+> rejects a scalar written where a list belongs, and a non-boolean `exclude_untracked`, with an error naming the field and
+> showing the correct form. It deliberately does not auto-wrap the value — a silent repair would leave the config still
+> wrong in version control. **The finding itself — `exclude:` silently ignoring root-level files — still stands**: a file
+> outside `docs_dirs`/`docs_files`/`entry_files`/`index_file` is never collected, so it can be neither excluded nor
+> counted, and there is still no warning. `out_of_scope:` (issue #44) inherits the same limitation, for the same reason.
 
 ## Threats to validity
 

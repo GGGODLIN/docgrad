@@ -1,0 +1,8 @@
+# .docgrad/ledger.jsonl is append-only and unordered: two branches each appending their own
+# verifications should merge to the union of both, not stop the merge. Duplicates, if they ever
+# happen, are detectable on (claim_id, round).
+.docgrad/ledger.jsonl merge=union
+
+# history.jsonl is deliberately NOT union-merged. Its lines are ordered rounds, so a union merge
+# would leave two "round 10" entries and silently corrupt the trend `report` draws. Two branches
+# producing the same round number is a real conflict and should stop and be resolved by a human.

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates } from '../scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored } from '../scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -97,6 +97,7 @@ test('loadConfig: unset fields get their defaults, nested maps deep-merge', () =
     assert.deepEqual(cfg.docs_dirs, ['documentation/']);
     assert.deepEqual(cfg.entry_files, []);
     assert.deepEqual(cfg.docs_files, []); // v1.4.0 new field: must default to an empty array even when an old config omits it (otherwise collectFiles crashes)
+    assert.deepEqual(cfg.out_of_scope, []); // #44's new field: same requirement, and [] is what keeps every pre-#44 config's ratings and corpus_hash exactly where they were
     assert.equal(cfg.index_file, null);
     assert.equal(cfg.targets.completeness, 4);
     assert.equal(cfg.targets.economy, 4); // v1.0.0's sixth dimension: an old config that omits it must still get the default target
@@ -118,6 +119,7 @@ const SCALAR_CASES = [
   ['docs_files', 'PRODUCT.md', 'PRODUCT.md'],
   ['entry_files', 'CLAUDE.md', 'CLAUDE.md'],
   ['exclude', 'docs/archive/', 'docs/archive/'],
+  ['out_of_scope', 'docs/zh-CN/', 'docs/zh-CN/'],
   ['src_dirs', 'src/', 'src/'],
   ['scenarios', 'src/foo/bar.ts', 'src/foo/bar.ts'],
 ];
@@ -189,6 +191,55 @@ test('loadConfig: exclude_untracked must be a boolean, and defaults to false', (
   }
 });
 
+// --- count fields: positive whole numbers ------------------------------------------------------
+//
+// Both are used as a slice length or a draw budget, so a wrong value doesn't throw anywhere — it
+// quietly produces an empty sample, which is exactly the symptom (coverage that stops moving) that
+// the claim_candidates_cap work exists to make legible in the first place.
+
+const COUNT_CASES = [
+  ['claim_candidates_cap', '60'],
+  ['correctness_sample', '8'],
+];
+
+for (const [field, example] of COUNT_CASES) {
+  for (const [written, described] of [
+    ['0', 'the number 0'],
+    ['-5', 'the number -5'],
+    ['1.5', 'the number 1.5'],
+    ['"60"', 'the string "60"'],
+    ['plenty', 'the string "plenty"'],
+    ['', 'an empty value'],
+  ]) {
+    test(`loadConfig: ${field}: ${written || '(empty)'} throws instead of silently drawing nothing`, () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-counttype-'));
+      try {
+        fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `docs_dirs: [docs/]\n${field}:${written ? ` ${written}` : ''}\n`);
+        assert.throws(() => loadConfig(tmp), (err) => {
+          assert.match(err.message, new RegExp(`${field} must be a positive whole number`), 'names the field');
+          assert.ok(err.message.includes(described), `describes what was given: ${err.message}`);
+          assert.ok(err.message.includes(`${field}: ${example}`), `shows the correct form: ${err.message}`);
+          return true;
+        });
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+test('loadConfig: claim_candidates_cap defaults to 60 and accepts a raised whole number', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-cap-'));
+  try {
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+    assert.equal(loadConfig(tmp).claim_candidates_cap, 60, 'the value inventory.mjs used to hardcode');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nclaim_candidates_cap: 400\n');
+    assert.equal(loadConfig(tmp).claim_candidates_cap, 400);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // --- #36: corpus_hash -------------------------------------------------------------------------
 
 test('corpusHash: cosmetic differences that mean the same corpus hash the same', () => {
@@ -217,6 +268,16 @@ test('corpusHash: fields outside the corpus definition do not move it', () => {
     corpusHash({ ...base, src_dirs: ['src/'], scenarios: ['src/a.ts'], correctness_sample: 20, targets: { economy: 5 } }),
     corpusHash(base),
     'a corpus fingerprint must not react to rubric/target/measurement settings'
+  );
+  // claim_candidates_cap changes what a round can *sample*, but not which files were measured:
+  // files_total, claims_total, the freshness denominator, the orphan population and the pollution
+  // denominator are all identical either side of it. Folding it in would stamp a six-dimension
+  // comparability break on every repo that applied the fix the tool itself recommends. The honest
+  // disclosure is per-round (claim_population.truncated), not a corpus break.
+  assert.equal(
+    corpusHash({ ...base, claim_candidates_cap: 400 }),
+    corpusHash(base),
+    'the candidate window is a sampling setting, not a corpus definition'
   );
 });
 
@@ -399,6 +460,113 @@ test('collectFiles: docs_files dedupes, silently skips missing files, exclude st
   }
 });
 
+// --- #44: out_of_scope is a second, differently-charged way out of the corpus -------------------
+
+// A repo shaped like the measured tj/commander.js case: English docs, a translated mirror that is
+// graded as its own corpus, and a genuinely embarrassing draft.
+function scopeRepo(configTail) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-oos-'));
+  fs.mkdirSync(path.join(tmp, 'docs', 'zh-CN'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, 'docs', 'wip'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+  fs.writeFileSync(path.join(tmp, 'docs', 'zh-CN', 'a.md'), '# 甲\n');
+  fs.writeFileSync(path.join(tmp, 'docs', 'wip', 'draft.md'), '# draft\n');
+  fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `docs_dirs: [docs/]\n${configTail}`);
+  return tmp;
+}
+
+test('collectFiles: out_of_scope leaves the corpus without landing in the pollution bucket; exclude still does', () => {
+  const tmp = scopeRepo('exclude: [docs/wip/]\nout_of_scope: [docs/zh-CN/]\n');
+  try {
+    const { included, excluded, outOfScope } = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(included, ['docs/a.md'], 'both fields take their files out of the corpus');
+    assert.deepEqual(excluded, ['docs/wip/draft.md'], 'only exclude feeds the pollution surface');
+    assert.deepEqual(outOfScope, ['docs/zh-CN/a.md']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: exclude wins when a path matches both fields', () => {
+  // Deterministic and one-directional on purpose: a broad out_of_scope entry must never silently
+  // cancel an exclude entry somebody already wrote. Getting out of the pollution surface always
+  // costs a visible deletion from exclude.
+  const tmp = scopeRepo('exclude: [docs/zh-CN/]\nout_of_scope: [docs/zh-CN/, docs/wip/]\n');
+  try {
+    const { included, excluded, outOfScope } = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(included, ['docs/a.md']);
+    assert.deepEqual(excluded, ['docs/zh-CN/a.md'], 'still charged: exclude wins the overlap');
+    assert.deepEqual(outOfScope, ['docs/wip/draft.md'], 'the non-overlapping entry is unaffected');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: an old config with no out_of_scope behaves exactly as before', () => {
+  const tmp = scopeRepo('exclude: [docs/wip/]\n');
+  try {
+    const { included, excluded, outOfScope } = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(included, ['docs/a.md', 'docs/zh-CN/a.md']);
+    assert.deepEqual(excluded, ['docs/wip/draft.md']);
+    assert.deepEqual(outOfScope, [], 'the new bucket exists and is empty, it does not take anything');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: out_of_scope narrows under --include exactly like exclude does', () => {
+  const tmp = scopeRepo('exclude: [docs/wip/]\nout_of_scope: [docs/zh-CN/]\n');
+  try {
+    const cfg = loadConfig(tmp);
+    const narrow = collectFiles(tmp, cfg, { include: ['docs/a.md'] });
+    assert.deepEqual(narrow.outOfScope, [], 'outside the scope, so out of this run entirely');
+    assert.deepEqual(narrow.excluded, [], 'same as the pollution surface already behaves');
+    const wide = collectFiles(tmp, cfg, { include: ['docs/**'] });
+    assert.deepEqual(wide.outOfScope, ['docs/zh-CN/a.md']);
+    assert.deepEqual(wide.excluded, ['docs/wip/draft.md']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: a prefix entry only matches on a path boundary, in both fields', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-oos-prefix-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs', 'arch'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'docs', 'architecture.md'), '# arch\n');
+    fs.writeFileSync(path.join(tmp, 'docs', 'arch', 'old.md'), '# old\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nout_of_scope: [docs/arch]\n');
+    const { included, outOfScope } = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(included, ['docs/architecture.md'], 'docs/arch must not swallow architecture.md');
+    assert.deepEqual(outOfScope, ['docs/arch/old.md']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('corpusHash: out_of_scope is corpus-defining, but an absent field still hashes as it did before #44', () => {
+  const base = {
+    docs_dirs: ['docs/'], docs_files: [], entry_files: ['CLAUDE.md'], exclude: ['docs/archive/'],
+    index_file: 'docs/README.md',
+  };
+  // Pinned to the digest the pre-#44 implementation produced for this config. Adding the field
+  // must not stamp a comparability break on every repo that never uses it: a config without
+  // out_of_scope and a config with `out_of_scope: []` select the same corpus, so they hash alike.
+  assert.equal(corpusHash(base), 'ea564869', 'pre-#44 digest preserved');
+  assert.equal(corpusHash({ ...base, out_of_scope: [] }), 'ea564869');
+  assert.notEqual(corpusHash({ ...base, out_of_scope: ['docs/zh-CN/'] }), corpusHash(base), 'out_of_scope');
+  // The case the field exists for: moving a directory between the two fields changes every
+  // denominator while files_total stays put, so report has to draw a comparability break on it.
+  const excluded = { ...base, exclude: ['docs/zh-CN/'], out_of_scope: [] };
+  const scopedOut = { ...base, exclude: [], out_of_scope: ['docs/zh-CN/'] };
+  assert.notEqual(corpusHash(scopedOut), corpusHash(excluded), 'exclude -> out_of_scope is a break');
+  // Same normalisation as every other corpus list: trailing slash, order and duplicates are cosmetic.
+  assert.equal(
+    corpusHash({ ...base, out_of_scope: ['docs/zh-CN', 'guides/', 'docs/zh-CN/'] }),
+    corpusHash({ ...base, out_of_scope: ['guides', 'docs/zh-CN/'] })
+  );
+});
+
 test('collectFiles: docs_files pointing at a directory -> throws explicitly (instead of letting inventory blow up with EISDIR)', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-docsfiles-dir-'));
   try {
@@ -443,6 +611,33 @@ test('extractHeadings: a word-internal underscore is literal; only an emphasis u
   assert.ok(extractHeadings('## __bold__ x\n').has('bold-x'));
   assert.ok(extractHeadings('## `code` span\n').has('code-span'));
   assert.ok(extractHeadings('## 狀態圖例 (status / sot_level legend)\n').has('狀態圖例-status--sot_level-legend'));
+});
+
+// #42: the 0.6.1 fix only covered the word-internal case. An `_` whose *left* neighbour is
+// punctuation or the start of the line was still stripped, so the slug disagreed with GitHub and
+// links into those sections were reported as bad anchors — which always costs a star.
+test('extractHeadings: an unpaired underscore is literal, whatever sits next to it (#42)', () => {
+  const cases = [
+    ['### cmd._args', 'cmd_args'], // githubSlug drops the dot, keeps the underscore
+    ['### _private', '_private'],
+    ['### sot_level', 'sot_level'], // the 0.6.1 regression case
+    ['### a.b_c', 'ab_c'],
+    ['### my_var', 'my_var'],
+    ['### __dunder', '__dunder'],
+    ['### opts._flags and cfg._other', 'opts_flags-and-cfg_other'], // two lone `_` must not pair up
+  ];
+  for (const [heading, slug] of cases) {
+    assert.ok(
+      extractHeadings(`${heading}\n`).has(slug),
+      `${heading} should slug to ${slug}, got ${[...extractHeadings(`${heading}\n`)].join(', ')}`
+    );
+  }
+});
+
+test('extractHeadings: a matched underscore pair is still emphasis and is still stripped (#42)', () => {
+  assert.ok(extractHeadings('### _emphasis_\n').has('emphasis'));
+  assert.ok(extractHeadings('### __init__\n').has('init'), 'GitHub renders this as bold "init" too');
+  assert.ok(extractHeadings('### _emphasis_ and cmd._args\n').has('emphasis-and-cmd_args'));
 });
 
 test('extractHeadings: explicit anchors <a id>/<a name> are also indexed into the slug set', () => {
@@ -611,6 +806,144 @@ test('extractClaimLines: returns the section range it belongs to, so verificatio
   const [start, end] = claim.section_lines;
   assert.ok(start <= 5 && end >= 5, `the neighboring sentence on line 5 must fall inside section range [${start}, ${end}]`);
   assert.ok(end < 7, 'the section range must not cross the next heading');
+});
+
+// #41: the ledger keys claims on `<path>:<line>`, and docgrad's own convergence loop moves
+// content between documents. A content-derived key is what survives that move.
+test('claimHash: identical claim text hashes the same wherever it moves to (#41)', () => {
+  const moved = 'Settlement is handled by `src/balance.ts › settle()`.';
+  const a = extractClaimLines(`# A\n\n${moved}\n`, ['src/']);
+  const b = extractClaimLines(`# B\n\nfiller\n\nmore filler\n\n${moved}\n`, ['src/']);
+  assert.equal(a[0].line, 3);
+  assert.equal(b[0].line, 7, 'same text, different line');
+  assert.equal(a[0].claim_hash, b[0].claim_hash);
+  assert.equal(a[0].claim_hash.length, CLAIM_HASH_CHARS);
+  assert.match(a[0].claim_hash, /^[0-9a-f]+$/);
+});
+
+test('claimHash: whitespace is normalised but markup and case are not (#41)', () => {
+  const base = claimHash('Routing lives in `src/router.ts`.');
+  assert.equal(claimHash('   Routing   lives\tin  `src/router.ts`.  '), base, 'whitespace runs collapse');
+  assert.notEqual(claimHash('routing lives in `src/router.ts`.'), base, 'case is not folded');
+  assert.notEqual(claimHash('Routing lives in **`src/router.ts`**.'), base, 'markup is not stripped');
+  assert.notEqual(claimHash('Routing lives in `src/routes.ts`.'), base, 'an edited claim is a new claim');
+});
+
+// #40: library documentation describes an API, not a file tree. Measured on tj/commander.js,
+// path-shaped matching found a claim on exactly zero lines.
+function apiRepo() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-api-'));
+  fs.mkdirSync(path.join(tmp, 'src'));
+  fs.writeFileSync(
+    path.join(tmp, 'src', 'command.js'),
+    'class Command {\n  option() {}\n  opts() {}\n}\nconst program = new Command();\nlet minWidthToWrap = 40;\n'
+  );
+  return tmp;
+}
+
+test('extractClaimLines: API-shaped inline code counts, but only when the symbol exists under src_dirs (#40)', () => {
+  const tmp = apiRepo();
+  try {
+    const { symbols, files_scanned } = buildSrcSymbolIndex(tmp, ['src/']);
+    assert.ok(files_scanned === 1 && symbols.has('option') && symbols.has('program'));
+    const text = [
+      '# Options',
+      '',
+      'Declare an option with `.option()`.',            // member call, leading dot
+      'Read the parsed values with `program.opts()`.',  // member call
+      'Call `opts()` on the command.',                  // bare call
+      'The `.mangle()` helper does not exist here.',    // shape matches, symbol does not exist
+      'Prose about a `sandwich` and a `program`.',      // bare identifiers: never accepted
+      'Wrapping is controlled by `minWidthToWrap`.',    // bare identifier, even though it exists
+      '```',
+      'fenced `.option()` does not count',
+      '```',
+    ].join('\n');
+    const claims = extractClaimLines(text, ['src/'], { symbols });
+    assert.deepEqual(claims.map((c) => c.line), [3, 4, 5]);
+    assert.ok(claims.every((c) => c.refs_path === 0 && c.refs_api === 1 && c.refs === 1));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('extractClaimLines: without a symbol index the API shape is inert, path shapes unchanged (#40)', () => {
+  const text = 'Declare an option with `.option()`, routing lives in `src/router.ts`.';
+  assert.deepEqual(extractClaimLines(text, ['src/']).map((c) => c.line), [1], 'path ref still counts');
+  const [claim] = extractClaimLines(text, ['src/']);
+  assert.equal(claim.refs, 1);
+  assert.equal(claim.refs_api, 0, 'no src_dirs index -> no existence check -> no API refs');
+  assert.deepEqual(extractClaimLines('Declare an option with `.option()`.', []), [], 'inert, not guessing');
+});
+
+test('buildSrcSymbolIndex: src_dirs unset returns null, so the caller can report the degradation (#40)', () => {
+  assert.equal(buildSrcSymbolIndex(process.cwd(), []), null);
+  assert.equal(buildSrcSymbolIndex(process.cwd(), undefined), null);
+  assert.equal(buildSrcSymbolIndex(process.cwd(), ['   ']), null, 'whitespace-only entries do not count');
+});
+
+test('extractClaimLines: a paren-less dotted span already counted as a path ref is not double counted (#40)', () => {
+  const tmp = apiRepo();
+  try {
+    const { symbols } = buildSrcSymbolIndex(tmp, ['src/']);
+    // `program.opts` has a basename-shaped tail, so extractCodeRefs already emits it. Counting it
+    // a second time would inflate refs and silently reorder the candidate list.
+    const [claim] = extractClaimLines('Use `program.opts` directly.', ['src/'], { symbols });
+    assert.equal(claim.refs, 1);
+    assert.equal(claim.refs_path, 1);
+    assert.equal(claim.refs_api, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('isDocgradAuthored: a docs(docgrad) subject is true, anything else false, no subject null (#40)', () => {
+  assert.equal(isDocgradAuthored('docs(docgrad): 第 2 輪收斂 — 完整性 ★3→★4'), true);
+  assert.equal(isDocgradAuthored('docs(docgrad) : spaced colon'), true);
+  assert.equal(isDocgradAuthored('docs: hand-written'), false);
+  assert.equal(isDocgradAuthored('feat(docgrad): a code change'), false);
+  assert.equal(isDocgradAuthored(undefined), null, 'unknown is never false');
+  assert.equal(isDocgradAuthored(null), null);
+});
+
+test('gitAddCommitSubjects: reports the oldest adding commit per path, null outside a git tree (#40)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-added-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'hand.md'), '# hand\n');
+    gitInit(tmp); // commits everything on disk with subject "fixture"
+    fs.writeFileSync(path.join(tmp, 'docs', 'written.md'), '# written\n');
+    const env = {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
+      GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com',
+      GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+    };
+    execFileSync('git', ['add', '-A'], { cwd: tmp, env });
+    execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'docs(docgrad): round 2'], { cwd: tmp, env });
+    // edit the hand-written file afterwards: the *adding* commit must still be the one reported
+    fs.writeFileSync(path.join(tmp, 'docs', 'hand.md'), '# hand\n\nmore\n');
+    execFileSync('git', ['add', '-A'], { cwd: tmp, env });
+    execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'docs(docgrad): round 3'], { cwd: tmp, env });
+
+    const subjects = gitAddCommitSubjects(tmp, ['docs/hand.md', 'docs/written.md']);
+    assert.equal(subjects.get('docs/hand.md'), 'fixture');
+    assert.equal(subjects.get('docs/written.md'), 'docs(docgrad): round 2');
+    assert.equal(isDocgradAuthored(subjects.get('docs/hand.md')), false);
+    assert.equal(isDocgradAuthored(subjects.get('docs/written.md')), true);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('gitAddCommitSubjects: outside a git work tree returns null, never an empty answer (#40)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-nogit-added-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'a.md'), '# a\n');
+    assert.equal(gitAddCommitSubjects(tmp, ['a.md']), null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('rankClaimCandidates: more refs comes first, ties broken by path then line (stable, reproducible)', () => {

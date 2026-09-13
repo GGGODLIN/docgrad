@@ -159,7 +159,11 @@ test('coverage: --include is deliberately a no-op (scope + note explain the full
     writeBaseFiles(tmp);
     // docs/auth.md falls outside scope -- if scope took effect, src/auth would be misjudged as undocumented.
     const out = run(tmp, ['--include', 'docs/search.md']);
-    assert.deepEqual(out.scope, ['docs/search.md']);
+    // `scope` reports what the output actually covers, not what was asked for. This script always
+    // compares the full corpus, so it reports null -- echoing the requested scope would contradict
+    // its own note and break the cross-script comparability of the header. retrieval.mjs, which
+    // also ignores --include, behaves the same way.
+    assert.equal(out.scope, null);
     assert.match(out.note, /does not apply/);
     const auth = out.areas.find((a) => a.area === 'src/auth');
     assert.deepEqual(auth.mentioned_by, ['docs/auth.md']); // full comparison, mentions outside scope still count
@@ -178,6 +182,37 @@ test('coverage: not a git repo -> status is all no_git, no crash, exit 0', () =>
     assert.ok(out.areas.every((a) => a.status === 'no_git'), JSON.stringify(out.areas.map((a) => a.status)));
     assert.deepEqual(out.undocumented, []);
     assert.deepEqual(out.drifted, []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('coverage: output carries the docgrad fingerprint, right after scope (#45)', () => {
+  const tmp = makeCoverageFixture();
+  try {
+    const out = run(tmp);
+    assert.equal(typeof out.docgrad.version, 'string');
+    assert.notEqual(out.docgrad.version, null); // #47: a null version here is the silent failure mode
+    assert.match(out.docgrad.rubric_hash, /^[0-9a-f]{8}$/);
+    assert.match(out.docgrad.corpus_hash, /^[0-9a-f]{8}$/);
+    // Same placement as inventory.mjs, so the five scripts' JSON can be compared field by field.
+    assert.deepEqual(Object.keys(out).slice(0, 2), ['scope', 'docgrad']);
+    // The scoped run keeps its own note; docgrad still sits directly after scope.
+    const scoped = run(tmp, ['--include', 'docs/search.md']);
+    assert.deepEqual(Object.keys(scoped).slice(0, 3), ['scope', 'docgrad', 'note']);
+    assert.match(scoped.note, /does not apply/);
+    // The degraded src_dirs-unset path returns early — it must carry the fingerprint too.
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-cov-meta-'));
+    try {
+      write(empty, '.docgrad.yml', 'docs_dirs: [docs/]\nentry_files: [CLAUDE.md]\n');
+      write(empty, 'CLAUDE.md', '# 專案\n');
+      const degraded = run(empty);
+      assert.match(degraded.docgrad.corpus_hash, /^[0-9a-f]{8}$/);
+      assert.deepEqual(Object.keys(degraded).slice(0, 2), ['scope', 'docgrad']);
+      assert.match(degraded.note, /src_dirs is unset/);
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

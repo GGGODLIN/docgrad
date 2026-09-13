@@ -13,11 +13,17 @@ study that only reports wins is marketing with a table in it.
 | [1](01-commander-js.md) | `tj/commander.js` at a pinned commit | Does an agent doing the same feature-design task spend fewer tokens after docgrad has converged the docs? |
 | [2](02-docgrad-self.md) | docgrad itself, nine real convergence rounds | Where does a documentation system's token cost land as the product grows? |
 | [3](03-fixtures.md) | The three eval fixtures | Is the star rating reproducible at all — and does the skill actually fire? |
+| [4](04-long-running.md) | A private production repo, 13 rounds | What does a long run actually buy, and what decays anyway? |
 
 Case 1 is the one that tests the claim people care about. Case 2 is longitudinal and confounded by
 the product growing alongside the docs. Case 3 is not a token claim at all; it is the check that
 makes the first two worth reading, because a rating that is not reproducible cannot support a
-before/after comparison.
+before/after comparison. Case 4 is the only subject with a long production history, and it is the
+one to read if you are deciding whether to adopt this — it reports what 13 rounds bought, what they
+did not, and the deliverable that expired without anyone noticing.
+
+Case 4's subject is a private repository. Its contents, domain and file names are withheld; counts,
+ratings and mechanics are reported in full, and every figure was re-measured rather than quoted.
 
 ## Two instruments
 

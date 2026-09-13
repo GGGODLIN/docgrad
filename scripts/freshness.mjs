@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { loadConfig, collectFiles, parseArgs, fail, extractClaimedDate, parseFreshnessConventions } from './lib.mjs';
+import { loadConfig, collectFiles, parseArgs, fail, docgradMeta, extractClaimedDate, parseFreshnessConventions } from './lib.mjs';
 
 const MISMATCH_TOLERANCE_DAYS = 7;
 
@@ -76,6 +76,9 @@ try {
     `${JSON.stringify(
       {
         scope: include.length ? include : null,
+        // Same position as in inventory.mjs (right after scope) so two scripts' JSON can be
+        // compared field by field: which tool version, which rubric, which corpus definition.
+        docgrad: docgradMeta(undefined, config),
         // the actual convention list applied (a single value is still returned as an array;
         // with multiple values they're tried in order, see lib.mjs's extractClaimedDate).
         convention: parseFreshnessConventions(config.freshness.convention),

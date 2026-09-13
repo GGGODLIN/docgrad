@@ -49,7 +49,7 @@ stdout (consume it in full — do not truncate it through `head` or `grep`), and
 stderr with a non-zero exit:
 
 ```bash
-node "$SKILL_DIR/scripts/inventory.mjs" --root .   # inventory/tokens/fixed cost/pollution surface/untracked files/section structure
+node "$SKILL_DIR/scripts/inventory.mjs" --root .   # inventory/tokens/fixed cost/pollution surface/out_of_scope/untracked files/claim candidates/section structure
 node "$SKILL_DIR/scripts/links.mjs" --root .       # dead links/broken anchors/orphans/reachable ratio
 node "$SKILL_DIR/scripts/freshness.mjs" --root .   # date-signal coverage/git comparison (convention may be multi-valued)
 node "$SKILL_DIR/scripts/coverage.mjs" --root .    # coverage drift/undocumented areas

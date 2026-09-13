@@ -74,20 +74,53 @@ existing ledger, and verify every one of them against the code (see [audit.md](a
 **The script decides the sample**: the population is `inventory.totals.claims_total` (non-heading
 lines outside fences that carry a code coordinate), the draw order is
 `inventory.claim_candidates` (stably sorted by ref count → path → line), at most 2 per document.
+`claim_candidates` is a **window** onto that order, not all of it: it holds the first
+`claim_candidates_cap` candidates (default 60), because emitting hundreds of claim texts would cost
+the reader the very thing the economy dimension measures. Draws come only from the window, so a
+ledger that fills it stops growing while `claims_total` stays higher —
+`inventory.claim_population` reports `emitted` / `population` / `truncated` / `cap` on every run so
+that state is never inferred from a coverage number that simply stopped moving. Raising
+`claim_candidates_cap` is the fix, and it only appends: the window is a prefix of one stable order,
+so a wider one draws everything a narrower one drew, in the same positions.
+A "code coordinate" is either **path-shaped** inline code (`lib/foo.js`, `src/a.ts › parse()`) or **API-shaped** inline code
+(`foo()`, `.option()`, `program.opts()`) whose every segment exists as an identifier under `src_dirs`; the per-candidate split is
+`refs_path` / `refs_api`. With `src_dirs` unset the API shape is inert and contributes nothing —
+`inventory.claim_population.api_matching` reports `disabled`, and on a library repo that alone can leave `claims_total` at 0
+(see the not-measurable case below). Claims are keyed on `claim_hash`, a 12-hex-character digest of the claim text with
+whitespace collapsed: stable when a claim moves, different when a claim is edited, so the ledger survives the document
+rewrites that improve itself performs. `path`/`line` remain locating aids, not identity.
 **`correctness_sample` is the number of claims drawn new each round, not the total verified that
 round.** A round verifies: every outstanding `fail`/`stale` entry in `.docgrad/ledger.jsonl` (no
 cap — otherwise a repo's score would improve as its documentation got worse), plus the
 `floor(correctness_sample / 2)` least-recently-verified `pass` entries (by ledger `round`
 ascending), plus `correctness_sample` claims that have never entered the ledger. Re-verification
-never reduces the new draws, so cumulative coverage grows by `correctness_sample` per round with no
-ceiling; the ledger accumulates rather than resampling. The pass rate that sets the star rating is
-computed over that whole verified set.
+never reduces the new draws, so cumulative coverage grows by `correctness_sample` per round until
+the emitted window is exhausted; the ledger accumulates rather than resampling. The pass rate that
+sets the star rating is computed over that whole verified set.
+
+> **The one ceiling that does exist is the emitted window, and it is a config setting, not a
+> property of the repo.** Coverage climbs by `correctness_sample` a round until the ledger holds
+> every candidate in `claim_candidates`, then stops — at `claim_candidates_cap`, not at
+> `claims_total`. From the outside this is indistinguishable from a fully covered corpus: both show
+> a flat coverage line and a round that drew nothing. `claim_population.truncated` is what tells
+> them apart, and [audit.md](audit.md) step 3 sets out the three causes of a short draw and the
+> different response each one needs. A capped coverage figure must be reported as capped.
 
 > **Report pass rate and coverage separately**: the star rating for this dimension follows the
 > **pass rate** (passes ÷ claims verified this round). **Cumulative coverage** (distinct claims in
 > the ledger ÷ `claims_total`) does not affect the star rating, but **the report must include it** —
 > 8/8 at 5% coverage and 8/8 at 60% coverage are two different things, and giving only the star
 > rating lets the reader overestimate how much that number is worth.
+
+> **A star built on docgrad's own prose must disclose it.** `inventory.totals.claims_docgrad_authored_ratio` is the share of
+> the round's claim population drawn from documents docgrad itself wrote during a convergence round (detected from the
+> subject of the commit that added each file). It **does not affect the star rating** and it is **not a deduction** — but the
+> report must state it beside cumulative coverage, and a high ratio has to be named as a finding. Measured on
+> `tj/commander.js` after five convergence rounds, all 26 candidates came from the three documents docgrad had just written
+> and none from the seven pre-existing ones: the tool was verifying the prose it had caused to exist, correctness rose, and
+> the repository's actual documentation debt was never sampled once. ★4 over a population that is 100% docgrad-authored and
+> ★4 over one that is 0% are not the same claim about a repo, and only the ratio tells them apart. `null` means git could not
+> answer and the share is unknown — report unknown, never 0.
 
 > **Zero verifiable claims: not measurable, not a star.** When the round's verified set is empty —
 > no outstanding `fail`/`stale`, no `pass` entries in the ledger, and `claims_total: 0` — the pass
@@ -178,6 +211,35 @@ When comparing this dimension's score across v0.5.0, note the scope was widened
 Measurement: **fixed cost** = `inventory.entry_cost.tokens_est` (the tax every task pays for
 loading `entry_files`, with symlink aliases de-duplicated); **pollution surface** =
 `inventory.pollution.ratio`. Both are fully mechanical, neither passes through LLM judgement.
+
+> **What the pollution surface measures — and what it does not**: it measures *how much junk this repo contains*, not *how
+> much of it you chose not to grade*. Those are two different questions and only the first should move a star. Two config
+> fields say which one you mean, and both take files out of the corpus:
+>
+> | Field | Corpus | Pollution surface | Reported as |
+> |---|---|---|---|
+> | `exclude` | out | **charged** | `inventory.pollution.excluded_files` / `excluded_tokens` |
+> | `out_of_scope` | out | **not charged** | `inventory.out_of_scope.count` / `tokens_est` |
+>
+> Use `exclude` for the WIP draft you would be embarrassed to have read — it is in the repo, and the repo should answer for
+> it. Use `out_of_scope` for content that is real documentation but is not what this run grades: a translated mirror rated as
+> its own corpus, a vendored handbook, a subproject with its own `.docgrad.yml`. Measured on `tj/commander.js`, `docs/zh-CN/`
+> — translated mirrors graded separately — sat in `exclude` and charged **40.6%** pollution, capping economy at ★3 while the
+> fixed cost was a perfect 0. Every exit was closed: deleting the translations is content that is still correct and still
+> needed, which [improve.md](improve.md) forbids deleting to lower a cost; un-excluding them reverses the owner's answer and
+> pulls the mirror into the graded corpus; and diluting the ratio under 10% would have taken roughly 28,700 tokens of English
+> filler. What was wrong was the field's semantics, not the documentation.
+>
+> **`out_of_scope` is not a free pass, and the audit must not read it as one.** Its size is printed on every run, empty or
+> not, precisely so the field cannot become a silent switch for zeroing your own pollution surface. You may move anything you
+> like out of the surface; how much you moved is on the same page, in the same units. An `out_of_scope` that dwarfs the
+> graded corpus is a finding in its own right (see [audit.md](audit.md) step 7). When a path is listed in both fields,
+> **`exclude` wins** and the file stays charged — a broad `out_of_scope` entry must never silently cancel an `exclude`
+> someone already wrote, so getting anything out of the surface always costs one deliberate edit to `exclude`.
+>
+> `out_of_scope` joins `corpus_hash` **only when it is non-empty**, so a config that predates the field and a config that
+> spells out `out_of_scope: []` select the same corpus and hash the same; moving a path between the two fields still moves
+> the hash, because it leaves the `exclude` list (see [§Version history](#version-history-and-comparability-notes)).
 
 > **Pollution downgrade rule**: at a pollution surface ≥ 10%, this dimension is capped at ★3 no
 > matter how low the fixed cost is. Without this rule, "fixed cost 4,000 + pollution 15%" would
@@ -271,6 +333,62 @@ individual dimension did not).
 <details>
 <summary>Expand</summary>
 
+- **v1.6.0 — the claim-candidate window is configurable and disclosed** (**not an anchor change**):
+  the ★1–★5 thresholds are untouched and no dimension gained or lost a criterion. `inventory.mjs` has always emitted only the
+  first 60 ranked claim candidates; that number is now the config field `claim_candidates_cap`, **defaulting to 60**, so no
+  existing run's numbers move. What changed is that the cap is now visible (`claim_population.emitted` / `population` /
+  `truncated` / `cap`) and can be raised. Consequences for comparing scores across this version:
+  - **Cumulative coverage figures recorded before this version may be ceilings, not measurements.** A repo whose ledger had
+    reached 60 distinct claims was drawing nothing new every round while `claims_total` read higher, and nothing in the
+    output said so — §Correctness and [audit.md](audit.md) step 3 both described coverage as growing without a ceiling,
+    which was true only below the 60th candidate. A flat coverage line in an older `history.jsonl` cannot be read as
+    convergence without checking the ledger size against 60.
+  - **Pass rates either side of a cap *change* are drawn from differently composed sets.** The window is the top of a
+    ranking by reference count, so the first 60 candidates are the most densely referenced claims in the corpus. Widening it
+    admits less specific ones, which need not pass at the same rate. The star may move for that reason alone; it is not a
+    documentation change. Widening it does **not** reorder or re-draw anything already in the ledger — the window is a prefix
+    of one stable order — so the ledger itself stays comparable.
+  - **`claim_candidates_cap` is deliberately *not* part of `corpus_hash`.** It selects no files and moves no denominator:
+    `claims_total`, the freshness denominator, the orphan population and the pollution denominator are all identical either
+    side of a change to it. Folding it in would draw a whole-round comparability break across all six dimensions — five of
+    which cannot have been affected — every time someone applies the fix the tool itself recommends. The narrower, honest
+    disclosure is the per-round `claim_population.truncated`, which is emitted whether or not anyone changed the field.
+- **v1.6.0 — the correctness sampling population now includes API-shaped claims, and discloses who wrote it**
+  (issues #40, #41) (**not an anchor change**): the ★1–★5 thresholds (pass rate <50% / 50–79% / ≥80% / ≥90% / all pass) are
+  unchanged word for word, and no dimension gained or lost a criterion. What changed is **which lines are eligible to be
+  sampled**. A claim used to be a line carrying path-shaped inline code; it is now a line carrying path-shaped **or**
+  API-shaped inline code (`foo()`, `.option()`, `program.opts()`), the latter admitted only when every segment exists as an
+  identifier under `src_dirs`. Consequences for comparing scores across this version:
+  - **On a library repo the population goes from nothing to something.** Measured on `tj/commander.js`, `claims_total` was
+    **0** at baseline — correctness had no mechanical basis at all and was reported as not measurable. A post-change ★
+    there is the first real measurement, not an improvement on the old one; there is no old number to compare it to.
+  - **On a repo with both shapes, the candidate order moves once.** `refs` now counts API references alongside path
+    references, so the ranking — most specific claim first — reshuffles. This is a deliberate consequence of admitting API
+    references as coordinates, not a defect. A round that straddles the change did not draw from the same sequence the
+    previous round drew from, so a one-round jump or dip in pass rate across the boundary is unexplained.
+  - **With `src_dirs` unset, nothing changes at all**: the extension is inert, `claim_population.api_matching` reports
+    `disabled`, and such a repo's scores are directly comparable across this version.
+  - Also new and report-only: `claims_docgrad_authored_ratio`, the share of the population coming from documents docgrad
+    itself wrote. It moves no star, but the report must state it (see [§Correctness](#correctness)) — historical scores
+    carry no such figure, so how much of an older ★ rested on the tool's own prose cannot be recovered.
+  - Claim identity moved from `<path>:<line>` to `claim_hash` (#41). That is a **state-file** change, not a ruler change:
+    moving a claim no longer looks like a new claim, so cumulative coverage stops being inflated by document reshuffles and
+    a ledger `pass` is no longer silently repointed at other content by improve's own rewrites. Coverage percentages
+    recorded before this fix may therefore read slightly high. Migration is mechanical — see [improve.md](improve.md) step 5.
+- **v1.6.0 — `out_of_scope`: content graded elsewhere is no longer charged as pollution** (issue #44)
+  (**not an anchor change**): the ★1–★5 anchor text and the `pollution_max: 0.1` downgrade threshold are both untouched, and
+  the pollution surface is still computed the same way from the same `exclude` list. What is new is a **second** config field
+  that removes files from the corpus **without** charging them — see [§Economy](#economy) for the split and why the two
+  questions are not the same question. Comparability:
+  - **A config that does not use the field is byte-for-byte unaffected.** `out_of_scope` defaults to `[]`, joins
+    `corpus_hash` only when non-empty, and an absent field and an empty list select the same corpus and hash identically, so
+    no repo in existence acquires a false comparability break at upgrade time.
+  - **Moving a path from `exclude` into `out_of_scope` does move `corpus_hash`** (the path leaves the `exclude` list, which is
+    always hashed) and drops the pollution ratio without a single file changing. `report` therefore draws a break, and it
+    should: an economy star either side of that edit is not the same measurement. The reason improve is forbidden to make
+    that edit as an economy fix is exactly this — it is re-labelling, not improvement.
+  - **Precedence is fixed and one-directional**: a path in both fields is charged, `exclude` wins, and `inventory.out_of_scope.note`
+    names the overlap. Getting anything out of the pollution surface always costs a visible deletion from `exclude`.
 - **v1.5.0 — `corpus_hash`: the corpus scope now has a fingerprint of its own** (issue #36)
   (not an anchor change): no threshold and no anchor text moved, and no dimension changed how it is
   measured. What is new is a second fingerprint next to `rubric_hash` in `inventory.mjs`'s `docgrad`

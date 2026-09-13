@@ -95,6 +95,10 @@ rewrite), re-rates to confirm that dimension rose and none of the others fell, t
 change lands on the `docgrad/converge` branch, one commit per round — interruptible, revertible,
 reviewable as a batch before you merge.
 
+The scores, the claim ledger and the latest scorecard live in `.docgrad/`, **and they belong in version
+control**. They are state, not scratch: without them a fresh clone restarts coverage at zero and can
+never detect that the rubric or the corpus definition changed under it.
+
 `loop` stops on one of three conditions:
 
 - **Targets met** — every dimension is at or above the targets in `.docgrad.yml` (★4 by default),
@@ -195,6 +199,7 @@ ones that do not are in there.
 | [1](case-studies/01-commander-js.md) | `tj/commander.js` | Real agent token usage on the same feature-design task, before and after convergence | Design quality tied at 12/12 both ways; converged docs took **15% fewer turns** and pulled **20% more tokens** into context |
 | [2](case-studies/02-docgrad-self.md) | docgrad itself, 9 real rounds | Where a doc system's tokens land as the product grows | Corpus grew 3.4×; the tax every task pays grew 1.8× and **halved as a share of the corpus** |
 | [3](case-studies/03-fixtures.md) | The three eval fixtures | Whether the rating is reproducible at all | 12 runs, all passing; 16 of 18 dimension slots unanimous — and one real gap in the rubric |
+| [4](case-studies/04-long-running.md) | A private production repo, 13 rounds | What a long run buys, and what decays | Ratings mostly ★4 — on **10.1% verified coverage**; economy stuck at ★3 for nine rounds; the generated CI gate went red four rounds before anyone noticed |
 
 Start with [the method note](case-studies/README.md) if you intend to check the numbers.
 

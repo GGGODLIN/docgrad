@@ -80,3 +80,16 @@ test('links: full run with an index_file -> orphans is still an array, and still
   assert.ok(Array.isArray(out.orphans));
   assert.deepEqual(out.orphans, ['docs/orphan.md']);
 });
+
+test('links: output carries the docgrad fingerprint, right after scope (#45)', () => {
+  const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
+  // This is the output that most needs to identify itself: `orphans` changed shape in v1.5.0
+  // ([] -> null when not computed, #39), so a stored JSON with no version stamp can be read
+  // under the wrong contract.
+  assert.equal(typeof out.docgrad.version, 'string');
+  assert.notEqual(out.docgrad.version, null); // #47: a null version here is the silent failure mode
+  assert.match(out.docgrad.rubric_hash, /^[0-9a-f]{8}$/);
+  assert.match(out.docgrad.corpus_hash, /^[0-9a-f]{8}$/);
+  // Same placement as inventory.mjs, so the five scripts' JSON can be compared field by field.
+  assert.deepEqual(Object.keys(out).slice(0, 2), ['scope', 'docgrad']);
+});

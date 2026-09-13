@@ -15,6 +15,12 @@
 - Always work on the `docgrad/converge` branch: doesn't exist → create it from the current branch; already exists → checkout and continue (resumable after interruption).
 - Only commit docs changes and `.docgrad/` state files — "docs changes" = files covered by `.docgrad.yml`'s `docs_dirs`/`docs_files`/
   `entry_files`, **not source code files** (including their comments). **Never touch the target repo's CI config.**
+- **`.docgrad/` belongs in version control, all of it.** It is not scratch space, it is this tool's state: `history.jsonl` is
+  what the next round compares its `rubric_hash`/`corpus_hash` against, `ledger.jsonl` is the cumulative coverage that the
+  sampling rule in [audit.md](audit.md) §3. Correctness (claim ledger) draws down, `scorecard-latest.md` is what `report`
+  reprints, and `graduation/` holds deliverables the team copies into `.github/` by hand. Gitignore any of them and the
+  feature that reads it silently stops working — a cloned repo restarts coverage at zero and never draws a comparability
+  break, with no error to notice.
 - Branch isolation lets the user review the whole batch before merging; one commit per round guarantees you can roll back.
 
 ## Steps in each round
@@ -50,6 +56,14 @@
      If `entry_files`'s configuration itself is wrong (it lists a file that never enters the agent's context, or omits one that's required reading) → fix `.docgrad.yml`
      and say so explicitly in the commit message; this counts as a config fix, not score-farming. When a listed file is actually **conditionally** loaded,
      move it to `docs_files` instead (still in the corpus, doesn't count toward fixed cost) — **don't** just delete it, since deleting it would also drop completeness.
+     - **Forbidden: raising economy by moving directories from `exclude` into `out_of_scope`.** Both fields take files out of
+       the corpus, but only `exclude` is charged to the pollution surface, so re-labelling a directory drops the ratio — and
+       possibly lifts the ★3 cap — **without one byte of documentation changing**. That is re-labelling, not improvement, and
+       it is the one edit that turns `out_of_scope` into a switch for zeroing your own pollution surface. The field exists to
+       let a *human* answer a question about their own repo at `init` time ("is this junk, or is it real documentation graded
+       elsewhere?" — see [init.md](init.md) questionnaire item 5); it is not a lever for the loop. If a round genuinely
+       believes a directory is misfiled, write it into the report as a recommendation for the user, and leave the config
+       alone. The edit is visible either way: it moves `corpus_hash`, so `report` draws a comparability break across it.
    - **The boundary for placement fixes**: only touch files within docs scope (entry file ↔ docs, docs ↔ docs moves go ahead as normal).
      Suggestions to move information into code comments or other source files are **never executed automatically** — that's outside the branch discipline of
      "only commit docs changes," and none of the five scripts verify code comments, so there'd be no way to confirm the change didn't break anything.
@@ -68,7 +82,7 @@
 
      The three version fields are for `report` to draw comparability breakpoints: when `rubric_hash` changes it means the ruler changed,
      and the scores before and after can't be compared directly; when `corpus_hash` changes it means the set of files being measured
-     changed (`docs_dirs`/`docs_files`/`entry_files`/`exclude`/`index_file`/`exclude_untracked`), which moves `files_total`,
+     changed (`docs_dirs`/`docs_files`/`entry_files`/`exclude`/`out_of_scope`/`index_file`/`exclude_untracked`), which moves `files_total`,
      `claims_total`, the freshness denominator and the pollution denominator at once — every dimension in that round is affected,
      not just one. **Write `corpus_hash` every round even when it hasn't moved**: `report` can only spot the change by comparing
      consecutive lines, so a round that omits it leaves the break undetectable. `corpus_hash` is `null` when the round ran without a
@@ -81,12 +95,34 @@
      when re-verifying an old entry, append a new line (with the new `round`) rather than editing the old line, so you can still see when a given claim broke and when it got fixed:
 
      ```json
-     {"claim_id": "docs/x.md:75", "round": 3, "doc": "docs/x.md", "line": 75, "claim": "Routing is defined in src/router.ts", "verify": "Read src/router.ts", "result": "pass", "verified_at": "2026-07-12"}
+     {"claim_hash": "728d463bc0b4", "round": 3, "doc": "docs/x.md", "line": 75, "claim": "Routing is defined in src/router.ts", "verify": "Read src/router.ts", "result": "pass", "verified_at": "2026-07-12"}
      ```
 
-     `claim_id` = `<path>:<line>`. When document reshuffling causes the line number to drift, keep using the old `claim_id` based on the claim's content
-     and add `"moved_from": "<old id>"` on that line — don't treat it as a new claim, that would inflate cumulative coverage artificially.
+     **`claim_hash` is the key. Copy it from `inventory.claim_candidates`; never compute or invent one.** It is a
+     12-hex-character digest of the claim's text with runs of whitespace collapsed and the ends trimmed — nothing else is
+     normalised. So it is **stable when a claim moves** and **different when a claim is edited**, which is exactly the pair of
+     properties the ledger needs: improve's own prescribed economy fix is "move the entry file's content out", and under the
+     old `<path>:<line>` key every such move silently repointed a batch of ledger rows at other content — the next round
+     re-verified the wrong line, recorded a false `fail`, and because failures are re-verified without a cap, that batch ate
+     the following round's new-draw budget. A harmless tidy-up stopped coverage from growing.
+     `doc` and `line` stay on the row as **locating aids** — they are still how a reader finds the text — but nothing keys on
+     them, and a row whose `line` has gone stale is not a problem to fix.
+
+     > **Migrating an existing ledger.** Rows written before this change carry `claim_id` and no `claim_hash`. Do not rewrite
+     > them (the ledger is append-only) and do not re-draw those claims as if they were new — that would inflate cumulative
+     > coverage. Back-compute the hash from the row's own `claim` field, which holds the claim text verbatim: collapse runs of
+     > whitespace, trim the ends, take the first 12 hex characters of its SHA-256. That is the same function
+     > `scripts/lib.mjs › claimHash()` applies, so a row whose text has not changed lands on the hash the current
+     > `claim_candidates` reports, and the claim is recognised as already covered. A row whose text no longer matches any
+     > candidate is a claim that was edited or deleted since — leave it in the ledger as history and let the new wording be
+     > drawn as the new claim it is. Once migrated, write `claim_hash` on every new row and stop writing `claim_id`.
    - Overwrite `.docgrad/scorecard-latest.md` (the full scorecard text from audit.md).
+   - **Before committing the scorecard, check `inventory.untracked.count`.** Non-zero means the pollution surface — and
+     therefore the economy rating — was measured against files that exist only on this machine, so the numbers you are about
+     to commit are ones nobody else can reproduce (measured: ratio 0.1066 in a working checkout against 0.0517 in a clean
+     worktree of the same commit, with the `pollution_max: 0.1` downgrade threshold between them). Either stash the
+     untracked files and re-run, or set `exclude_untracked: true`, or commit as-is and **write the count and token total
+     into the scorecard** so the next reader knows which numbers are checkout-bound. Do not commit it silently.
    - Commit. Write the message in the target repo's own language — the `language:` field in its
      `.docgrad.yml`, falling back to the language its recent commits are written in. The structure
      below is fixed; only the prose is translated:
@@ -158,6 +194,10 @@ Do two things at graduation:
    ```
 
    **Never write into `.github/`**, and never modify any existing CI configuration.
+
+   **Commit the two produced files** along with the round's other `.docgrad/` state. They are a deliverable, not a
+   by-product: the team copies them into `.github/` by hand, and if they are not in version control the only way to get
+   them back is to run another convergence round to graduation.
 
 2. **Always attach this passage to the report** (fill in the actual path values):
 

@@ -3,6 +3,86 @@
 Version authority is `version` in [.claude-plugin/plugin.json](.claude-plugin/plugin.json); this file records changes per version.
 For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](docs/how-to.md) §Cut a release.
 
+## 1.6.0 — 2026-09-13
+
+Five measurement defects fixed (#40 #41 #42 #44 #45), plus two statements the tool was making about
+its own behaviour that turned out to be false. **No ★1-★5 threshold moved and no dimension changed**;
+`rubric_hash` moves to `f0ce7d6a` because the Correctness and Economy measurement prose changed.
+
+**What this version asks of you.** Three things, and a patch-level version number would have hidden
+all of them:
+
+1. **If you have a `.docgrad/ledger.jsonl`, its keys change.** `claim_id` was `<path>:<line>`; it is
+   now `claim_hash`, a content hash the scripts hand you. Existing rows carry a `claim` field, so
+   the hashes can be back-computed — the recipe is in `reference/improve.md`. Until you migrate, a
+   round that re-verifies old entries will not match them up.
+2. **The claim-candidate order reshuffles once.** `refs` now counts API-shaped references as well as
+   path-shaped ones, so the ranking changes. Sampling stays fully deterministic; it is the
+   continuity with an existing ledger's *draw order* that breaks, not its keys.
+3. **Check `claim_population.truncated` before trusting cumulative coverage.** See the candidate
+   window entry below — this one contradicts something v1.5.0 told you.
+
+- **Fixed (#42) false broken anchors from underscores next to punctuation.** `extractHeadings()`
+  stripped an underscore whenever *either* neighbour was non-alphanumeric, so `### cmd._args` slugged
+  to `cmdargs` while GitHub produces `cmd_args` — and a link pointing at that heading was reported
+  broken. Broken anchors always cost a star, and linkage is a fully mechanical dimension, so nothing
+  prompts an agent to doubt the script: on a real repo the convergence loop **edited a file that had
+  nothing wrong with it** to satisfy the false positive. An underscore is an emphasis delimiter only
+  when it is part of a matching pair whose outer sides are non-alphanumeric; that is what is now
+  implemented. 0.6.1 fixed a narrower case of the same bug and the fix was incomplete.
+- **Fixed (#41) the ledger's primary key was destroyed by this tool's own core action.** `claim_id`
+  keyed on `<path>:<line>`, and moving content out of an entry file is one of the two prescribed ways
+  to improve economy. Every such move invalidates a batch of keys; the next round then reads the
+  wrong line, records a false `fail`, and — because failures are re-verified without a cap — consumes
+  the following round's new-draw budget. Measured: one round cut an entry file from 9,209 to 5,391
+  tokens and invalidated three ledger keys. `claim_candidates` now carries `claim_hash` (sha256, 12
+  hex chars) over the claim text with whitespace collapsed and nothing else normalised: a moved claim
+  hashes the same, an **edited** claim hashes differently and is re-verified, which is correct.
+- **Fixed (#40) on a library repo the correctness dimension had no mechanical basis at all.**
+  `extractClaimLines()` recognised a claim by inline code shaped like a *file path*, and library
+  documentation describes an *API*. Measured on `tj/commander.js`: baseline `claims_total` **0**, so
+  the audit fell back to exactly the free-form sampling `reference/audit.md` forbids — the rule
+  contradicted itself, because at zero population it offered no alternative. API-shaped spans now
+  count, **guarded** by requiring every segment to exist as a symbol under `src_dirs`; with `src_dirs`
+  unset the extension is inert and says so.
+  - **Also disclosed: how much of the population docgrad wrote itself.** After that same repo's
+    convergence loop wrote three documents in docgrad's house style, **all 26 candidates came from
+    those three files and none from the seven pre-existing ones** — the correctness score rose while
+    the repo's actual documentation debt was never sampled. `claim_population` and
+    `totals.claims_docgrad_authored_ratio` now report this, and the audit must state it.
+- **Fixed (#44) `exclude` carried two incompatible meanings and the pollution surface honoured only
+  one.** "WIP I am ashamed of" and "content I deliberately scoped out of this run" are different
+  claims about a repo and only the first should move a star. Measured on `tj/commander.js`: excluding
+  translated mirrors that are graded as their own corpus charged **40.6% pollution** and capped
+  economy at ★3 while the fixed cost was a perfect 0 — the one dimension five rounds of convergence
+  could not move, blocked by field semantics rather than documentation quality. New list field
+  **`out_of_scope:`** takes files out of the corpus without charging them, and its count and token
+  total are reported on **every** run, empty or not, so the field cannot become a silent switch for
+  zeroing your own pollution surface. A path in both fields stays charged (`exclude` wins), so a
+  broad `out_of_scope` entry can never quietly cancel an `exclude` someone already wrote.
+  **Default behaviour is unchanged and no existing rating moves**; a config that never uses the field
+  hashes exactly as it did before the field existed.
+- **Fixed (#45) four of the five scripts could not say which version produced their output.** Only
+  `inventory.mjs` emitted the `docgrad` fingerprint. All five now do, in the same position — which
+  matters most for `links.mjs`, whose `orphans` field changed shape in v1.5.0: the output most likely
+  to be misread across versions was the one that could not identify itself.
+- **Fixed: the claim-candidate window was a second, undocumented coverage ceiling — and v1.5.0 said
+  it did not exist.** `inventory.mjs` emits only the top-ranked candidates, and a round can only draw
+  from what is emitted; once a ledger covers them all, every later round draws zero while
+  `claims_total` still reads in the hundreds. v1.5.0's rewritten sampling rule said coverage grows
+  "with no ceiling" — true of the mechanism #37 changed, false of the pipeline. A repo under
+  long-running convergence was three rounds from hitting it. The window is now the config field
+  **`claim_candidates_cap`** (default 60, so nothing changes by default), and `claim_population`
+  reports `cap` / `emitted` / `population` / `truncated` with instructions, so a truncated window can
+  no longer read as a complete one.
+- **Fixed: `coverage.mjs` reported a `scope` it does not honour.** It ignores `--include` and always
+  compares the full corpus — its own `note` says so — yet it echoed the requested scope in the same
+  object, while `retrieval.mjs`, which also ignores the flag, reports `null`. `scope` now means one
+  thing across all five scripts: what the output actually covers, not what the caller asked for.
+  `reference/audit.md` contradicted itself on this too and now matches the code.
+- **Fixed: the `src_dirs`-unset note overstated what you lose.** It listed `a.b` as an API shape, but
+  `a.b` is collected by the *path* matcher and keeps producing candidates with or without `src_dirs`.
+
 ## 1.5.0 — 2026-09-13
 
 The repository's working language becomes English, `case-studies/` is added, and five measurement
