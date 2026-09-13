@@ -3,6 +3,124 @@
 Version authority is `version` in [.claude-plugin/plugin.json](.claude-plugin/plugin.json); this file records changes per version.
 For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](docs/how-to.md) §Cut a release.
 
+## 1.7.0 — 2026-09-14
+
+Six defects fixed (#47 #48 #49 #50 #51 #52). **No ★1–★5 threshold moved**, no dimension gained or
+lost a criterion, and every shipped default is unchanged. `rubric_hash` moves to `e1d1c6dc` because
+rubric prose changed; a new `thresholds_hash` joins the fingerprint block.
+
+**What this version asks of you.** Four things, and none of them is detectable from a score alone:
+
+1. **If your `.docgrad.yml` sets an `economy:` block, your economy rating may move without a file
+   changing.** `economy.entry_cost_tiers` and `economy.pollution_max` have existed since v1.0.0 and
+   were **read by nothing** — the thresholds actually applied were retyped in `rubric.md`'s prose. A
+   repo carrying `pollution_max: 0.2` was graded at 0.1 and is now graded at 0.2. This is the fix
+   working, and it is a real break in that repo's trend. Repos that never set the block are graded
+   exactly as before.
+2. **Correctness pass rates are not comparable across this version, and no fingerprint says so.**
+   `reference/audit.md` gained two boundary rules, one of which can only lower a pass rate.
+   `rubric_hash` is computed over `rubric.md` alone, and the rules live in `audit.md`, so `report`
+   cannot draw this break mechanically. Treat the first 1.7.0 round in any repo as a **new baseline**
+   for correctness rather than a continuation. A drop across this boundary is not evidence of decay.
+3. **This repo's own `corpus_hash` breaks once** (`684034d6` → `d2a71823`) because the skill payload
+   moved to `skills/docgrad/`. If you track docgrad's own scores, the discontinuity is at this
+   release. Your repo's `corpus_hash` is unaffected.
+4. **Two report-only numbers step once**: `structure.rules.anchored_ratio` (now counts API-shaped
+   coordinates) and `retrieval.marginal_tokens` (now de-duplicates symlinked entry files). Neither
+   carries a star, so nothing is regraded — but a trend line will show a step.
+
+Also: `history.jsonl` gains `thresholds_hash`; `.docgrad/ledger.jsonl` gains `borderline` and
+`rationale`, both forward-only (do not back-fill). Installation changed — see below.
+
+- **Fixed (#47) docgrad could only be packaged for Claude Code, and the reason was the layout, not
+  the README.** The skill payload now sits at `skills/docgrad/` as the
+  [Agent Skills specification](https://agentskills.io/specification) expects; `"skills": ["./"]`
+  (plugin root *is* skill root) was a Claude-Code-only spelling. Added `.codex-plugin/plugin.json`,
+  `.agents/` workspace discovery and a root `plugin.json` for Antigravity. **Only Claude Code is
+  marked verified in the README**, meaning installed from a real machine with the skill and scripts
+  resolving afterwards; the others say unverified, and the Skills CLI cannot be tested against this
+  layout until the release is published.
+  - **The move silently broke `version`, which is why it has a test now.** `docgradMeta()` read
+    `<skill root>/.claude-plugin/plugin.json`, and the manifest stays at the repo root, so `version`
+    would have become `null` while `rubric_hash` stayed correct — one field broken, one field fine,
+    the hardest kind to notice, and it would have surfaced months later as a `history.jsonl` full of
+    nulls. It searches upward now.
+  - **`git clone … ~/.claude/skills/docgrad` no longer works, and `cp -r skills/docgrad` is a trap:**
+    it leaves `.claude-plugin/` behind and reproduces exactly that `version: null` failure. Clone the
+    repo and symlink the payload; the README gives the two commands.
+  - `docs-gate.mjs` resolves both layouts, so a gate copied into someone's CI keeps working across
+    the boundary. While there: its plugin-cache fallback never matched a real install (the path
+    carries a version segment the candidate list lacked), so every `DOCGRAD_DIR`-less run against a
+    plugin install exited 2. Pre-existing, fixed here.
+- **Fixed (#50) two config fields claimed to move a rubric anchor and were wired to nothing; a third
+  moved one without claiming to.** `economy.entry_cost_tiers` / `economy.pollution_max` are now read
+  by `inventory.mjs`, which emits `economy_thresholds` — the values in force, whether they are the
+  shipped ones, and the arithmetic over them — and `rubric.md` cites that instead of keeping a second
+  copy of the numbers. `reference/init.md` warned against editing these fields because "changing the
+  threshold changes the rubric anchor"; that causal chain did not exist, and the warning has been
+  rewritten to describe what is now true.
+  - The mirror image: **`freshness.stale_after_days` has always driven the freshness ★3 staleness
+    window** while the anchor read like a fixed "≤60 days" and nothing warned it was configurable. A
+    repo could set 365 and quietly redefine ★3 with `rubric_hash` unmoved. No behaviour changes; the
+    anchor now says it is configurable and the value is fingerprinted.
+  - **New `thresholds_hash`** covers all three. `rubric_hash` fingerprints the ruler docgrad ships;
+    `thresholds_hash` fingerprints the ruler a repo is actually graded by. One thing it cannot do:
+    pre-1.7.0 history lines have no such field, so the round where an inert `economy:` block became
+    authoritative reads as "unknown → first value", not as a change. That transition is breakpoint 1
+    above, disclosed here because it cannot be detected there.
+  - `loadConfig()` finally deep-merges `economy` — it was the only nested map without it, so
+    `economy: { pollution_max: 0.2 }` left `entry_cost_tiers` `undefined`. Nothing noticed because
+    nothing read the field: the two defects had been hiding each other. `validateConfigTypes` now
+    covers nested maps.
+- **Fixed (#48) the same claim over unmodified code was judged `pass` in one round and `fail` in
+  another, and nothing recorded that it had happened.** Both verifiers described the code correctly;
+  they disagreed about whether a generalisation above a table is a claim about its rows. So a
+  pass-rate change could not be told apart from documentation decay — and cross-round comparison is
+  the reason the ledger exists.
+  - The ledger gains **`rationale`** (mandatory on every `fail` and every borderline `pass`: which
+    sentence, which code line, why) and **`borderline`**. Previously a later round could re-verify the
+    claim but not the judgement, and the judgement was the unstable part.
+  - `audit.md` settles the two recurring boundaries instead of asking each round to re-derive them:
+    a generalisation adjacent to a structured list is judged **against every row**; an incomplete
+    enumeration is not itself a misstatement but is always borderline. "When in doubt, round down"
+    still governs what is left.
+  - The **borderline count is printed beside the pass rate**, zero included. A field that appears
+    only when inconvenient is not a disclosure.
+- **Fixed (#49) a graduation gate expires by itself, and nobody finds out.** Producing
+  `.docgrad/graduation/docs-gate.mjs` solved "there is no deliverable" and not "nobody runs it".
+  Measured: a gate pinned at `min_freshness_coverage: 0.93` in round 8, red from round 9, unreferenced
+  by any workflow, unnoticed for four rounds. The cause was not decay but **corpus growth** — the
+  denominator went 46 → 50 — which is an action docgrad actively encourages. Note the direction of
+  failure: prose nobody follows leaves you *knowing* you have no gatekeeper; a gate nobody runs leaves
+  you *believing* you have one.
+  - `audit` and `report` now report a present gate's state every round: that it exists, whether any
+    workflow references it, and its declared thresholds evaluated against the numbers this round
+    already measured.
+  - **docgrad does not execute it** — not even when it looks unmodified. It is a Node module committed
+    into the repo being graded, and this tool's documented use includes auditing clones of repos you
+    did not write. An executed gate also decides its own verdict, so it would carry the whole risk and
+    buy no integrity. The check costs nothing because the gate consumes exactly the three script
+    outputs the audit already produced. A `THRESHOLDS` block that is not a plain list of numbers fails
+    closed: docgrad says it cannot evaluate it and stops.
+  - §Graduation's argument is rewritten: a deliverable is **necessary, not sufficient**.
+- **Fixed (#51) `anchored_ratio` still recognised only path-shaped coordinates.** v1.6.0 taught the
+  claim population to accept API-shaped ones; this signal was left behind, so a library repo scored 0
+  **by construction** and `rubric.md`'s traceability note ("<0.5 means claims lack verifiable code
+  landing points") fired on repos where every rule had one.
+  - Also: **a symlinked entry-file pair was charged twice.** `inventory.mjs` de-duplicates on
+    realpath, `retrieval.mjs` de-duplicated on the config string, so `CLAUDE.md -> AGENTS.md` cost 348
+    tokens in `entry_cost` and 696 in `marginal_tokens` — while `rubric.md` has always defined
+    `marginal_tokens` as counting each file once. The issue flagged this as unverified; a fixture
+    reproduced it exactly before anything was changed.
+- **Fixed (#52) three smaller doc/code disagreements.** `init.md` said a directory in `docs_files` is
+  dropped; it is a hard error with exit 1. `audit.md` described `untracked.files` as if it were a
+  complete list; it is capped at 20 — the same shape as the candidate cap v1.6.0 fixed, and the same
+  file already documented the identical cap for `out_of_scope`.
+  - The third had its location wrong in the issue but the problem was real: the disjunction was in
+    `NO_GIT` itself ("git is unavailable **or** this is not a git working tree") while `audit.md` told
+    the reader the note says which. It does now — the two causes have different remedies (install git
+    / run elsewhere, versus this check can never apply here).
+
 ## 1.6.0 — 2026-09-13
 
 Five measurement defects fixed (#40 #41 #42 #44 #45), plus two statements the tool was making about
