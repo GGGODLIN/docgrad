@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   loadConfig, collectFiles, estimateTokens, parseArgs, fail,
   extractCodeRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
-  gitTrackedFiles, GIT_UNAVAILABLE_NOTE,
+  gitTrackedFiles, GIT_UNAVAILABLE_NOTE, matchesPathPrefix,
   buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, AUTHORSHIP_UNAVAILABLE_NOTE,
   MAX_SRC_SYMBOL_FILE_BYTES,
 } from './lib.mjs';
@@ -16,6 +16,9 @@ const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+\.)\s+/;
 // How many untracked paths to print. The count and the token total are always exact; the list is
 // there to make the files identifiable, not to be exhaustive.
 const UNTRACKED_LIST_CAP = 20;
+
+// Same discipline for out_of_scope (#44): count and tokens_est exact, list capped with a note.
+const OUT_OF_SCOPE_LIST_CAP = 20;
 
 function fileType(p, config) {
   if (config.entry_files.includes(p)) return 'entry';
@@ -125,7 +128,7 @@ try {
   const config = loadConfig(root, configFile);
   // One git call, shared between collectFiles (exclude_untracked) and the untracked report below.
   const tracked = gitTrackedFiles(root);
-  const { included, excluded } = collectFiles(root, config, { include, tracked });
+  const { included, excluded, outOfScope } = collectFiles(root, config, { include, tracked });
   // One pass over src_dirs, reused by every file: the existence check that keeps API-shaped
   // inline code a signal rather than noise. null when src_dirs is unset -> the extension is inert
   // and claim_population.api_matching reports that (#40).
@@ -133,6 +136,12 @@ try {
   const symbols = symbolIndex ? symbolIndex.symbols : null;
   const filesRaw = included.map((p) => measure(root, p, config, symbols));
   const excludedFiles = excluded.map((p) => measure(root, p, config, symbols));
+  // out_of_scope files are outside every rated population — no claims, no rules, no structure are
+  // drawn from them. Only their size is reported, so only their size is computed.
+  const outOfScopeFiles = outOfScope.map((p) => ({
+    path: p,
+    tokens_est: estimateTokens(fs.readFileSync(path.join(root, p), 'utf8')),
+  }));
 
   // Who wrote each document: the subject of the commit that added it. `docs(docgrad):` means
   // docgrad produced the file during a convergence round, so a claim drawn from it is docgrad
@@ -172,6 +181,15 @@ try {
   // Untracked files among everything this run collected (included + excluded — both sides feed
   // pollution.ratio, which is a rated input). Reporting them is what makes the difference between
   // a working checkout and a clean one visible instead of silent; it does not change the numbers.
+  //
+  // out_of_scope files are deliberately **not** in this population (#44). This block exists to
+  // explain how two checkouts of the same commit can land on different star ratings, and its
+  // membership test is "does this file feed a rated input". out_of_scope feeds none — not the
+  // corpus, not the pollution ratio — so an untracked file in there cannot produce that
+  // divergence, and listing it would pad `untracked` with paths that provably cannot move a score.
+  // out_of_scope's own size is reported separately and is report-only. (When exclude_untracked is
+  // on, the tracked filter has already run above the split, so out_of_scope's tally is on the same
+  // clean-checkout basis as every other number here.)
   const collected = [...filesRaw, ...excludedFiles];
   const untrackedFiles = tracked === null ? null : collected.filter((f) => !tracked.has(f.path));
   const untracked =
@@ -185,6 +203,27 @@ try {
             ? { note: `list capped: only the first ${UNTRACKED_LIST_CAP} of ${untrackedFiles.length} paths are shown (count/tokens_est cover all of them)` }
             : {}),
         };
+  // Files that both fields claim. exclude wins the split (see collectFiles), so these are charged
+  // to the pollution surface; say so, because the author who listed them in out_of_scope is
+  // expecting the opposite and would otherwise only see a ratio that refused to move.
+  const bothFields = excludedFiles
+    .filter((f) => matchesPathPrefix(f.path, config.out_of_scope))
+    .map((f) => f.path)
+    .sort();
+  const outOfScopeNotes = [
+    ...(outOfScopeFiles.length > OUT_OF_SCOPE_LIST_CAP
+      ? [`list capped: only the first ${OUT_OF_SCOPE_LIST_CAP} of ${outOfScopeFiles.length} paths are shown (count/tokens_est cover all of them)`]
+      : []),
+    ...(bothFields.length
+      ? [`${bothFields.length} path(s) match both exclude and out_of_scope and are counted in the pollution surface, because exclude wins: ${bothFields.slice(0, OUT_OF_SCOPE_LIST_CAP).join(', ')} — remove them from exclude if they are genuinely out of scope`]
+      : []),
+  ];
+  const outOfScopeBlock = {
+    count: outOfScopeFiles.length,
+    tokens_est: outOfScopeFiles.reduce((s, f) => s + f.tokens_est, 0),
+    files: outOfScopeFiles.map((f) => f.path).slice(0, OUT_OF_SCOPE_LIST_CAP),
+    ...(outOfScopeNotes.length ? { note: outOfScopeNotes.join('; ') } : {}),
+  };
   // The ratio itself is left exactly as it was — silently changing everyone's economy rating is
   // the kind of break this tool exists to catch. The note only says the number is checkout-bound.
   const pollutionNote =
@@ -279,6 +318,12 @@ try {
               : Number((excludedTokens / (totalTokens + excludedTokens)).toFixed(4)),
           ...(pollutionNote ? { note: pollutionNote } : {}),
         },
+        // Sits next to pollution, and is emitted on **every** run — empty field included. That is
+        // the anti-abuse property, not decoration: if the size of out_of_scope were hidden when
+        // convenient, the field would just be a switch for zeroing your own pollution surface. You
+        // can move anything you like out of the surface; how much you moved is printed on the same
+        // page, by the same run, in the same units.
+        out_of_scope: outOfScopeBlock,
         untracked,
       },
       null,

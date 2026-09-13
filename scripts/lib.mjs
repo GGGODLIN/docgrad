@@ -86,12 +86,20 @@ const DEFAULTS = {
   docs_files: [],
   entry_files: [],
   index_file: null,
+  // exclude: "this repo contains this, and I am not proud of it". Removed from the corpus and
+  // **charged to the pollution surface** — unchanged meaning, unchanged numbers.
   exclude: [],
+  // out_of_scope: "this exists, it is real documentation, and it is not what this run grades".
+  // Removed from the corpus exactly like exclude, but **not** charged to the pollution surface;
+  // its own count and token total are reported on every run instead (see inventory.mjs). Defaults
+  // to [] so a config written before this field existed behaves identically to before — an absent
+  // field and an empty list are the same corpus, and neither moves a single rating.
+  out_of_scope: [],
   // exclude_untracked: opt-in, default false (= today's behavior). When true, collectFiles drops
   // every collected file that git does not track, so the corpus matches a clean checkout of the
   // same commit. This is strictly about **tracked vs. untracked**; it says nothing about what
-  // `exclude` means — a deliberately scoped-out directory is still charged to the pollution
-  // surface exactly as before.
+  // `exclude` or `out_of_scope` mean. It is a separate failure mode (#35: scan baseline) from the
+  // one those two fields separate (#44: scope semantics) and the filter runs before their split.
   exclude_untracked: false,
   src_dirs: [],
   // convention can be a single value or a comma/`+`-separated list of values (see
@@ -129,6 +137,7 @@ const LIST_FIELD_EXAMPLES = {
   docs_files: 'PRODUCT.md',
   entry_files: 'CLAUDE.md',
   exclude: 'docs/archive/',
+  out_of_scope: 'docs/zh-CN/',
   src_dirs: 'src/',
   scenarios: 'src/foo/bar.ts',
 };
@@ -373,6 +382,14 @@ export function gitTrackedFiles(rootDir) {
   }
 }
 
+// Does a collected path sit at, or under, any entry of a path list? Shared by collectFiles' two
+// buckets and by inventory.mjs's exclude/out_of_scope overlap note, so the two can never drift.
+// A trailing slash is optional in the config; `docs/arch` must not match `docs/architecture.md`.
+export function matchesPathPrefix(p, list) {
+  if (!Array.isArray(list)) return false;
+  return list.some((e) => p === e || p.startsWith(e.endsWith('/') ? e : `${e}/`));
+}
+
 const NO_GIT = 'git is unavailable or this is not a git working tree';
 export const GIT_UNAVAILABLE_NOTE =
   `${NO_GIT}: tracked and untracked files cannot be told apart, so this is null rather than zero`;
@@ -412,12 +429,33 @@ export function collectFiles(rootDir, config, { include = [], tracked } = {}) {
     }
     collected = all.filter((p) => trackedSet.has(p));
   }
-  const isExcluded = (p) =>
-    config.exclude.some((ex) => p === ex || p.startsWith(ex.endsWith('/') ? ex : `${ex}/`));
+  // --- the exclude / out_of_scope split (#44) -------------------------------------------------
+  //
+  // The rubric answer this encodes: **the pollution surface measures how much junk this repo
+  // contains, not how much of it I chose not to grade.** Only the first should move a star.
+  // `exclude` carried both meanings at once and the pollution surface only honoured one of them:
+  // on tj/commander.js a `docs/zh-CN/` translated mirror — deliberately graded as a separate
+  // corpus, not junk — was charged 40.6% pollution and capped economy at ★3 while the fixed cost
+  // was a perfect 0. So the two meanings get two fields:
+  //   exclude       -> out of the corpus, **in** the pollution surface ("this repo contains this")
+  //   out_of_scope  -> out of the corpus, **out** of the pollution surface, size always reported
+  //
+  // Precedence when a path matches both: **exclude wins.** Deterministic, and it is the direction
+  // that cannot launder a pollution surface — adding a broad `out_of_scope` entry can never
+  // silently cancel an `exclude` entry someone already wrote and make the ratio drop without an
+  // `exclude` line being visibly deleted. Getting something out of the pollution surface therefore
+  // always costs one deliberate edit to `exclude`. The overlap is never silent either: the file
+  // shows up under pollution.excluded_files rather than out_of_scope, and inventory.mjs names the
+  // overlapping paths in a note.
+  const isExcluded = (p) => matchesPathPrefix(p, config.exclude);
+  const isOutOfScope = (p) => !isExcluded(p) && matchesPathPrefix(p, config.out_of_scope);
   const inScope = (p) => matchesScope(p, include);
   return {
-    included: collected.filter((p) => !isExcluded(p) && inScope(p)).sort(),
+    included: collected.filter((p) => !isExcluded(p) && !isOutOfScope(p) && inScope(p)).sort(),
     excluded: collected.filter((p) => isExcluded(p) && inScope(p)).sort(),
+    // Narrowed by `include` exactly like `excluded` is: under a scoped run every bucket describes
+    // the same slice of the tree, so the three add up to what the scope collected.
+    outOfScope: collected.filter((p) => isOutOfScope(p) && inScope(p)).sort(),
   };
 }
 
@@ -801,7 +839,7 @@ export const AUTHORSHIP_UNAVAILABLE_NOTE =
 
 // corpus_hash is the counterpart fingerprint: rubric_hash answers "which ruler did this round
 // use", corpus_hash answers "which files did it measure". Editing docs_dirs / docs_files /
-// index_file / entry_files / exclude moves files_total, claims_total, the freshness denominator,
+// index_file / entry_files / exclude / out_of_scope moves files_total, claims_total, the freshness denominator,
 // the orphan/reachability population and the pollution denominator all at once — every score in
 // that round becomes incomparable with the round before, while rubric_hash does not change a
 // single character. Same shape as rubric_hash (sha256, first 8 hex chars), so report's existing
@@ -813,6 +851,8 @@ export const AUTHORSHIP_UNAVAILABLE_NOTE =
 // literal would make the digest depend on key insertion order.
 
 const CORPUS_LIST_FIELDS = ['docs_dirs', 'docs_files', 'entry_files', 'exclude'];
+// out_of_scope is deliberately not in that array — it is appended conditionally in
+// corpusFingerprint below, so that a config without the field keeps the hash it already had.
 
 function normalizeCorpusEntry(v) {
   return String(v).trim().replace(/\/+$/, '');
@@ -824,6 +864,20 @@ export function corpusFingerprint(config) {
     return [field, [...new Set(raw.map(normalizeCorpusEntry).filter(Boolean))].sort()];
   });
   pairs.push(['index_file', config?.index_file ? normalizeCorpusEntry(config.index_file) || null : null]);
+  // out_of_scope (#44) is corpus-defining in the same way exclude is — it moves files_total, the
+  // freshness denominator, the orphan population — and moving a directory *between* the two fields
+  // changes the pollution denominator without changing files_total, so report must see a break.
+  //
+  // Appended only when non-empty, unlike the fields above. A config that predates the field and a
+  // config that spells out `out_of_scope: []` select exactly the same corpus, so they must hash the
+  // same; emitting the pair unconditionally would instead stamp a comparability break on every repo
+  // in existence at upgrade time, for a corpus that did not change by one file. A path moving
+  // between exclude and out_of_scope still moves the hash — it leaves the exclude list, which is
+  // always emitted.
+  const outOfScope = [
+    ...new Set((Array.isArray(config?.out_of_scope) ? config.out_of_scope : []).map(normalizeCorpusEntry).filter(Boolean)),
+  ].sort();
+  if (outOfScope.length) pairs.push(['out_of_scope', outOfScope]);
   // Not a path, but it selects a different corpus out of the same tree: flipping it moves
   // files_total, the freshness denominator and the pollution denominator. Leaving it out would
   // reproduce the exact blind spot #36 exists to close.
