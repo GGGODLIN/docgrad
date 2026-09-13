@@ -3,11 +3,27 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, extractClaimLines, rankClaimCandidates } from '../scripts/lib.mjs';
+import { execFileSync } from 'node:child_process';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates } from '../scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
 const DOCS_FILES_FIXTURE = fileURLToPath(new URL('./fixtures/docs-files/', import.meta.url));
+
+// A throwaway git work tree: files already on disk get committed, anything written afterwards is
+// untracked. Isolated from the developer's own git config/hooks so CI and laptops behave alike.
+function gitInit(tmp) {
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com',
+    GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+  };
+  execFileSync('git', ['init', '-q'], { cwd: tmp, env });
+  execFileSync('git', ['add', '-A'], { cwd: tmp, env });
+  execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'fixture'], { cwd: tmp, env });
+}
 
 test('parseYamlSubset: parse a full .docgrad.yml template', () => {
   const doc = `
@@ -90,6 +106,176 @@ test('loadConfig: unset fields get their defaults, nested maps deep-merge', () =
     assert.equal(cfg.freshness.stale_after_days, 60); // the default isn't swallowed by the freshness override
     assert.equal(cfg.correctness_sample, 8);
     assert.equal(cfg.language, 'zh-TW');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// --- #38 part 2: list/bool fields fail loudly ------------------------------------------------
+
+const SCALAR_CASES = [
+  ['docs_dirs', 'documentation/', 'docs/'],
+  ['docs_files', 'PRODUCT.md', 'PRODUCT.md'],
+  ['entry_files', 'CLAUDE.md', 'CLAUDE.md'],
+  ['exclude', 'docs/archive/', 'docs/archive/'],
+  ['src_dirs', 'src/', 'src/'],
+  ['scenarios', 'src/foo/bar.ts', 'src/foo/bar.ts'],
+];
+
+for (const [field, scalar, example] of SCALAR_CASES) {
+  test(`loadConfig: ${field} written as a scalar throws instead of silently collecting nothing`, () => {
+    // Without the check, for…of iterates the string **character by character**: every character is
+    // tried as a path, every existsSync fails, and the only symptom is that files_total never moves.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-listtype-'));
+    try {
+      fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `${field}: ${scalar}\n`);
+      assert.throws(() => loadConfig(tmp), (err) => {
+        assert.match(err.message, new RegExp(`${field} must be a list`), 'names the field');
+        assert.ok(err.message.includes(JSON.stringify(scalar)), `shows what was given: ${err.message}`);
+        assert.ok(err.message.includes(`${field}: [${example}]`), `shows the correct inline-list form: ${err.message}`);
+        return true;
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
+
+test('loadConfig: a list entry that is not a non-empty string throws, pointing at the index', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-listentry-'));
+  try {
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/, 42]\n');
+    assert.throws(() => loadConfig(tmp), /docs_dirs\[1\] must be a non-empty path string, but got the number 42/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('loadConfig: a list key left empty throws rather than blowing up later inside collectFiles', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-listempty-'));
+  try {
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nexclude:\n');
+    assert.throws(() => loadConfig(tmp), /exclude must be a list, but got an empty value/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('loadConfig: exclude_untracked must be a boolean, and defaults to false', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-booltype-'));
+  try {
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+    assert.equal(loadConfig(tmp).exclude_untracked, false, 'default is today\'s behavior');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nexclude_untracked: yes\n');
+    assert.throws(() => loadConfig(tmp), /exclude_untracked must be true or false, but got the string "yes"[\s\S]*exclude_untracked: true/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// --- #36: corpus_hash -------------------------------------------------------------------------
+
+test('corpusHash: cosmetic differences that mean the same corpus hash the same', () => {
+  const base = {
+    docs_dirs: ['docs/', 'guides/'],
+    docs_files: ['PRODUCT.md', 'DESIGN.md'],
+    entry_files: ['CLAUDE.md'],
+    exclude: ['docs/archive/'],
+    index_file: 'docs/README.md',
+  };
+  const cosmetic = {
+    // reordered, trailing slashes flipped, whitespace, a duplicate entry
+    docs_dirs: ['guides', ' docs/ '],
+    docs_files: ['DESIGN.md', 'PRODUCT.md', 'PRODUCT.md'],
+    entry_files: ['CLAUDE.md'],
+    exclude: ['docs/archive'],
+    index_file: ' docs/README.md',
+  };
+  assert.equal(corpusHash(cosmetic), corpusHash(base));
+  assert.match(corpusHash(base), /^[0-9a-f]{8}$/, 'same shape as rubric_hash');
+});
+
+test('corpusHash: fields outside the corpus definition do not move it', () => {
+  const base = { docs_dirs: ['docs/'], docs_files: [], entry_files: [], exclude: [], index_file: null };
+  assert.equal(
+    corpusHash({ ...base, src_dirs: ['src/'], scenarios: ['src/a.ts'], correctness_sample: 20, targets: { economy: 5 } }),
+    corpusHash(base),
+    'a corpus fingerprint must not react to rubric/target/measurement settings'
+  );
+});
+
+test('corpusHash: every corpus-defining field genuinely changes it', () => {
+  const base = {
+    docs_dirs: ['docs/'], docs_files: [], entry_files: ['CLAUDE.md'], exclude: [], index_file: 'docs/README.md',
+  };
+  const before = corpusHash(base);
+  // the v1.4.0 case from #36: adding docs_files moved files_total 46->48 while rubric_hash stood still
+  assert.notEqual(corpusHash({ ...base, docs_files: ['PRODUCT.md'] }), before, 'docs_files');
+  assert.notEqual(corpusHash({ ...base, docs_dirs: ['docs/', 'guides/'] }), before, 'docs_dirs');
+  assert.notEqual(corpusHash({ ...base, entry_files: ['CLAUDE.md', 'AGENTS.md'] }), before, 'entry_files');
+  assert.notEqual(corpusHash({ ...base, exclude: ['docs/archive/'] }), before, 'exclude');
+  assert.notEqual(corpusHash({ ...base, index_file: 'README.md' }), before, 'index_file');
+  assert.notEqual(corpusHash({ ...base, index_file: null }), before, 'index_file unset');
+});
+
+test('corpusHash: no config -> null (never a hash of an empty corpus)', () => {
+  assert.equal(corpusHash(null), null);
+  assert.equal(corpusHash(undefined), null);
+  assert.notEqual(corpusHash({ docs_dirs: [] }), null, 'a genuinely empty config still hashes');
+});
+
+// --- #35: untracked files ---------------------------------------------------------------------
+
+test('gitTrackedFiles: returns the tracked set inside a work tree, null outside one', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-tracked-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    assert.equal(gitTrackedFiles(tmp), null, 'not a git work tree -> null, not an empty set');
+    gitInit(tmp);
+    fs.writeFileSync(path.join(tmp, 'docs', 'draft.md'), '# draft\n');
+    const tracked = gitTrackedFiles(tmp);
+    assert.ok(tracked.has('docs/a.md'));
+    assert.ok(!tracked.has('docs/draft.md'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: exclude_untracked true drops untracked files, including .gitignore\'d ones', () => {
+  // The measured case: the file that moved pollution.ratio 0.0517 -> 0.1066 was untracked *and*
+  // ignored, so `git ls-files --others --exclude-standard` would have filtered it back out.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-untracked-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs', 'plans'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    fs.writeFileSync(path.join(tmp, 'docs', 'plans', 'kept.md'), '# kept\n');
+    fs.writeFileSync(path.join(tmp, '.gitignore'), 'docs/plans/local-*\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nexclude: [docs/plans/]\n');
+    gitInit(tmp);
+    fs.writeFileSync(path.join(tmp, 'docs', 'draft.md'), '# untracked draft\n');
+    fs.writeFileSync(path.join(tmp, 'docs', 'plans', 'local-wip.md'), '# ignored + untracked\n');
+
+    const off = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(off.included, ['docs/a.md', 'docs/draft.md'], 'default: untracked files still counted');
+    assert.deepEqual(off.excluded, ['docs/plans/kept.md', 'docs/plans/local-wip.md']);
+
+    fs.appendFileSync(path.join(tmp, '.docgrad.yml'), 'exclude_untracked: true\n');
+    const on = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(on.included, ['docs/a.md'], 'opt-in: corpus matches a clean checkout');
+    assert.deepEqual(on.excluded, ['docs/plans/kept.md'], 'the pollution denominator shrinks too');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: exclude_untracked true without git throws instead of silently doing nothing', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-untracked-nogit-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nexclude_untracked: true\n');
+    assert.throws(() => collectFiles(tmp, loadConfig(tmp)), /exclude_untracked: true.*git/s);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -337,6 +523,13 @@ test('extractCodeRefs: skips backticks inside a code fence, skips non-path-shape
   assert.deepEqual(refs, []);
 });
 
+test('docgradMeta: corpus_hash is null without a config, and present with one (backward-compatible signature)', () => {
+  assert.equal(docgradMeta().corpus_hash, null, 'an old one-argument caller must not crash');
+  const cfg = loadConfig(FIXTURE);
+  assert.equal(docgradMeta(undefined, cfg).corpus_hash, corpusHash(cfg));
+  assert.match(docgradMeta(undefined, cfg).corpus_hash, /^[0-9a-f]{8}$/);
+});
+
 test('docgradMeta: returns version and rubric fingerprint; the hash changes when rubric changes', () => {
   const meta = docgradMeta();
   assert.match(meta.version, /^\d+\.\d+\.\d+$/);
@@ -360,7 +553,7 @@ test('docgradMeta: returns version and rubric fingerprint; the hash changes when
 test('docgradMeta: returns null instead of throwing when files cannot be read', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-meta-'));
   try {
-    assert.deepEqual(docgradMeta(tmp), { version: null, rubric_hash: null });
+    assert.deepEqual(docgradMeta(tmp), { version: null, rubric_hash: null, corpus_hash: null });
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

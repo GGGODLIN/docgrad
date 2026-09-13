@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const CONFIG_FILENAME = '.docgrad.yml';
@@ -86,6 +87,12 @@ const DEFAULTS = {
   entry_files: [],
   index_file: null,
   exclude: [],
+  // exclude_untracked: opt-in, default false (= today's behavior). When true, collectFiles drops
+  // every collected file that git does not track, so the corpus matches a clean checkout of the
+  // same commit. This is strictly about **tracked vs. untracked**; it says nothing about what
+  // `exclude` means — a deliberately scoped-out directory is still charged to the pollution
+  // surface exactly as before.
+  exclude_untracked: false,
   src_dirs: [],
   // convention can be a single value or a comma/`+`-separated list of values (see
   // parseFreshnessConventions); heading_field is the inline keyword used for a heading-line;
@@ -103,6 +110,75 @@ const DEFAULTS = {
   language: 'zh-TW',
 };
 
+// --- Config field type validation -------------------------------------------------
+//
+// A scalar written where a list belongs (`docs_files: PRODUCT.md`, missing the brackets) used to
+// be iterated **character by character** by the `for…of` loops in collectFiles: every single
+// character was tried as a path, every existsSync failed, and the corpus silently came back
+// without those files. The only symptom was that files_total didn't move — and nobody connects
+// "the number didn't change" to "the config is malformed", least of all right after adding a
+// field and expecting the number to grow.
+//
+// So: fail loudly, and cover every list field in one pass (validating only the newest field would
+// leave the older ones inconsistent). Deliberately **not** auto-wrapping a scalar into a
+// one-element list: a silent repair leaves the config still wrong in a version-controlled file,
+// for the next reader to trip over again.
+
+const LIST_FIELD_EXAMPLES = {
+  docs_dirs: 'docs/',
+  docs_files: 'PRODUCT.md',
+  entry_files: 'CLAUDE.md',
+  exclude: 'docs/archive/',
+  src_dirs: 'src/',
+  scenarios: 'src/foo/bar.ts',
+};
+
+const BOOL_FIELD_EXAMPLES = {
+  exclude_untracked: 'true',
+};
+
+function describeValue(v) {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'a list';
+  if (typeof v === 'object') {
+    return Object.keys(v).length === 0
+      ? 'an empty value (nothing after the colon, and no "- " item under it)'
+      : 'a map';
+  }
+  if (typeof v === 'string') return `the string ${JSON.stringify(v)}`;
+  return `the ${typeof v} ${JSON.stringify(v)}`;
+}
+
+export function validateConfigTypes(config, configFile = CONFIG_FILENAME) {
+  for (const [field, example] of Object.entries(LIST_FIELD_EXAMPLES)) {
+    const value = config[field];
+    if (!Array.isArray(value)) {
+      throw new Error(
+        `${configFile}: ${field} must be a list, but got ${describeValue(value)}. ` +
+          `Write it as an inline list — ${field}: [${example}] — or as a block list with one "- " item per line. ` +
+          `A bare scalar would be iterated character by character and collect nothing at all.`
+      );
+    }
+    const bad = value.findIndex((e) => typeof e !== 'string' || e.trim() === '');
+    if (bad >= 0) {
+      throw new Error(
+        `${configFile}: ${field}[${bad}] must be a non-empty path string, but got ${describeValue(value[bad])}. ` +
+          `Correct form: ${field}: [${example}]`
+      );
+    }
+  }
+  for (const [field, example] of Object.entries(BOOL_FIELD_EXAMPLES)) {
+    const value = config[field];
+    if (typeof value !== 'boolean') {
+      throw new Error(
+        `${configFile}: ${field} must be true or false, but got ${describeValue(value)}. ` +
+          `Correct form: ${field}: ${example}`
+      );
+    }
+  }
+  return config;
+}
+
 // configFile can be external (--config): for when the doc source itself can't take a written file
 // (an export directory, a read-only mount) and you want to point at a config file elsewhere.
 export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILENAME)) {
@@ -118,6 +194,7 @@ export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILEN
     targets: { ...DEFAULTS.targets, ...(parsed.targets ?? {}) },
     rules: { ...DEFAULTS.rules, ...(parsed.rules ?? {}) },
   };
+  validateConfigTypes(config, configFile);
   const needsField = parseFreshnessConventions(config.freshness.convention).some(
     (c) => c === 'frontmatter' || c === 'heading-line'
   );
@@ -251,7 +328,42 @@ function pushSingleFile(rootDir, rel, field, out) {
   if (!out.includes(rel)) out.push(rel);
 }
 
-export function collectFiles(rootDir, config, { include = [] } = {}) {
+// --- git: which collected files does git actually track? ----------------------------
+//
+// collectFiles walks the filesystem, it does not ask git. So an untracked local file sitting
+// inside the corpus changes pollution.ratio — and the pollution surface is a **rated** input
+// (economy.pollution_max forces a downgrade once it is exceeded). Measured on one repo at the
+// same commit, same script version: ratio 0.1066 in a working checkout vs 0.0517 in a clean
+// worktree, the whole difference being a single untracked 9,730-token draft in a .gitignore'd
+// directory. pollution_max sits at 0.10, i.e. **between the two numbers**: two people can rate
+// the same commit differently, which is precisely the class of problem docgrad exists to catch.
+//
+// Classification is by the complement of the **tracked** set (`git ls-files`), not by
+// `git ls-files --others --exclude-standard`: the draft that produced the measurement above lives
+// in a .gitignore'd directory, so it is untracked *and* ignored, and --exclude-standard would
+// filter it straight back out. "Not in git" is the property that matters here, and an ignored
+// file has it.
+export function gitTrackedFiles(rootDir) {
+  try {
+    const out = execFileSync('git', ['ls-files', '-z'], {
+      cwd: rootDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return new Set(out.split('\0').filter(Boolean)); // git already prints posix separators
+  } catch {
+    return null; // not a git work tree / git not installed — callers must report null, never zero
+  }
+}
+
+const NO_GIT = 'git is unavailable or this is not a git working tree';
+export const GIT_UNAVAILABLE_NOTE =
+  `${NO_GIT}: tracked and untracked files cannot be told apart, so this is null rather than zero`;
+
+// tracked: pass a Set from gitTrackedFiles() to reuse one git call; undefined = look it up when
+// config.exclude_untracked needs it; null = caller already established git is unavailable.
+export function collectFiles(rootDir, config, { include = [], tracked } = {}) {
   const all = [];
   for (const dir of config.docs_dirs) {
     const abs = path.join(rootDir, dir);
@@ -272,12 +384,24 @@ export function collectFiles(rootDir, config, { include = [] } = {}) {
   // misjudged as orphans.
   for (const f of config.entry_files) pushSingleFile(rootDir, f, 'entry_files', all);
   pushSingleFile(rootDir, config.index_file, 'index_file', all);
+  // Filter before the exclude/scope split, so the pollution surface's numerator *and* denominator
+  // both describe the same clean-checkout corpus.
+  let collected = all;
+  if (config.exclude_untracked) {
+    const trackedSet = tracked === undefined ? gitTrackedFiles(rootDir) : tracked;
+    if (trackedSet === null) {
+      throw new Error(
+        `exclude_untracked: true, but ${NO_GIT} — run inside a git working tree, or set exclude_untracked: false`
+      );
+    }
+    collected = all.filter((p) => trackedSet.has(p));
+  }
   const isExcluded = (p) =>
     config.exclude.some((ex) => p === ex || p.startsWith(ex.endsWith('/') ? ex : `${ex}/`));
   const inScope = (p) => matchesScope(p, include);
   return {
-    included: all.filter((p) => !isExcluded(p) && inScope(p)).sort(),
-    excluded: all.filter((p) => isExcluded(p) && inScope(p)).sort(),
+    included: collected.filter((p) => !isExcluded(p) && inScope(p)).sort(),
+    excluded: collected.filter((p) => isExcluded(p) && inScope(p)).sort(),
   };
 }
 
@@ -461,9 +585,47 @@ export function extractCodeRefs(text, srcDirs = []) {
 // enough to distinguish (collision probability is negligible), and it keeps each history line
 // from getting too long.
 
+// corpus_hash is the counterpart fingerprint: rubric_hash answers "which ruler did this round
+// use", corpus_hash answers "which files did it measure". Editing docs_dirs / docs_files /
+// index_file / entry_files / exclude moves files_total, claims_total, the freshness denominator,
+// the orphan/reachability population and the pollution denominator all at once — every score in
+// that round becomes incomparable with the round before, while rubric_hash does not change a
+// single character. Same shape as rubric_hash (sha256, first 8 hex chars), so report's existing
+// comparability-break detection can be reused verbatim.
+//
+// Normalised before hashing, so cosmetic edits don't fake a break: entries trimmed, trailing
+// slashes dropped (`docs/` and `docs` are the same directory), duplicates removed, each list
+// sorted. Serialisation is an array of [field, value] pairs in a fixed order — a plain object
+// literal would make the digest depend on key insertion order.
+
+const CORPUS_LIST_FIELDS = ['docs_dirs', 'docs_files', 'entry_files', 'exclude'];
+
+function normalizeCorpusEntry(v) {
+  return String(v).trim().replace(/\/+$/, '');
+}
+
+export function corpusFingerprint(config) {
+  const pairs = CORPUS_LIST_FIELDS.map((field) => {
+    const raw = Array.isArray(config?.[field]) ? config[field] : [];
+    return [field, [...new Set(raw.map(normalizeCorpusEntry).filter(Boolean))].sort()];
+  });
+  pairs.push(['index_file', config?.index_file ? normalizeCorpusEntry(config.index_file) || null : null]);
+  return pairs;
+}
+
+// No config supplied (an older caller, or a run that never loaded one) -> null, never a crash and
+// never a hash of an empty corpus — report must be able to tell "unknown" from "genuinely empty".
+export function corpusHash(config) {
+  if (!config) return null;
+  return createHash('sha256')
+    .update(JSON.stringify(corpusFingerprint(config)), 'utf8')
+    .digest('hex')
+    .slice(0, 8);
+}
+
 const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-export function docgradMeta(skillRoot = SKILL_ROOT) {
+export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   let version = null;
   try {
     version = JSON.parse(fs.readFileSync(path.join(skillRoot, '.claude-plugin/plugin.json'), 'utf8')).version ?? null;
@@ -477,7 +639,7 @@ export function docgradMeta(skillRoot = SKILL_ROOT) {
   } catch {
     rubricHash = null;
   }
-  return { version, rubric_hash: rubricHash };
+  return { version, rubric_hash: rubricHash, corpus_hash: corpusHash(config) };
 }
 
 // --- Concrete claim candidates ------------------------------------------------------
