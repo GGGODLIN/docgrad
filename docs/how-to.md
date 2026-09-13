@@ -41,8 +41,21 @@ Use the absolute path from the line that actually runs after `/docgrad` is trigg
 `tests/` tests the scripts' output — it **cannot test whether star ratings are stable** — in the oikos incident, consistency went ★4->★2 and not a single unit test turned red. The reproducibility of star ratings is the job of `evals/` (three cases and fixture baselines are in [evals/README.md](../evals/README.md)):
 
 ```bash
-claude plugin eval . --runs 5
+claude plugin eval . --runs 5 --scaffold --allow-tools Bash --keep-temp
 ```
+
+Three of those flags are not optional for this plugin:
+
+- **`--allow-tools Bash`** — docgrad's six dimensions are computed by five Node scripts, and the
+  harness removes ungranted tools from the session entirely. A case's own `allowed_tools` cannot
+  grant `Bash`; only this flag can. Without it the audit is structurally impossible, not merely
+  worse.
+- **`--scaffold`** — each run starts in an empty workspace, so each case's `fixture.sh` copies its
+  fixture in and gives it its own git history.
+- **`--keep-temp`** — keeps each run's `trace.jsonl`. A failing case otherwise reports `0.00` and
+  nothing else, which does not distinguish "the skill scored badly" from "the sandbox had no
+  filesystem access". Every diagnosis in [evals/README.md](../evals/README.md) §Current status came
+  out of a kept trace.
 
 `--runs` isn't about running multiple times and taking the mode: **the distribution of star ratings is itself the metric**. If the same fixture comes out ★2/★2/★3, that means there's still slack there, and it should be tracked as a defect.
 

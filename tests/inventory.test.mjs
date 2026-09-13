@@ -759,6 +759,34 @@ test('inventory: the untracked note names which git failure occurred (#52)', () 
     );
     assert.match(noBinary.untracked.note, /git is not installed/);
     assert.notEqual(noBinary.untracked.note, notATree.untracked.note, 'the two causes must be distinguishable');
+
+    // Third cause, and the one the first version of this fix got wrong: git exists, runs, and fails
+    // for its own reasons *inside a real work tree*. Inferring "not a work tree" from "exited
+    // non-zero" produced the one message whose follow-up is the opposite of the right one. Found by
+    // running docgrad under `claude plugin eval`, where /usr/bin/git is macOS's xcrun shim and
+    // cannot write its cache.
+    const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-brokengit-'));
+    try {
+      fs.mkdirSync(path.join(tree, 'docs'));
+      fs.writeFileSync(path.join(tree, 'docs/a.md'), '# a\n');
+      fs.writeFileSync(path.join(tree, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+      gitInit(tree); // a genuine work tree
+      fs.writeFileSync(path.join(binDir, 'git'), "#!/bin/sh\necho \"git: error: Failed to locate 'git'.\" >&2\nexit 72\n");
+      fs.chmodSync(path.join(binDir, 'git'), 0o755);
+      const brokenGit = JSON.parse(
+        execFileSync(process.execPath, [SCRIPT, '--root', tree], { encoding: 'utf8', env: { PATH: binDir } })
+      );
+      assert.equal(brokenGit.untracked.count, null);
+      assert.match(brokenGit.untracked.note, /git is present but failed to run here/);
+      assert.doesNotMatch(
+        brokenGit.untracked.note,
+        /is not a git working tree/,
+        'a real work tree must never be reported as not a work tree just because git broke'
+      );
+      assert.match(brokenGit.untracked.note, /Failed to locate/, "git's own words are what make the cause actionable");
+    } finally {
+      fs.rmSync(tree, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.rmSync(binDir, { recursive: true, force: true });

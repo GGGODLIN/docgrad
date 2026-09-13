@@ -449,31 +449,49 @@ function pushSingleFile(rootDir, rel, field, out) {
 // in a .gitignore'd directory, so it is untracked *and* ignored, and --exclude-standard would
 // filter it straight back out. "Not in git" is the property that matters here, and an ignored
 // file has it.
-// Set by gitTrackedFiles() on its way to returning null, so a caller can say **which** of the two
-// causes applied. They are not interchangeable: "git is not installed" is fixed by installing git
-// or running somewhere else, while "this is not a git working tree" means the check can never apply
-// here and the report should stop suggesting it. A note that only offers the disjunction leaves the
-// reader to guess which action to take (#52).
+// Set by gitTrackedFiles() on its way to returning null, so a caller can say **which** cause
+// applied. The three are not interchangeable, and each points at a different action:
+//
+//   no-git-binary   install git, or run somewhere it exists
+//   not-a-work-tree the check can never apply here; stop recommending it
+//   git-failed      git exists and ran and broke — run where git works; the check does apply
+//
+// The first version of this (v1.7.0, #52) had only the first two and inferred the second from
+// "anything that is not ENOENT". That was wrong in a way that mattered: under an agent sandbox
+// where `/usr/bin/git` is macOS's xcrun shim and cannot write its cache, git exits non-zero inside
+// a directory that **is** a work tree, and the report said "not a git working tree" — the one
+// message whose follow-up is the opposite of the right one. Found by running docgrad under
+// `claude plugin eval`; the trace is in evals/README.md.
 let lastGitFailure = null;
+let lastGitStderr = null;
 
 export function gitUnavailableReason() {
   return lastGitFailure;
 }
+
+// git's own words for a directory that genuinely is not a work tree. Matched rather than assumed,
+// because "git exited non-zero" covers far more than that.
+const NOT_A_WORK_TREE_RE = /not a git repository|does not appear to be a git repository/i;
 
 export function gitTrackedFiles(rootDir) {
   try {
     const out = execFileSync('git', ['ls-files', '-z'], {
       cwd: rootDir,
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      // stderr is captured, not discarded: it is the only thing that separates "not a work tree"
+      // from "git is broken here". Piped rather than inherited, so a normal run stays quiet.
+      stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 64 * 1024 * 1024,
     });
     lastGitFailure = null;
+    lastGitStderr = null;
     return new Set(out.split('\0').filter(Boolean)); // git already prints posix separators
   } catch (err) {
-    // ENOENT on the spawn itself = no git binary. Anything else means git ran and refused, which
-    // for `ls-files` is "not a work tree" in every case a user will hit.
-    lastGitFailure = err && err.code === 'ENOENT' ? 'no-git-binary' : 'not-a-work-tree';
+    const stderr = String(err?.stderr ?? '').trim();
+    lastGitStderr = stderr ? stderr.split('\n')[0].slice(0, 200) : null;
+    if (err && err.code === 'ENOENT') lastGitFailure = 'no-git-binary';
+    else if (NOT_A_WORK_TREE_RE.test(stderr)) lastGitFailure = 'not-a-work-tree';
+    else lastGitFailure = 'git-failed';
     return null;
   }
 }
@@ -493,11 +511,13 @@ const NO_GIT = 'git is unavailable or this is not a git working tree';
 const GIT_FAILURE_TEXT = {
   'no-git-binary': 'git is not installed (or not on PATH)',
   'not-a-work-tree': 'this directory is not a git working tree',
+  'git-failed': 'git is present but failed to run here, so whether this is a work tree is unknown',
 };
 
-export function gitUnavailableNote(reason = gitUnavailableReason()) {
+export function gitUnavailableNote(reason = gitUnavailableReason(), stderr = lastGitStderr) {
   const cause = GIT_FAILURE_TEXT[reason] ?? NO_GIT;
-  return `${cause}: tracked and untracked files cannot be told apart, so this is null rather than zero`;
+  const detail = reason === 'git-failed' && stderr ? ` (git said: ${stderr})` : '';
+  return `${cause}${detail}: tracked and untracked files cannot be told apart, so this is null rather than zero`;
 }
 
 // Retained as the cause-unknown wording; prefer gitUnavailableNote() at any call site that has just
