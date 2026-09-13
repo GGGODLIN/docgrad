@@ -108,8 +108,13 @@ const DEFAULTS = {
   freshness: { convention: 'none', field: null, heading_field: null, stale_after_days: 60 },
   coverage: { drift_after_days: 30, min_commits: 3 },
   targets: { completeness: 4, correctness: 4, freshness: 4, linkage: 4, consistency: 4, economy: 4 },
-  // Thresholds for the economy anchors (added in v1.0.0). Changing these = changing the meaning
-  // of a rubric anchor = major, see reference/rubric.md.
+  // Thresholds for the economy anchors (added in v1.0.0, actually read since v1.7.0 — until then
+  // they were inert and reference/rubric.md retyped the numbers in prose, so editing them changed
+  // nothing while init.md warned that it changed everything). inventory.mjs reads them now and the
+  // rubric cites what it emits. Changing them does not change a *shipped* anchor — it changes the
+  // ruler this repo is graded by, which is why they are in thresholds_hash: a score measured at
+  // custom thresholds is not comparable with one measured at the defaults, and the fingerprint is
+  // how a reader can tell.
   economy: { entry_cost_tiers: [20000, 10000, 5000, 3000], pollution_max: 0.1 },
   correctness_sample: 8,
   // How many of the ranked claim candidates inventory.mjs actually emits. The population itself is
@@ -235,11 +240,49 @@ export function validateConfigTypes(config, configFile = CONFIG_FILENAME) {
       );
     }
   }
+  // Nested maps were never type-checked. That was survivable while nothing read economy; it is not
+  // now, and freshness.stale_after_days has driven a rubric anchor since long before that.
+  const economy = config.economy ?? {};
+  const tiers = economy.entry_cost_tiers;
+  if (!Array.isArray(tiers) || tiers.length !== 4 || tiers.some((t) => typeof t !== 'number' || !(t > 0))) {
+    throw new Error(
+      `${configFile}: economy.entry_cost_tiers must be a list of four positive numbers, but got ${describeValue(tiers)}. ` +
+        `Correct form: economy.entry_cost_tiers: [20000, 10000, 5000, 3000] — the ★1/★2/★3/★4 fixed-cost boundaries, highest first.`
+    );
+  }
+  for (let i = 1; i < tiers.length; i += 1) {
+    if (tiers[i] >= tiers[i - 1]) {
+      throw new Error(
+        `${configFile}: economy.entry_cost_tiers must decrease, but ${tiers[i - 1]} is followed by ${tiers[i]}. ` +
+          `They are star boundaries read highest-first; out of order they would place a cheaper entry file in a worse band than an expensive one.`
+      );
+    }
+  }
+  if (typeof economy.pollution_max !== 'number' || !(economy.pollution_max > 0) || economy.pollution_max > 1) {
+    throw new Error(
+      `${configFile}: economy.pollution_max must be a ratio greater than 0 and at most 1, but got ${describeValue(economy.pollution_max)}. ` +
+        `Correct form: economy.pollution_max: 0.1 — that is 10%, written as a fraction, not as 10.`
+    );
+  }
+  const staleAfter = config.freshness?.stale_after_days;
+  if (!Number.isInteger(staleAfter) || staleAfter < 1) {
+    throw new Error(
+      `${configFile}: freshness.stale_after_days must be a positive whole number of days, but got ${describeValue(staleAfter)}. ` +
+        `Correct form: freshness.stale_after_days: 60. It sets the rubric's freshness ★3 staleness boundary for this repo.`
+    );
+  }
   return config;
 }
 
 // configFile can be external (--config): for when the doc source itself can't take a written file
 // (an export directory, a read-only mount) and you want to point at a config file elsewhere.
+// The shipped anchor values, exported so a run can say whether it was graded by them or by
+// something this repo chose. Deliberately not derived from DEFAULTS at call time: the point of
+// comparison is "the values docgrad ships", and reading them out of the same object a config has
+// already been merged into would compare a thing with itself.
+export const SHIPPED_TIERS = [20000, 10000, 5000, 3000];
+export const SHIPPED_POLLUTION_MAX = 0.1;
+
 export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILENAME)) {
   if (!fs.existsSync(configFile)) {
     throw new Error(`Could not find ${configFile} (root: ${rootDir}). Run /docgrad init first.`);
@@ -252,6 +295,10 @@ export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILEN
     coverage: { ...DEFAULTS.coverage, ...(parsed.coverage ?? {}) },
     targets: { ...DEFAULTS.targets, ...(parsed.targets ?? {}) },
     rules: { ...DEFAULTS.rules, ...(parsed.rules ?? {}) },
+    // economy was the only nested map without this, so `economy: { pollution_max: 0.2 }` used to
+    // leave entry_cost_tiers undefined rather than at its default. Nothing noticed because nothing
+    // read the field; now that inventory.mjs does, a partial economy block would have crashed it.
+    economy: { ...DEFAULTS.economy, ...(parsed.economy ?? {}) },
   };
   validateConfigTypes(config, configFile);
   const needsField = parseFreshnessConventions(config.freshness.convention).some(
@@ -953,6 +1000,38 @@ function resolveSkillRoot() {
   }
 }
 
+// --- thresholds_hash ---------------------------------------------------------------
+//
+// rubric_hash fingerprints the ruler docgrad ships. It does not cover the ruler a *repo* is
+// actually graded by, because three config values move judgement boundaries without touching a
+// word of rubric.md:
+//
+//   economy.entry_cost_tiers   the ★1/★2/★3/★4 fixed-cost bands
+//   economy.pollution_max      the ★3 cap on the pollution surface
+//   freshness.stale_after_days the ★3 staleness boundary, written in the anchor as "≤60 days"
+//
+// The first two were inert until v1.7.0 and warned about anyway; the third has been live since it
+// was introduced and was never warned about at all — the wiring was the opposite of what the docs
+// said in both directions (#50). Now they are all read, and all fingerprinted: two rounds whose
+// thresholds_hash differs were not measured by the same ruler, however identical their rubric_hash.
+//
+// null without a config, for the same reason corpus_hash is: "unknown" must stay distinguishable
+// from "the defaults".
+export function thresholdsHash(config) {
+  if (!config) return null;
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        config.economy?.entry_cost_tiers ?? null,
+        config.economy?.pollution_max ?? null,
+        config.freshness?.stale_after_days ?? null,
+      ]),
+      'utf8'
+    )
+    .digest('hex')
+    .slice(0, 8);
+}
+
 const SKILL_ROOT = resolveSkillRoot();
 
 // The manifest is at the *plugin* root, which since v1.7.0 is not the skill root: the skill payload
@@ -992,7 +1071,12 @@ export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   } catch {
     rubricHash = null;
   }
-  return { version, rubric_hash: rubricHash, corpus_hash: corpusHash(config) };
+  return {
+    version,
+    rubric_hash: rubricHash,
+    thresholds_hash: thresholdsHash(config),
+    corpus_hash: corpusHash(config),
+  };
 }
 
 // --- Claim identity ------------------------------------------------------------------

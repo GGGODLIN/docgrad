@@ -31,8 +31,8 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
      `entry_files`; read only when doing a certain kind of work (the entry file says "read `DESIGN.md` before touching the UI") →
      `docs_files`. Listing one document in both places is pointless — `entry_files` wins and counts toward fixed cost.
    - **Getting this wrong has an asymmetric cost.** Stuffing a conditional document into `entry_files` inflates fixed cost for
-     nothing (measured on oikos: 9,037 → 21,474 tokens, crossing the 20,000 threshold in `economy.entry_cost_tiers` and dropping
-     economy from ★3 to ★1), and [audit.md](audit.md) §Economy will find `entry_cost.files` doesn't match reality and **log a
+     nothing (measured on oikos: 9,037 → 21,474 tokens, crossing the first `economy.entry_cost_tiers` threshold — 20,000 at the shipped
+     defaults — and dropping economy from ★3 to ★1), and [audit.md](audit.md) §Economy will find `entry_cost.files` doesn't match reality and **log a
      separate** deduction. The reverse (putting a truly always-loaded file into `docs_files`) underreports fixed cost, which is
      equally false.
    - **Files only**: listing a directory drops it (put directories in `docs_dirs`); a nonexistent file is silently skipped;
@@ -83,8 +83,13 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
    one and write them comma-separated) + `field` (for frontmatter) / `heading_field` (for heading-line; can be left blank when
    only one convention is chosen and it's already described by `field` — the scripts fall back to `field`)
 8. `targets`: default all 4 (six dimensions), ask "which dimensions are you willing to lower to 3?" (multi-select).
-   If economy is hard to hit because the repo's entry file is inherently large, lower the target rather than change
-   `economy.entry_cost_tiers` — changing the threshold changes the rubric anchor, which makes historical scores incomparable
+   If economy is hard to hit because the repo's entry file is inherently large, prefer lowering the target over changing
+   `economy.entry_cost_tiers`. Both are legitimate; they say different things. Lowering the target says "this repo accepts
+   ★3 economy"; raising the tiers says "this repo's ★4 means something looser than docgrad's ★4", and every later reader
+   has to know that to read the score. Since v1.7.0 the change is at least **visible**: the thresholds are reported on
+   every run (`inventory.economy_thresholds.customised`) and folded into `thresholds_hash`, so `report` draws a
+   comparability break where it happened. Before v1.7.0 these two fields were read by nothing at all — editing them changed
+   no outcome, while this questionnaire warned that it changed the rubric. Both halves of that were wrong
 9. `scenario`: ask the user to describe the repo's representative development task in one sentence (used as the LLM-simulation
    fallback when `scenarios` is absent)
 10. `correctness_sample`: **the number of claims drawn *new* each round** (re-verification of the existing ledger is a separate

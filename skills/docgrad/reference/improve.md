@@ -72,21 +72,29 @@
 4. **Verify**: rerun the scripts and re-score the affected dimensions. Success = the target dimension goes up and no other dimension drops.
    Any dimension dropping → revert the change that caused the drop, and note it.
 5. **Record and commit**:
-   - Append one line to `.docgrad/history.jsonl` (create it if it doesn't exist). `docgrad_version`, `rubric_hash` and
-     `corpus_hash` **must be copied straight from `inventory.mjs`'s output `docgrad` block** (all three live there), don't fill
-     them in yourself:
+   - Append one line to `.docgrad/history.jsonl` (create it if it doesn't exist). `docgrad_version`, `rubric_hash`,
+     `thresholds_hash` and `corpus_hash` **must be copied straight from `inventory.mjs`'s output `docgrad` block** (all four
+     live there), don't fill them in yourself:
 
      ```json
-     {"round": 3, "date": "2026-07-12", "dimension": "linkage", "docgrad_version": "1.1.0", "rubric_hash": "b6e4f7f3", "corpus_hash": "684034d6", "scores": {"completeness": 4, "correctness": 3, "freshness": 4, "linkage": 4, "consistency": 4, "economy": 4}, "coverage": {"claims_verified": 23, "claims_total": 68}, "notes": "fixed 12 dead links; folded 2 orphans into the index"}
+     {"round": 3, "date": "2026-07-12", "dimension": "linkage", "docgrad_version": "1.1.0", "rubric_hash": "b6e4f7f3", "thresholds_hash": "ec596daf", "corpus_hash": "684034d6", "scores": {"completeness": 4, "correctness": 3, "freshness": 4, "linkage": 4, "consistency": 4, "economy": 4}, "coverage": {"claims_verified": 23, "claims_total": 68}, "notes": "fixed 12 dead links; folded 2 orphans into the index"}
      ```
 
-     The three version fields are for `report` to draw comparability breakpoints: when `rubric_hash` changes it means the ruler changed,
+     The four version fields are for `report` to draw comparability breakpoints: when `rubric_hash` changes it means the ruler changed,
      and the scores before and after can't be compared directly; when `corpus_hash` changes it means the set of files being measured
      changed (`docs_dirs`/`docs_files`/`entry_files`/`exclude`/`out_of_scope`/`index_file`/`exclude_untracked`), which moves `files_total`,
      `claims_total`, the freshness denominator and the pollution denominator at once — every dimension in that round is affected,
      not just one. **Write `corpus_hash` every round even when it hasn't moved**: `report` can only spot the change by comparing
      consecutive lines, so a round that omits it leaves the break undetectable. `corpus_hash` is `null` when the round ran without a
      config. Old records missing these fields are treated as unknown and don't block anything.
+
+     `thresholds_hash` (added v1.7.0) covers the three config values that move a judgement boundary without changing a word of
+     `rubric.md`: `economy.entry_cost_tiers`, `economy.pollution_max` and `freshness.stale_after_days`. Two rounds whose
+     `thresholds_hash` differs were **not measured by the same ruler**, however identical their `rubric_hash` — so treat a move
+     exactly like a `rubric_hash` move and draw the break. One thing it cannot tell you: rounds recorded **before** v1.7.0 have no
+     such field, so the round where a repo's custom `economy:` block went from inert to authoritative reads as "unknown → first
+     value", not as a change. That transition is a real break and it is stated in the v1.7.0 CHANGELOG rather than detectable
+     here.
 
      A dimension judged **not measurable** (see the design-ceiling section below — currently only correctness, when the corpus
      holds no verifiable claims) is recorded as `null`, never as a number. `report` must render it as `n/a` and must not

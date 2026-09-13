@@ -298,7 +298,7 @@ have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_
 | Freshness | ★x | ★y | …(date concentration x%, call it out if high) |
 | Linkage | ★x | ★y | … |
 | Consistency | ★x | ★y | …(deductions tagged `[contradiction]`/`[duplication]`/`[placement]`) |
-| Economy | ★x | ★y | …(fixed cost N tokens, pollution surface x%, out_of_scope N files / ~M tokens — always stated; add "N untracked files — ratio is checkout-bound" when `untracked.count` is non-zero, "untracked not checked (no git)" when it is `null`) |
+| Economy | ★x | ★y | …(fixed cost N tokens, pollution surface x%, out_of_scope N files / ~M tokens — always stated; add "N untracked files — ratio is checkout-bound" when `untracked.count` is non-zero, "untracked not checked (no git)" when it is `null`; add "graded at custom thresholds: tiers […], pollution_max x" when `economy_thresholds.customised` is true) |
 
 ## Token economy (not rated)
 - Fixed cost: ~N tokens (entry_files: …) — already counted in economy
@@ -306,6 +306,11 @@ have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_
   code_pointer yes/no, churn_commits N — call out the one that taxes the most); without scenarios, fall back to scenario "…" LLM
   simulation: ~N tokens, required-reading path a.md → b.md → …
 - Pollution surface: x% (exclude: …) — already counted in economy
+- Thresholds in force: read them from `inventory.economy_thresholds`, never from memory or from the
+  rubric table. When `customised` is **false**, say `shipped defaults`. When it is **true**, print the
+  tiers and `pollution_max` and state plainly that this repo's ★ is not comparable with one graded at
+  the defaults — the reader cannot infer that from the star alone, and `thresholds_hash` only tells
+  them the ruler changed, not what it changed to
 - Out of scope (not charged to the pollution surface): N files / ~M tokens (…paths) — **always printed, `0 files / 0 tokens`
   when the field is unused**. Say what it is graded as instead, and call it out when M is a material share of the corpus
   token total above; pass `out_of_scope.note` through verbatim when it appears (list capped, or paths that match both

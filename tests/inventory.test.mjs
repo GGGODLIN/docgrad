@@ -642,3 +642,54 @@ test('inventory: the src_dirs-unset note names shapes the API matcher actually a
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// #50: these two fields sat in .docgrad.yml since v1.0.0 and were read by nothing, while the rubric
+// applied its own hardcoded copy of the same numbers and init.md warned against editing them. These
+// tests are the wiring: the config must reach the output, and the output must say when it is not
+// the shipped ruler.
+test('inventory: economy_thresholds reports the shipped values and the arithmetic over them (#50)', () => {
+  const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
+  const e = out.economy_thresholds;
+  assert.deepEqual(e.entry_cost_tiers, [20000, 10000, 5000, 3000]);
+  assert.equal(e.pollution_max, 0.1);
+  assert.equal(e.customised, false, 'a config that never mentions economy: is not customised');
+  assert.equal(e.entry_cost_tokens_est, out.entry_cost.tokens_est, 'must cite the same number economy is rated on');
+  assert.equal(e.pollution_ratio, out.pollution.ratio);
+  assert.equal(e.cost_allows_star, 4);
+  assert.equal(e.pollution_caps_at, null);
+  assert.match(out.docgrad.thresholds_hash, /^[0-9a-f]{8}$/);
+});
+
+test('inventory: custom thresholds are honoured, flagged, and move thresholds_hash (#50)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-econ-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs/README.md'), '# index\n\nsome prose.\n');
+    fs.writeFileSync(path.join(tmp, 'ENTRY.md'), `# entry\n\n${'padding words here. '.repeat(40)}\n`);
+    const write = (economy) =>
+      fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `docs_dirs: [docs/]\nentry_files: [ENTRY.md]\n${economy}`);
+
+    write('');
+    const shipped = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(shipped.economy_thresholds.customised, false);
+    assert.equal(shipped.economy_thresholds.cost_allows_star, 4);
+
+    // Tiers tight enough that the same entry file now lands in the worst band: the config decides
+    // the boundary, which before v1.7.0 it demonstrably did not.
+    write('economy:\n  entry_cost_tiers: [50, 40, 30, 20]\n');
+    const tight = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(tight.economy_thresholds.customised, true);
+    assert.equal(tight.economy_thresholds.cost_allows_star, 1, 'the same file, a different ruler');
+    assert.equal(tight.economy_thresholds.star_5_cost_met, false);
+    assert.notEqual(tight.docgrad.thresholds_hash, shipped.docgrad.thresholds_hash);
+    assert.equal(tight.entry_cost.tokens_est, shipped.entry_cost.tokens_est, 'the measurement itself must not move');
+
+    // A partial economy block must keep the other key at its default (the missing deep-merge).
+    write('economy:\n  pollution_max: 0.9\n');
+    const partial = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.deepEqual(partial.economy_thresholds.entry_cost_tiers, [20000, 10000, 5000, 3000]);
+    assert.equal(partial.economy_thresholds.pollution_max, 0.9);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
