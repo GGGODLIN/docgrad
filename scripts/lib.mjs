@@ -457,6 +457,27 @@ export function githubSlug(heading) {
 // were of this kind).
 const EXPLICIT_ANCHOR_RE = /<a\s[^>]*\b(?:id|name)\s*=\s*["']([^"']+)["']/gi;
 
+// Strips the emphasis markers out of a heading before it is slugged, so the slug describes what
+// GitHub actually *renders*. `*` and `` ` `` are stripped unconditionally. `_` is the hard case:
+// GFM only treats it as an emphasis delimiter when it comes in a **matched pair** whose outer
+// sides are non-alphanumeric and whose inner sides are not whitespace. A lone `_` sitting next to
+// punctuation, or at the start of a word, is literal — GitHub keeps it in the slug.
+//
+//   `_emphasis_` / `__bold__` / `__init__` -> stripped (GitHub renders these as emphasis too)
+//   `sot_level` / `cmd._args` / `_private` -> kept
+//
+// The previous implementation stripped an `_` whenever *either* neighbour was non-alphanumeric,
+// which turned `### cmd._args` into `cmdargs` and `### _private` into `private` while GitHub
+// produces `cmd_args` / `_private`. Every link pointing at such a section was reported as a bad
+// anchor, and a bad anchor always costs a star — measured on tj/commander.js, the convergence
+// loop went and added `<a id>` to a document that had nothing wrong with it (#42). The 0.6.1 fix
+// only covered the word-internal case (`sot_level`); pairing is what covers all of them.
+const EMPHASIS_PAIR_RE = /(?<![\p{L}\p{N}])(_{1,3})(?=[^\s_])(.+?)(?<=[^\s_])\1(?![\p{L}\p{N}])/gu;
+
+export function stripHeadingEmphasis(heading) {
+  return heading.replace(/[*`]/g, '').replace(EMPHASIS_PAIR_RE, '$2');
+}
+
 export function extractHeadings(text) {
   const counts = new Map();
   const slugs = new Set();
@@ -464,15 +485,7 @@ export function extractHeadings(text) {
     for (const m of line.matchAll(EXPLICIT_ANCHOR_RE)) slugs.add(m[1].trim());
     const m = line.match(/^#{1,6}\s+(.+?)\s*#*\s*$/);
     if (!m) continue;
-    // Strip markdown emphasis markers from the heading before computing the slug. `_` needs two
-    // cases: GFM's word-internal underscore is not emphasis (`sot_level` is literal, and GitHub's
-    // slug keeps it) — only an `_` with non-alphanumeric characters on both sides is a delimiter.
-    // The old implementation stripped it unconditionally, so
-    // `## 狀態圖例 (status / sot_level legend)` was computed as `…-sotlevel-…`, and every link
-    // pointing at that section was falsely reported as a bad anchor.
-    const base = githubSlug(
-      m[1].replace(/[*`]/g, '').replace(/_(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])_/gu, '')
-    );
+    const base = githubSlug(stripHeadingEmphasis(m[1]));
     const n = counts.get(base) ?? 0;
     counts.set(base, n + 1);
     slugs.add(n === 0 ? base : `${base}-${n}`);
@@ -594,6 +607,191 @@ export function extractCodeRefs(text, srcDirs = []) {
   return refs;
 }
 
+// --- Source symbol index (the guard for API-shaped claim candidates) ---------------------------
+//
+// Library documentation describes an **API**, not a file tree. Measured on tj/commander.js,
+// extractCodeRefs found a path-shaped span on exactly zero lines — `claims_total` was 0, so the
+// correctness dimension had no mechanical basis at all, and the convergence loop then wrote new
+// documents in docgrad's own `path › symbol()` house style and manufactured a population out of
+// its own prose (#40).
+//
+// Recognising API-shaped inline code needs a guard, because prose is full of code-shaped words.
+// The guard is existence: an identifier only counts if it actually occurs somewhere under
+// src_dirs. That is one pass over src_dirs building a Set, never a grep per candidate — cost is
+// O(bytes under src_dirs), read once per script run and then O(1) per lookup. Files above
+// MAX_SRC_SYMBOL_FILE_BYTES are skipped: a minified bundle or a generated lockfile is both the most
+// expensive thing in the tree and the worst possible symbol source (it would add every mangled
+// name in the dependency graph to the set and blunt the guard).
+//
+// No src_dirs -> null -> the whole extension stays inert. Callers must report that, not hide it.
+
+const IDENTIFIER_RE = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+export const MAX_SRC_SYMBOL_FILE_BYTES = 512 * 1024;
+
+export function buildSrcSymbolIndex(rootDir, srcDirs = []) {
+  const dirs = (Array.isArray(srcDirs) ? srcDirs : [])
+    .map((d) => String(d).trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+  if (!dirs.length) return null;
+
+  const symbols = new Set();
+  let filesScanned = 0;
+  let filesSkipped = 0;
+  let bytesScanned = 0;
+
+  const visit = (absDir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory — the guard degrades, it must not crash the measurement
+    }
+    for (const entry of entries) {
+      const abs = path.join(absDir, entry.name);
+      if (entry.isDirectory()) {
+        if (ALWAYS_SKIP_DIRS.has(entry.name)) continue;
+        visit(abs);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      let text;
+      try {
+        const { size } = fs.statSync(abs);
+        if (size > MAX_SRC_SYMBOL_FILE_BYTES) {
+          filesSkipped += 1;
+          continue;
+        }
+        text = fs.readFileSync(abs, 'utf8');
+        bytesScanned += size;
+      } catch {
+        filesSkipped += 1;
+        continue;
+      }
+      if (text.includes('\0')) {
+        filesSkipped += 1; // binary
+        continue;
+      }
+      filesScanned += 1;
+      for (const m of text.matchAll(IDENTIFIER_RE)) symbols.add(m[0]);
+    }
+  };
+
+  for (const dir of dirs) {
+    const abs = path.join(rootDir, dir);
+    if (fs.existsSync(abs)) visit(abs);
+  }
+  return { symbols, files_scanned: filesScanned, files_skipped: filesSkipped, bytes_scanned: bytesScanned };
+}
+
+// API-shaped inline code. Three shapes are accepted, and each must be the *entire* content of one
+// backtick span:
+//   `foo()`                     bare call
+//   `.option()` / `obj.method()`  member call (a leading dot is how JS API docs name a method)
+//   `a.b` / `a.b.c`             dotted symbol with no call parens
+//
+// Deliberately NOT accepted:
+//   - a bare identifier with neither a dot nor parens (`minWidthToWrap`). The existence check
+//     cannot carry that shape on its own: a Set of every identifier under src_dirs contains
+//     `data`, `name`, `true`, `value`, and inline code around those words is ordinary prose.
+//     A real API claim about such a symbol is almost always written next to a call somewhere in
+//     the same document, so the cost of excluding it is small and the false-positive saving large.
+//   - a paren-less dotted span whose last segment looks like a file extension (`program.opts`,
+//     `lib.mjs`). extractCodeRefs already emits those as basename path refs, and counting them
+//     twice would inflate `refs` and silently reorder the candidate list.
+const API_SPAN_RE = /^\.?([A-Za-z_$][A-Za-z0-9_$]*)((?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)(\(\s*\))?$/;
+const BASENAME_TAIL_RE = /\.[A-Za-z0-9]{1,10}$/;
+
+export function apiSpanSegments(raw) {
+  const m = raw.match(API_SPAN_RE);
+  if (!m) return null;
+  const [, head, rest, call] = m;
+  if (!call && !rest) return null; // bare identifier
+  if (!call && BASENAME_TAIL_RE.test(raw)) return null; // already a basename path ref
+  return rest ? [head, ...rest.slice(1).split('.')] : [head];
+}
+
+// symbols: a Set from buildSrcSymbolIndex().symbols. null/undefined => inert, returns [].
+export function extractApiRefs(text, symbols) {
+  if (!symbols || !symbols.size) return [];
+  const refs = [];
+  let inFence = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    for (const m of line.matchAll(CODE_REF_RE)) {
+      const raw = m[1].trim();
+      if (!raw || raw.includes('/') || raw.includes('›')) continue; // path territory, not API
+      const segments = apiSpanSegments(raw);
+      if (!segments) continue;
+      // Every segment must exist under src_dirs, not just the last one. The existence check is
+      // what makes this a signal rather than noise; requiring all of it is what keeps a documented
+      // config key like `freshness.retention` from passing on the strength of one common word.
+      if (!segments.every((s) => symbols.has(s))) continue;
+      refs.push({ symbol: raw });
+    }
+  }
+  return refs;
+}
+
+// --- git: which commit first added a file, and did docgrad write it? ---------------------------
+//
+// A correctness score built entirely on the tool's own prose is not worthless, but the reader has
+// to be told. Measured on tj/commander.js after five convergence rounds: all 26 claim candidates
+// came from the three documents docgrad itself had just written, and none from the seven
+// pre-existing ones — the score went up while the repo's actual documentation debt was never
+// sampled once.
+//
+// The signal is mechanical: the commit that *added* the file (oldest `--diff-filter=A`), and
+// whether its subject carries docgrad's own `docs(docgrad):` prefix. One `git log` for the whole
+// corpus rather than one per file; `--reverse` means the first time a path appears in the output
+// is its add commit. Chunked so a very large corpus cannot overflow argv.
+//
+// null when git is unavailable — never false. "We could not tell" and "docgrad did not write it"
+// are different statements, and collapsing them is how a disclosure field becomes a lie.
+
+const GIT_PATHSPEC_CHUNK = 200;
+const DOCGRAD_COMMIT_SUBJECT_RE = /^docs\(docgrad\)\s*:/;
+
+export function gitAddCommitSubjects(rootDir, relPaths = []) {
+  if (!relPaths.length) return new Map();
+  const subjects = new Map();
+  try {
+    for (let i = 0; i < relPaths.length; i += GIT_PATHSPEC_CHUNK) {
+      const chunk = relPaths.slice(i, i + GIT_PATHSPEC_CHUNK);
+      const out = execFileSync(
+        'git',
+        ['log', '--reverse', '--diff-filter=A', '--name-only', '--format=%x00%s', '--', ...chunk],
+        { cwd: rootDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }
+      );
+      let subject = null;
+      for (const line of out.split('\n')) {
+        if (line.startsWith('\0')) {
+          subject = line.slice(1);
+          continue;
+        }
+        const p = line.trim();
+        if (!p || subjects.has(p)) continue;
+        subjects.set(p, subject);
+      }
+    }
+  } catch {
+    return null; // not a git work tree / git not installed
+  }
+  return subjects;
+}
+
+// null = unknown (no git, or the path has no add commit in this history); true/false otherwise.
+export function isDocgradAuthored(subject) {
+  if (typeof subject !== 'string') return null;
+  return DOCGRAD_COMMIT_SUBJECT_RE.test(subject);
+}
+
+export const AUTHORSHIP_UNAVAILABLE_NOTE =
+  `${NO_GIT}: the commit that added each document cannot be read, so docgrad_authored is null rather than false — the share of candidates coming from documents docgrad itself wrote is unknown for this round`;
+
 // --- docgrad's own version fingerprint (used for history.jsonl's comparability fields) ----------------
 //
 // rubric_hash is the fingerprint of "the ruler this round used": every edit to rubric.md changes
@@ -662,15 +860,61 @@ export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   return { version, rubric_hash: rubricHash, corpus_hash: corpusHash(config) };
 }
 
+// --- Claim identity ------------------------------------------------------------------
+//
+// `.docgrad/ledger.jsonl` keys a claim on `<path>:<line>`, and docgrad's own improve/loop
+// **rewrites documents** — "move content out of the entry file" is literally one of the two
+// prescribed economy fixes. Every such move silently repoints a batch of ledger keys at other
+// content: the next round re-verifies the wrong line, records a false `fail`, and because
+// failures are re-verified without a cap, that batch eats the following round's new-draw budget.
+// A harmless tidy-up therefore stops coverage from growing. The tool's core action destroys its
+// own state file (#41).
+//
+// claim_hash is the content-derived key that survives the move, handed to the agent writing the
+// ledger so it does not have to invent one. `path` and `line` stay in the output as locating
+// aids — they are still how a verifier finds the text to read.
+//
+// Normalisation is deliberately shallow: runs of whitespace collapsed, ends trimmed. Markdown
+// markup is **not** stripped and case is **not** folded, because an edited claim *should* hash
+// differently — a rewritten claim genuinely needs re-verification, and treating it as the same
+// claim would carry a stale `pass` forward. Moved-but-identical hashing the same is the point;
+// edited-but-identical would be the bug.
+export function normalizeClaimText(text) {
+  return String(text).replace(/\s+/gu, ' ').trim();
+}
+
+// sha256, first 12 hex chars — the same shape as rubric_hash/corpus_hash but longer than their 8.
+// Those two are a single value per round and only ever compared against the previous round, so
+// they have no birthday problem. claim_hash is a **key across a whole population**, and a realistic
+// repo carries hundreds to low thousands of claims. At 2,000 claims, 32 bits (8 hex chars) collides
+// with probability ~4.7e-4: roughly one repo in two thousand would silently merge two unrelated
+// claims into one ledger row — exactly the class of failure this field exists to remove. 48 bits
+// puts the same figure at ~7e-9 and still fits comfortably on one JSONL line.
+export const CLAIM_HASH_CHARS = 12;
+
+export function claimHash(text) {
+  return createHash('sha256')
+    .update(normalizeClaimText(text), 'utf8')
+    .digest('hex')
+    .slice(0, CLAIM_HASH_CHARS);
+}
+
 // --- Concrete claim candidates ------------------------------------------------------
 //
-// A "concrete claim" = a line outside a fence that has code coordinates to check against
-// (extractCodeRefs can extract a ref from it). A plain descriptive sentence has no coordinates
-// to extract and shouldn't enter the claim ledger in the first place — the rubric's weighted
-// sampling rule for correctness (prefer sampling lines with a path/symbol) becomes mechanically
-// reproducible this way, instead of being freely re-picked by an LLM each round. Heading lines
-// are excluded: a heading is navigation, not a claim.
-export function extractClaimLines(text, srcDirs = []) {
+// A "concrete claim" = a line outside a fence that has code coordinates to check against. Two
+// shapes count as coordinates:
+//   - path-shaped inline code (`lib/foo.js`, `src/a.ts › parse()`) — extractCodeRefs
+//   - API-shaped inline code (`foo()`, `obj.method()`, `a.b`) — extractApiRefs, and **only** when
+//     a symbol index built from src_dirs is supplied, so every identifier is existence-checked
+// A plain descriptive sentence has no coordinates to extract and shouldn't enter the claim ledger
+// in the first place — the rubric's weighted sampling rule for correctness (prefer sampling lines
+// with a path/symbol) becomes mechanically reproducible this way, instead of being freely
+// re-picked by an LLM each round. Heading lines are excluded: a heading is navigation, not a claim.
+//
+// options.symbols: the Set from buildSrcSymbolIndex().symbols. Omitted or null (which is what
+// buildSrcSymbolIndex returns when src_dirs is unset) makes the API shape inert — no existence
+// check is possible, so no candidate is drawn from it.
+export function extractClaimLines(text, srcDirs = [], { symbols = null } = {}) {
   const lines = text.split(/\r?\n/);
 
   // Split into sections first: each heading opens a new section, and the section range tells a
@@ -706,13 +950,23 @@ export function extractClaimLines(text, srcDirs = []) {
     if (inFence) continue;
     if (/^\s*#{1,6}\s/.test(line)) continue;
     if (!line.trim()) continue;
-    const refs = extractCodeRefs(line, srcDirs);
-    if (!refs.length) continue;
+    const pathRefs = extractCodeRefs(line, srcDirs);
+    const apiRefs = extractApiRefs(line, symbols);
+    const refs = pathRefs.length + apiRefs.length;
+    if (!refs) continue;
     const sec = sectionOf(i + 1);
+    const text_ = line.trim();
     out.push({
       line: i + 1,
-      text: line.trim(),
-      refs: refs.length,
+      text: text_,
+      // Stable across a move, different after an edit — see claimHash above. path/line remain as
+      // locating aids, they are just no longer the identity.
+      claim_hash: claimHash(text_),
+      refs,
+      // The split is disclosed, not just the total: on a library repo `refs_path` is 0 across the
+      // board, and a reader needs to see that the population rests entirely on the API matcher.
+      refs_path: pathRefs.length,
+      refs_api: apiRefs.length,
       section: sec.title,
       // verification range: the whole section, not just this one line.
       section_lines: [sec.start, sec.end],

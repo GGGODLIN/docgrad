@@ -251,3 +251,149 @@ test('inventory: rules.pattern can be customized via .docgrad.yml', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// #41: the ledger keys a claim on `<path>:<line>`, and docgrad's own convergence loop moves
+// content between documents. claim_hash is the content-derived key handed to the agent writing
+// the ledger, so a move no longer silently repoints a batch of rows at unrelated content.
+test('inventory: claim_candidates carry a content-derived claim_hash; path/line stay as locating aids', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-claimhash-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.mkdirSync(path.join(tmp, 'src'));
+    fs.writeFileSync(path.join(tmp, 'src', 'balance.ts'), 'export function settle() {}\n');
+    const claim = 'Settlement is handled by `src/balance.ts`.';
+    // the same sentence, in another file at another line — the "moved" case
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), `# A\n\n${claim}\n`);
+    fs.writeFileSync(path.join(tmp, 'docs', 'b.md'), `# B\n\nfiller\n\nfiller\n\n${claim}\n`);
+    // one token different — the "edited" case, which must NOT key the same
+    fs.writeFileSync(path.join(tmp, 'docs', 'c.md'), '# C\n\nSettlement is handled by `src/ledger.ts`.\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nsrc_dirs: [src/]\n');
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    const byPath = Object.fromEntries(out.claim_candidates.map((c) => [c.path, c]));
+    assert.equal(byPath['docs/a.md'].line, 3);
+    assert.equal(byPath['docs/b.md'].line, 7);
+    assert.match(byPath['docs/a.md'].claim_hash, /^[0-9a-f]{12}$/);
+    assert.equal(
+      byPath['docs/a.md'].claim_hash,
+      byPath['docs/b.md'].claim_hash,
+      'moved-but-identical must key the same — that is the whole point'
+    );
+    assert.notEqual(
+      byPath['docs/c.md'].claim_hash,
+      byPath['docs/a.md'].claim_hash,
+      'an edited claim genuinely needs re-verification, so it must key differently'
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// --- #40: a library repo has a claim population, and the report says where it came from --------
+
+// A library repo the way tj/commander.js is written: documentation describes an API, and not one
+// inline code span is path-shaped. Baseline claims_total on that repo was 0.
+function libraryRepo({ withSrcDirs = true, git = false } = {}) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-library-'));
+  fs.mkdirSync(path.join(tmp, 'docs'));
+  fs.mkdirSync(path.join(tmp, 'src'));
+  fs.writeFileSync(
+    path.join(tmp, 'src', 'command.js'),
+    'class Command {\n  option() {}\n  opts() {}\n}\nconst program = new Command();\n'
+  );
+  fs.writeFileSync(
+    path.join(tmp, 'docs', 'options.md'),
+    [
+      '# Options',
+      '',
+      'Declare an option with `.option()`.',
+      'Read the parsed values with `program.opts()`.',
+      'The `.mangle()` helper does not exist in this library.',
+      'A `sandwich` is not an API.',
+    ].join('\n')
+  );
+  fs.writeFileSync(
+    path.join(tmp, '.docgrad.yml'),
+    `docs_dirs: [docs/]\n${withSrcDirs ? 'src_dirs: [src/]\n' : ''}`
+  );
+  if (git) gitInit(tmp);
+  return tmp;
+}
+
+test('inventory: a library repo gets a claim population from API-shaped inline code, guarded by src_dirs (#40)', () => {
+  const tmp = libraryRepo();
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(out.totals.claims_total, 2, 'only the two lines whose symbols exist under src_dirs');
+    assert.equal(out.totals.claims_api_only, 2, 'nothing path-shaped in this corpus at all');
+    assert.deepEqual(out.claim_candidates.map((c) => c.line), [3, 4]);
+    assert.ok(out.claim_candidates.every((c) => c.refs_path === 0 && c.refs_api === 1));
+    assert.equal(out.claim_population.api_matching, 'enabled');
+    assert.ok(out.claim_population.src_symbols > 0);
+    assert.equal(out.claim_population.src_files_scanned, 1);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: src_dirs unset makes the API matcher inert, and says so out loud (#40)', () => {
+  const tmp = libraryRepo({ withSrcDirs: false });
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(out.totals.claims_total, 0, 'no src_dirs, no existence check, no new candidates');
+    assert.equal(out.totals.claims_api_only, 0);
+    assert.equal(out.claim_population.api_matching, 'disabled');
+    assert.equal(out.claim_population.src_symbols, null);
+    assert.ok(
+      out.claim_population.notes.some((n) => n.includes('src_dirs is unset')),
+      'the degradation must be visible, not silent'
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: candidates disclose whether docgrad itself wrote the document they came from (#40)', () => {
+  const tmp = libraryRepo({ git: true });
+  try {
+    // a second document, added by a commit carrying docgrad's own subject prefix
+    fs.writeFileSync(path.join(tmp, 'docs', 'internals.md'), '# Internals\n\nUse `program.opts()` internally.\n');
+    const env = {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
+      GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com',
+      GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+    };
+    execFileSync('git', ['add', '-A'], { cwd: tmp, env });
+    execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'docs(docgrad): round 3 — correctness'], { cwd: tmp, env });
+
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    const byPath = Object.fromEntries(out.claim_candidates.map((c) => [c.path, c]));
+    assert.equal(byPath['docs/internals.md'].docgrad_authored, true);
+    assert.equal(byPath['docs/options.md'].docgrad_authored, false);
+    assert.equal(out.claim_population.authorship, 'git');
+    assert.equal(out.totals.claims_total, 3);
+    assert.equal(out.totals.claims_docgrad_authored, 1);
+    assert.equal(out.totals.claims_docgrad_authored_ratio, 0.3333);
+    assert.ok(
+      out.claim_population.notes.some((n) => n.includes("docgrad itself wrote")),
+      'the share must be stated, not left for the reader to compute'
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: without git, docgrad_authored is null rather than false, with a note (#40)', () => {
+  const tmp = libraryRepo();
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(out.claim_population.authorship, 'unavailable');
+    assert.ok(out.claim_candidates.every((c) => c.docgrad_authored === null));
+    assert.ok(out.files.every((f) => f.docgrad_authored === null));
+    assert.equal(out.totals.claims_docgrad_authored, null, '"we cannot tell" is not "zero"');
+    assert.equal(out.totals.claims_docgrad_authored_ratio, null);
+    assert.ok(out.claim_population.notes.some((n) => n.includes('docgrad_authored is null rather than false')));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
