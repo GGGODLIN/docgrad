@@ -73,7 +73,18 @@ const check = (label, actual, ok, limit) => {
 
 check('dead links', links.dead_links.length, links.dead_links.length <= THRESHOLDS.max_dead_links, THRESHOLDS.max_dead_links);
 check('bad anchors', links.bad_anchors.length, links.bad_anchors.length <= THRESHOLDS.max_bad_anchors, THRESHOLDS.max_bad_anchors);
-check('orphans', links.orphans.length, links.orphans.length <= THRESHOLDS.max_orphans, THRESHOLDS.max_orphans);
+// links.mjs may return orphans as null — with no index_file (or under scope) reachability has no
+// starting point, so what comes back is "not computed", not "zero orphans". The gate must not treat
+// that as a pass: a threshold that can't be verified is a threshold that isn't being enforced.
+// It counts as exit 1 (docs failed the gate) rather than 2 (environment problem) — having no index
+// at all is itself a hole in the documentation system, not a mistake by whoever ran the gate.
+if (links.orphans === null) {
+  violations.push(
+    'orphans: not computed — .docgrad.yml has no index_file, so reachability has no starting point (this is NOT "zero orphans")'
+  );
+} else {
+  check('orphans', links.orphans.length, links.orphans.length <= THRESHOLDS.max_orphans, THRESHOLDS.max_orphans);
+}
 check(
   'freshness coverage',
   freshness.coverage_ratio,
@@ -94,7 +105,7 @@ if (violations.length) {
     console.error('\nDead link details:');
     for (const d of links.dead_links) console.error(`  ${d.file}:${d.line} → ${d.target}`);
   }
-  if (links.orphans.length) console.error(`\nOrphans: ${links.orphans.join(', ')}`);
+  if (links.orphans?.length) console.error(`\nOrphans: ${links.orphans.join(', ')}`);
   process.exit(1);
 }
 

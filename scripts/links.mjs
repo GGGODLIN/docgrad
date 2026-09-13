@@ -87,7 +87,11 @@ try {
         total_links,
         dead_links,
         bad_anchors,
-        orphans: !scoped && config.index_file ? included.filter((p) => !reachable.has(p)) : [],
+        // null when it can't be computed, never [] — an empty array is indistinguishable from
+        // "computed, and there are genuinely none", and downstream reads that as "linkage is fine".
+        // Same condition as reachable_ratio: under scope, or with no index_file, reachability has
+        // no starting point, so orphanhood can't be judged at all.
+        orphans: !scoped && config.index_file ? included.filter((p) => !reachable.has(p)) : null,
         reachable_ratio:
           !scoped && config.index_file && included.length > 0
             ? Number((reachable.size / included.length).toFixed(4))
