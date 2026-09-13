@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { loadConfig, collectFiles, parseArgs, fail } from './lib.mjs';
+import { loadConfig, collectFiles, parseArgs, fail, docgradMeta } from './lib.mjs';
 
 const SKIP_DIRS = new Set(['node_modules', '.git']);
 
@@ -73,19 +73,22 @@ const toDate = (iso) => (iso ? iso.slice(0, 10) : null);
 try {
   const { root, configFile, include } = parseArgs();
   const config = loadConfig(root, configFile);
-  const scopeNote = include.length
-    ? { scope: include, note: 'scope does not apply to coverage drift: narrowing the docs side would misjudge mentions outside scope as undocumented, so this always compares the full corpus' }
-    : { scope: null };
+  const scopeNoteText = include.length
+    ? 'scope does not apply to coverage drift: narrowing the docs side would misjudge mentions outside scope as undocumented, so this always compares the full corpus'
+    : null;
+  // Key order follows inventory.mjs — scope, then docgrad, then everything else — so a reader
+  // comparing two scripts' JSON finds the same fingerprint in the same place.
+  const head = { scope: include.length ? include : null, docgrad: docgradMeta(undefined, config) };
 
   // src_dirs unset -> degrade: don't measure, hand it back to the LLM for a plain comparison.
   if (config.src_dirs.length === 0) {
     process.stdout.write(
       `${JSON.stringify(
         {
-          ...scopeNote,
+          ...head,
           src_dirs: [],
           areas: [],
-          note: [scopeNote.note, 'src_dirs is unset, coverage drift cannot be measured'].filter(Boolean).join('; '),
+          note: [scopeNoteText, 'src_dirs is unset, coverage drift cannot be measured'].filter(Boolean).join('; '),
         },
         null,
         2
@@ -167,7 +170,8 @@ try {
   process.stdout.write(
     `${JSON.stringify(
       {
-        ...scopeNote,
+        ...head,
+        ...(scopeNoteText ? { note: scopeNoteText } : {}),
         src_dirs: config.src_dirs,
         thresholds: {
           drift_after_days: config.coverage.drift_after_days,

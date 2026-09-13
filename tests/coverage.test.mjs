@@ -182,3 +182,34 @@ test('coverage: not a git repo -> status is all no_git, no crash, exit 0', () =>
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('coverage: output carries the docgrad fingerprint, right after scope (#45)', () => {
+  const tmp = makeCoverageFixture();
+  try {
+    const out = run(tmp);
+    assert.equal(typeof out.docgrad.version, 'string');
+    assert.notEqual(out.docgrad.version, null); // #47: a null version here is the silent failure mode
+    assert.match(out.docgrad.rubric_hash, /^[0-9a-f]{8}$/);
+    assert.match(out.docgrad.corpus_hash, /^[0-9a-f]{8}$/);
+    // Same placement as inventory.mjs, so the five scripts' JSON can be compared field by field.
+    assert.deepEqual(Object.keys(out).slice(0, 2), ['scope', 'docgrad']);
+    // The scoped run keeps its own note; docgrad still sits directly after scope.
+    const scoped = run(tmp, ['--include', 'docs/search.md']);
+    assert.deepEqual(Object.keys(scoped).slice(0, 3), ['scope', 'docgrad', 'note']);
+    assert.match(scoped.note, /does not apply/);
+    // The degraded src_dirs-unset path returns early — it must carry the fingerprint too.
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-cov-meta-'));
+    try {
+      write(empty, '.docgrad.yml', 'docs_dirs: [docs/]\nentry_files: [CLAUDE.md]\n');
+      write(empty, 'CLAUDE.md', '# 專案\n');
+      const degraded = run(empty);
+      assert.match(degraded.docgrad.corpus_hash, /^[0-9a-f]{8}$/);
+      assert.deepEqual(Object.keys(degraded).slice(0, 2), ['scope', 'docgrad']);
+      assert.match(degraded.note, /src_dirs is unset/);
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

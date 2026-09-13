@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { loadConfig, collectFiles, parseArgs, fail, estimateTokens, extractLinks, extractCodeRefs } from './lib.mjs';
+import { loadConfig, collectFiles, parseArgs, fail, docgradMeta, estimateTokens, extractLinks, extractCodeRefs } from './lib.mjs';
 
 const SKIP_DIRS = new Set(['node_modules', '.git']);
 const CHURN_WINDOW_DAYS = 90;
@@ -294,6 +294,9 @@ try {
 
   const out = {
     scope: null,
+    // Same position as in inventory.mjs (right after scope) so two scripts' JSON can be
+    // compared field by field: which tool version, which rubric, which corpus definition.
+    docgrad: docgradMeta(undefined, config),
     scenarios,
     areas,
     code_pointer_ratio,
