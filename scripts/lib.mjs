@@ -149,6 +149,8 @@ function describeValue(v) {
   return `the ${typeof v} ${JSON.stringify(v)}`;
 }
 
+const PATH_FIELD_EXAMPLES = { index_file: 'docs/README.md' };
+
 export function validateConfigTypes(config, configFile = CONFIG_FILENAME) {
   for (const [field, example] of Object.entries(LIST_FIELD_EXAMPLES)) {
     const value = config[field];
@@ -173,6 +175,20 @@ export function validateConfigTypes(config, configFile = CONFIG_FILENAME) {
       throw new Error(
         `${configFile}: ${field} must be true or false, but got ${describeValue(value)}. ` +
           `Correct form: ${field}: ${example}`
+      );
+    }
+  }
+  // Single-path fields fail the same way list fields used to: a key written with nothing after the
+  // colon parses to {} and only surfaces much later as a raw TypeError out of path.join(). Null is
+  // legitimate here (it means "this repo has no index"), an object never is.
+  for (const [field, example] of Object.entries(PATH_FIELD_EXAMPLES)) {
+    const value = config[field];
+    if (value === null || value === undefined) continue;
+    if (typeof value !== 'string' || value.trim() === '') {
+      throw new Error(
+        `${configFile}: ${field} must be a path string or null, but got ${describeValue(value)}. ` +
+          `Write ${field}: ${example}, or ${field}: null when the repo has none. ` +
+          `A key with nothing after the colon parses as an empty mapping, not as null.`
       );
     }
   }

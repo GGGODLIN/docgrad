@@ -161,6 +161,22 @@ test('loadConfig: a list key left empty throws rather than blowing up later insi
   }
 });
 
+test('loadConfig: index_file written with nothing after the colon fails loudly, null still allowed', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-scalar-'));
+  try {
+    // A bare `index_file:` parses as an empty mapping and used to surface much later as a raw
+    // TypeError out of path.join() -- the same silent shape #38 fixed for list fields.
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nindex_file:\n');
+    assert.throws(() => loadConfig(tmp), /index_file must be a path string or null[\s\S]*nothing after the colon/);
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nindex_file: null\n');
+    assert.equal(loadConfig(tmp).index_file, null, 'an explicit null is a legitimate answer');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nindex_file: docs/README.md\n');
+    assert.equal(loadConfig(tmp).index_file, 'docs/README.md');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('loadConfig: exclude_untracked must be a boolean, and defaults to false', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-booltype-'));
   try {
