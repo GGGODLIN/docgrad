@@ -41,24 +41,37 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
      find it by guessing.
 4. `index_file` (single-select; no candidate → set to `null` and note: linkage will be capped for lack of a reachability root;
    improve's first round can build an index for you)
-5. `exclude` (multi-select; scanned candidates + free text)
-6. freshness `convention` (frontmatter / heading-line / none; multi-select — when a repo mixes both conventions, select more than
+5. `exclude` (multi-select; scanned candidates + free text). Excluding a directory takes it out of the scored corpus but **not**
+   out of the pollution surface — that is the point of the field. Note what this means for files git doesn't track: a local
+   draft sitting inside an excluded directory (a gitignored WIP folder is the usual case) is still collected off the filesystem
+   and still counts toward the pollution surface, so a teammate on a clean checkout of the same commit measures a different
+   ratio. `exclude_untracked: true` (next item) is the only way to keep it out.
+6. `exclude_untracked` (yes/no; **default `false` = today's behavior**, every file on disk is collected whether git tracks it or
+   not). Set it to `true` when the team wants CI and everyone's laptop to rate the same commit identically: the corpus then
+   matches a clean checkout, and local drafts stop moving `pollution.ratio` and the token totals.
+   **Requires git** — with `true` set, the scripts abort when the target isn't a git working tree, rather than silently
+   measuring something else. Leave it `false` for an export directory or any tree that isn't under git.
+   The flag is part of `corpus_hash`, so flipping it draws a comparability break in `report` (see [rubric.md](rubric.md)
+   §Version history and comparability notes) — a deliberate one-off, not something to toggle back and forth between rounds.
+7. freshness `convention` (frontmatter / heading-line / none; multi-select — when a repo mixes both conventions, select more than
    one and write them comma-separated) + `field` (for frontmatter) / `heading_field` (for heading-line; can be left blank when
    only one convention is chosen and it's already described by `field` — the scripts fall back to `field`)
-7. `targets`: default all 4 (six dimensions), ask "which dimensions are you willing to lower to 3?" (multi-select).
+8. `targets`: default all 4 (six dimensions), ask "which dimensions are you willing to lower to 3?" (multi-select).
    If economy is hard to hit because the repo's entry file is inherently large, lower the target rather than change
    `economy.entry_cost_tiers` — changing the threshold changes the rubric anchor, which makes historical scores incomparable
-8. `scenario`: ask the user to describe the repo's representative development task in one sentence (used as the LLM-simulation
+9. `scenario`: ask the user to describe the repo's representative development task in one sentence (used as the LLM-simulation
    fallback when `scenarios` is absent)
-9. `correctness_sample`: default 8; for a large docs system (>50 files), 12 is recommended
-10. `src_dirs` (multi-select, pre-filled with scan candidates; used by coverage drift detection and retrieval.mjs): leaving it
+10. `correctness_sample`: **the number of claims drawn *new* each round** (re-verification of the existing ledger is a separate
+    budget on top, see [audit.md](audit.md) step 3) — so it is also the rate at which cumulative coverage grows. Default 8; for a
+    large docs system (>50 files), 12 is recommended
+11. `src_dirs` (multi-select, pre-filled with scan candidates; used by coverage drift detection and retrieval.mjs): leaving it
     empty → completeness falls back to pure LLM comparison (coverage.mjs doesn't measure, it only emits a note); retrieval.mjs's
     `areas`/`code_pointer_ratio` degrade the same way
-11. `scenarios`: ask the user for 2-4 representative code paths (files or directories, e.g.
+12. `scenarios`: ask the user for 2-4 representative code paths (files or directories, e.g.
     `apps/api/src/contract/contract-approval.service.ts`, `apps/api/src/timesheet`) — retrieval.mjs uses them to mechanically
     compute marginal cost and traceability (see [rubric.md](rubric.md) §Token economy report / Traceability); leaving it empty
     falls back to LLM simulation from `scenario`, which still produces areas/index_hotness
-12. `rules.pattern`: the rule-line detection string, default `**MUST` (reuse whatever rule-marking convention the repo already
+13. `rules.pattern`: the rule-line detection string, default `**MUST` (reuse whatever rule-marking convention the repo already
     has; usually no need to change it)
 
 ## 3. Write the file
@@ -73,6 +86,7 @@ docs_files: [PRODUCT.md, DESIGN.md]   # single files outside docs_dirs, taken in
 entry_files: [CLAUDE.md]
 index_file: docs/README.md
 exclude: [docs/archive/]
+exclude_untracked: false   # true = collect only files git tracks, so a clean checkout and a working one measure the same corpus (needs git)
 src_dirs: [src/]
 freshness:
   convention: frontmatter   # single value; when mixing both conventions: frontmatter,heading-line
@@ -98,6 +112,11 @@ rules:
   pattern: "**MUST"   # rule-line detection string (used by inventory.mjs structure.rules), this is the default
 language: zh-TW
 ```
+
+Every list field (`docs_dirs`, `docs_files`, `entry_files`, `exclude`, `src_dirs`, `scenarios`) must be written as a list, even
+when it holds one item (`docs_files: [PRODUCT.md]`) — a bare scalar, or a key with nothing after the colon, is rejected with an
+error naming the field. So is a non-boolean `exclude_untracked`. The scripts do not repair a malformed value for you: a silent
+repair would leave the wrong thing standing in a version-controlled file.
 
 As soon as it's written, verify: it's only done once `node "$SKILL_DIR/scripts/inventory.mjs" --root .` produces JSON output.
 

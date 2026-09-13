@@ -182,6 +182,21 @@ loading `entry_files`, with symlink aliases de-duplicated); **pollution surface*
 > **Pollution downgrade rule**: at a pollution surface ≥ 10%, this dimension is capped at ★3 no
 > matter how low the fixed cost is. Without this rule, "fixed cost 4,000 + pollution 15%" would
 > satisfy neither ★3 (cost too low) nor ★4 (pollution too high) and there would be no star to give.
+>
+> **The pollution surface is measured from the filesystem, not from git, so this cap is only
+> reproducible on a clean checkout — or with `exclude_untracked: true`.** Everything on disk is
+> collected, tracked or not, so an untracked local file changes a *rated* input. Measured on one
+> repo at the same commit with the same script version: ratio **0.1066** in a working checkout
+> versus **0.0517** in a clean worktree, the entire difference being one untracked 9,730-token
+> draft inside a `.gitignore`d directory. The default `pollution_max: 0.1` sits **between those two
+> numbers**, so the same commit is ★3 for one person and ★4 for the next — the exact class of
+> irreproducibility docgrad exists to catch. The ratio itself is deliberately left alone (silently
+> recomputing it would move everyone's economy rating at once); instead `inventory.untracked`
+> reports the count and token weight, `inventory.pollution.note` flags the ratio as checkout-bound,
+> and the audit must carry both into the scorecard (see [audit.md](audit.md) step 7). Setting
+> `exclude_untracked: true` restricts the corpus to what git tracks and makes the rating
+> reproducible; it changes `corpus_hash`, so scores either side of the flip are not comparable
+> (see [§Version history](#version-history-and-comparability-notes)).
 
 > **This dimension pulls against completeness by design, not by accident**: adding documentation
 > raises the fixed cost. Economy exists so the loop has a mechanical brake between "more
@@ -256,6 +271,20 @@ individual dimension did not).
 <details>
 <summary>Expand</summary>
 
+- **`corpus_hash` — the corpus scope now has a fingerprint of its own** (see CHANGELOG; issue #36)
+  (not an anchor change): no threshold and no anchor text moved, and no dimension changed how it is
+  measured. What is new is a second fingerprint next to `rubric_hash` in `inventory.mjs`'s `docgrad`
+  block, written into every `history.jsonl` line by improve (see [improve.md](improve.md) step 5).
+  `rubric_hash` answers "which ruler did this round use"; `corpus_hash` answers "which files did it
+  measure" — it is derived from `docs_dirs`, `docs_files`, `entry_files`, `exclude`, `index_file`
+  and `exclude_untracked`, normalised (trimmed, trailing slashes dropped, de-duplicated, sorted) so
+  that reordering a list or writing `docs/` for `docs` does not fake a change. Editing any of them
+  moves `files_total`, `claims_total`, the freshness denominator, the orphan/reachability
+  population and the pollution denominator all at once, while `rubric_hash` stays byte-identical —
+  which is why `report` now draws a comparability break on this field too, and why the whole round
+  either side of it is the thing that is incomparable, not one dimension. Rounds recorded before
+  this field existed carry no `corpus_hash`: like the other version fields, that is treated as
+  unknown and blocks nothing.
 - **Translation to English (see CHANGELOG)** (**anchor text changed; thresholds did not**): the
   whole file was translated from Traditional Chinese to English. What survived unchanged: every
   numeric threshold (`≤ 10,000`, `≥90%`, `<50%`, the tier lists) and the dimension order that

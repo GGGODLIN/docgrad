@@ -171,10 +171,15 @@ Assign a star rating directly against the rubric's economy anchors using `invent
    - **Conditionally-required files** (an entry file that says "read `DESIGN.md` before touching the UI") don't count as always-loaded:
      suggest moving them to `docs_files` instead — they still enter the corpus and the other five dimensions, but don't count toward the fixed cost (see [init.md](init.md) questionnaire item 3).
 2. When pollution surface ≥ 10%, this dimension is capped at ★3 (the rubric's downgrade rule), even if the fixed cost is low.
+3. **Check `inventory.untracked.count` before you write the rating down** — the corpus is collected off the filesystem, not out of git, so this rating can depend on whose checkout it was run in:
+   - **Non-zero** → the run collected N local files git does not track (`untracked.files` lists them, `untracked.tokens_est` is what they weigh). The pollution ratio and the token totals are **checkout-bound: another machine on the same commit gets a different number, and possibly a different star**. The scorecard must say so, quoting the count and token weight, and recommend `exclude_untracked: true` in `.docgrad.yml` to measure the clean-checkout corpus instead (see [init.md](init.md) questionnaire item 6). `inventory.pollution.note` carries the same warning when any *collected* file is untracked — pass it through, don't paraphrase it away.
+   - **`null`** → git was unavailable or this is not a git working tree (`untracked.note` says which), so tracked and untracked files cannot be told apart and the check **could not run at all**. State that in the report; `null` is not zero, and an unrun check must not be reported as a clean one.
+   - **Zero** → the collected corpus is exactly what the commit contains; nothing to note.
 
 ### 8. Token economy report
 
 Expand on the details of fixed cost and pollution surface per rubric.md's "Token economy report" section, with a break-even interpretation attached.
+Report `inventory.untracked` on the line right after the pollution surface (count, token weight, and the paths from `untracked.files` when there are few enough to name; `null` = the check could not run, see step 7) — it is the qualifier on the pollution number, so it belongs next to it rather than in a footnote.
 
 Marginal cost: when `.docgrad.yml` has `scenarios:` set (a list of representative code paths), consume `retrieval.mjs`'s
 `scenarios[]` output directly — list `marginal_tokens`/`max_depth`/`fan_in`/`code_pointer` for each entry, and use
@@ -198,7 +203,7 @@ have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_
 | Freshness | ★x | ★y | …(date concentration x%, call it out if high) |
 | Linkage | ★x | ★y | … |
 | Consistency | ★x | ★y | …(deductions tagged `[contradiction]`/`[duplication]`/`[placement]`) |
-| Economy | ★x | ★y | …(fixed cost N tokens, pollution surface x%) |
+| Economy | ★x | ★y | …(fixed cost N tokens, pollution surface x%; add "N untracked files — ratio is checkout-bound" when `untracked.count` is non-zero, "untracked not checked (no git)" when it is `null`) |
 
 ## Token economy (not rated)
 - Fixed cost: ~N tokens (entry_files: …) — already counted in economy
@@ -206,6 +211,9 @@ have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_
   code_pointer yes/no, churn_commits N — call out the one that taxes the most); without scenarios, fall back to scenario "…" LLM
   simulation: ~N tokens, required-reading path a.md → b.md → …
 - Pollution surface: x% (exclude: …) — already counted in economy
+- Untracked files in the corpus: N files / ~M tokens (…paths) — the ratio above is checkout-bound, another machine on this
+  commit may rate economy differently; `exclude_untracked: true` measures the clean-checkout corpus instead.
+  Write `0 — corpus matches the commit` when there are none, and `not checked (no git)` when `untracked.count` is `null`
 - Interpretation: …
 
 ### Traceability (report-only)
