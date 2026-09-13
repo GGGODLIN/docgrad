@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const CONFIG_FILENAME = '.docgrad.yml';
@@ -86,6 +87,12 @@ const DEFAULTS = {
   entry_files: [],
   index_file: null,
   exclude: [],
+  // exclude_untracked: opt-in, default false (= today's behavior). When true, collectFiles drops
+  // every collected file that git does not track, so the corpus matches a clean checkout of the
+  // same commit. This is strictly about **tracked vs. untracked**; it says nothing about what
+  // `exclude` means — a deliberately scoped-out directory is still charged to the pollution
+  // surface exactly as before.
+  exclude_untracked: false,
   src_dirs: [],
   // convention can be a single value or a comma/`+`-separated list of values (see
   // parseFreshnessConventions); heading_field is the inline keyword used for a heading-line;
@@ -251,7 +258,42 @@ function pushSingleFile(rootDir, rel, field, out) {
   if (!out.includes(rel)) out.push(rel);
 }
 
-export function collectFiles(rootDir, config, { include = [] } = {}) {
+// --- git: which collected files does git actually track? ----------------------------
+//
+// collectFiles walks the filesystem, it does not ask git. So an untracked local file sitting
+// inside the corpus changes pollution.ratio — and the pollution surface is a **rated** input
+// (economy.pollution_max forces a downgrade once it is exceeded). Measured on one repo at the
+// same commit, same script version: ratio 0.1066 in a working checkout vs 0.0517 in a clean
+// worktree, the whole difference being a single untracked 9,730-token draft in a .gitignore'd
+// directory. pollution_max sits at 0.10, i.e. **between the two numbers**: two people can rate
+// the same commit differently, which is precisely the class of problem docgrad exists to catch.
+//
+// Classification is by the complement of the **tracked** set (`git ls-files`), not by
+// `git ls-files --others --exclude-standard`: the draft that produced the measurement above lives
+// in a .gitignore'd directory, so it is untracked *and* ignored, and --exclude-standard would
+// filter it straight back out. "Not in git" is the property that matters here, and an ignored
+// file has it.
+export function gitTrackedFiles(rootDir) {
+  try {
+    const out = execFileSync('git', ['ls-files', '-z'], {
+      cwd: rootDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return new Set(out.split('\0').filter(Boolean)); // git already prints posix separators
+  } catch {
+    return null; // not a git work tree / git not installed — callers must report null, never zero
+  }
+}
+
+const NO_GIT = 'git is unavailable or this is not a git working tree';
+export const GIT_UNAVAILABLE_NOTE =
+  `${NO_GIT}: tracked and untracked files cannot be told apart, so this is null rather than zero`;
+
+// tracked: pass a Set from gitTrackedFiles() to reuse one git call; undefined = look it up when
+// config.exclude_untracked needs it; null = caller already established git is unavailable.
+export function collectFiles(rootDir, config, { include = [], tracked } = {}) {
   const all = [];
   for (const dir of config.docs_dirs) {
     const abs = path.join(rootDir, dir);
@@ -272,12 +314,24 @@ export function collectFiles(rootDir, config, { include = [] } = {}) {
   // misjudged as orphans.
   for (const f of config.entry_files) pushSingleFile(rootDir, f, 'entry_files', all);
   pushSingleFile(rootDir, config.index_file, 'index_file', all);
+  // Filter before the exclude/scope split, so the pollution surface's numerator *and* denominator
+  // both describe the same clean-checkout corpus.
+  let collected = all;
+  if (config.exclude_untracked) {
+    const trackedSet = tracked === undefined ? gitTrackedFiles(rootDir) : tracked;
+    if (trackedSet === null) {
+      throw new Error(
+        `exclude_untracked: true, but ${NO_GIT} — run inside a git working tree, or set exclude_untracked: false`
+      );
+    }
+    collected = all.filter((p) => trackedSet.has(p));
+  }
   const isExcluded = (p) =>
     config.exclude.some((ex) => p === ex || p.startsWith(ex.endsWith('/') ? ex : `${ex}/`));
   const inScope = (p) => matchesScope(p, include);
   return {
-    included: all.filter((p) => !isExcluded(p) && inScope(p)).sort(),
-    excluded: all.filter((p) => isExcluded(p) && inScope(p)).sort(),
+    included: collected.filter((p) => !isExcluded(p) && inScope(p)).sort(),
+    excluded: collected.filter((p) => isExcluded(p) && inScope(p)).sort(),
   };
 }
 

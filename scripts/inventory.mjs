@@ -6,9 +6,14 @@ import path from 'node:path';
 import {
   loadConfig, collectFiles, estimateTokens, parseArgs, fail,
   extractCodeRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
+  gitTrackedFiles, GIT_UNAVAILABLE_NOTE,
 } from './lib.mjs';
 
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+\.)\s+/;
+
+// How many untracked paths to print. The count and the token total are always exact; the list is
+// there to make the files identifiable, not to be exhaustive.
+const UNTRACKED_LIST_CAP = 20;
 
 function fileType(p, config) {
   if (config.entry_files.includes(p)) return 'entry';
@@ -116,7 +121,9 @@ function measure(rootDir, relPath, config) {
 try {
   const { root, configFile, include } = parseArgs();
   const config = loadConfig(root, configFile);
-  const { included, excluded } = collectFiles(root, config, { include });
+  // One git call, shared between collectFiles (exclude_untracked) and the untracked report below.
+  const tracked = gitTrackedFiles(root);
+  const { included, excluded } = collectFiles(root, config, { include, tracked });
   const filesRaw = included.map((p) => measure(root, p, config));
   const excludedFiles = excluded.map((p) => measure(root, p, config));
   const rulesTotal = filesRaw.reduce((s, f) => s + f._ruleLines.length, 0);
@@ -131,6 +138,29 @@ try {
   const files = filesRaw.map(({ _ruleLines, _claimLines, ...f }) => f);
   const totalTokens = files.reduce((s, f) => s + f.tokens_est, 0);
   const excludedTokens = excludedFiles.reduce((s, f) => s + f.tokens_est, 0);
+
+  // Untracked files among everything this run collected (included + excluded — both sides feed
+  // pollution.ratio, which is a rated input). Reporting them is what makes the difference between
+  // a working checkout and a clean one visible instead of silent; it does not change the numbers.
+  const collected = [...filesRaw, ...excludedFiles];
+  const untrackedFiles = tracked === null ? null : collected.filter((f) => !tracked.has(f.path));
+  const untracked =
+    untrackedFiles === null
+      ? { count: null, tokens_est: null, files: null, note: GIT_UNAVAILABLE_NOTE }
+      : {
+          count: untrackedFiles.length,
+          tokens_est: untrackedFiles.reduce((s, f) => s + f.tokens_est, 0),
+          files: untrackedFiles.map((f) => f.path).sort().slice(0, UNTRACKED_LIST_CAP),
+          ...(untrackedFiles.length > UNTRACKED_LIST_CAP
+            ? { note: `list capped: only the first ${UNTRACKED_LIST_CAP} of ${untrackedFiles.length} paths are shown (count/tokens_est cover all of them)` }
+            : {}),
+        };
+  // The ratio itself is left exactly as it was — silently changing everyone's economy rating is
+  // the kind of break this tool exists to catch. The note only says the number is checkout-bound.
+  const pollutionNote =
+    untrackedFiles && untrackedFiles.length
+      ? `this ratio includes ${untrackedFiles.length} untracked local file(s) (see "untracked"), so it will differ on a clean checkout of the same commit and two people can arrive at different economy ratings; set exclude_untracked: true in .docgrad.yml to measure the clean-checkout corpus instead`
+      : null;
   process.stdout.write(
     `${JSON.stringify(
       {
@@ -187,7 +217,9 @@ try {
             totalTokens + excludedTokens === 0
               ? 0
               : Number((excludedTokens / (totalTokens + excludedTokens)).toFixed(4)),
+          ...(pollutionNote ? { note: pollutionNote } : {}),
         },
+        untracked,
       },
       null,
       2

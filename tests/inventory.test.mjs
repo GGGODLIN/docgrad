@@ -11,6 +11,107 @@ const RETRIEVAL_FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.
 const DOCS_FILES_FIXTURE = fileURLToPath(new URL('./fixtures/docs-files/', import.meta.url));
 const SCRIPT = fileURLToPath(new URL('../scripts/inventory.mjs', import.meta.url));
 
+function gitInit(tmp) {
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com',
+    GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+  };
+  execFileSync('git', ['init', '-q'], { cwd: tmp, env });
+  execFileSync('git', ['add', '-A'], { cwd: tmp, env });
+  execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'fixture'], { cwd: tmp, env });
+}
+
+// A working checkout with one tracked and one untracked doc, plus an excluded directory holding
+// an untracked draft — the shape that produced the 0.0517 / 0.1066 split on a real repo.
+function mixedCheckout() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-untracked-inv-'));
+  fs.mkdirSync(path.join(tmp, 'docs', 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), `# a\n${'x '.repeat(200)}`);
+  fs.writeFileSync(path.join(tmp, 'docs', 'plans', 'kept.md'), `# kept\n${'y '.repeat(100)}`);
+  fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nexclude: [docs/plans/]\n');
+  gitInit(tmp);
+  fs.writeFileSync(path.join(tmp, 'docs', 'plans', 'local-wip.md'), `# local draft\n${'z '.repeat(4000)}`);
+  return tmp;
+}
+
+test('inventory: untracked reports count/tokens/paths, and pollution says the ratio is checkout-bound', () => {
+  const tmp = mixedCheckout();
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(out.untracked.count, 1);
+    assert.deepEqual(out.untracked.files, ['docs/plans/local-wip.md']);
+    assert.ok(out.untracked.tokens_est > 0);
+    assert.equal(
+      out.untracked.tokens_est,
+      out.pollution.excluded_files.find((f) => f.path === 'docs/plans/local-wip.md').tokens_est
+    );
+    assert.match(out.pollution.note, /untracked local file/);
+    assert.match(out.pollution.note, /clean checkout/);
+    assert.match(out.pollution.note, /exclude_untracked: true/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: exclude_untracked true shrinks the corpus to the clean checkout and drops the note', () => {
+  const tmp = mixedCheckout();
+  try {
+    const before = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    fs.appendFileSync(path.join(tmp, '.docgrad.yml'), 'exclude_untracked: true\n');
+    const after = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.ok(
+      after.pollution.excluded_tokens < before.pollution.excluded_tokens,
+      'the untracked draft no longer inflates the pollution surface'
+    );
+    assert.deepEqual(after.pollution.excluded_files.map((f) => f.path), ['docs/plans/kept.md']);
+    assert.ok(after.pollution.ratio < before.pollution.ratio);
+    assert.equal(after.untracked.count, 0);
+    assert.equal(after.pollution.note, undefined, 'nothing untracked left to warn about');
+    // exclude_untracked is not a corpus-defining field, so #36's break detector must stay quiet
+    assert.equal(after.docgrad.corpus_hash, before.docgrad.corpus_hash);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: no git -> untracked is null (not zero) with a note, and the ratio is unchanged', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-nogit-inv-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.deepEqual(
+      { count: out.untracked.count, tokens_est: out.untracked.tokens_est, files: out.untracked.files },
+      { count: null, tokens_est: null, files: null }
+    );
+    assert.match(out.untracked.note, /git is unavailable|not a git working tree/);
+    assert.equal(out.pollution.note, undefined, 'no claim is made either way about the ratio');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: a long untracked list is capped, and the note says so (count/tokens stay exact)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-untracked-cap-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+    gitInit(tmp);
+    for (let i = 0; i < 25; i += 1) fs.writeFileSync(path.join(tmp, 'docs', `d${i}.md`), `# d${i}\n`);
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(out.untracked.count, 25);
+    assert.equal(out.untracked.files.length, 20);
+    assert.match(out.untracked.note, /capped: only the first 20 of 25/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('inventory: docgrad carries corpus_hash alongside rubric_hash', () => {
   const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
   assert.match(out.docgrad.corpus_hash, /^[0-9a-f]{8}$/);

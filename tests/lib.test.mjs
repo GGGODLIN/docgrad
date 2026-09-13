@@ -3,11 +3,27 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, extractClaimLines, rankClaimCandidates } from '../scripts/lib.mjs';
+import { execFileSync } from 'node:child_process';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates } from '../scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
 const DOCS_FILES_FIXTURE = fileURLToPath(new URL('./fixtures/docs-files/', import.meta.url));
+
+// A throwaway git work tree: files already on disk get committed, anything written afterwards is
+// untracked. Isolated from the developer's own git config/hooks so CI and laptops behave alike.
+function gitInit(tmp) {
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com',
+    GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com',
+  };
+  execFileSync('git', ['init', '-q'], { cwd: tmp, env });
+  execFileSync('git', ['add', '-A'], { cwd: tmp, env });
+  execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'fixture'], { cwd: tmp, env });
+}
 
 test('parseYamlSubset: parse a full .docgrad.yml template', () => {
   const doc = `
@@ -144,6 +160,63 @@ test('corpusHash: no config -> null (never a hash of an empty corpus)', () => {
   assert.equal(corpusHash(null), null);
   assert.equal(corpusHash(undefined), null);
   assert.notEqual(corpusHash({ docs_dirs: [] }), null, 'a genuinely empty config still hashes');
+});
+
+// --- #35: untracked files ---------------------------------------------------------------------
+
+test('gitTrackedFiles: returns the tracked set inside a work tree, null outside one', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-tracked-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    assert.equal(gitTrackedFiles(tmp), null, 'not a git work tree -> null, not an empty set');
+    gitInit(tmp);
+    fs.writeFileSync(path.join(tmp, 'docs', 'draft.md'), '# draft\n');
+    const tracked = gitTrackedFiles(tmp);
+    assert.ok(tracked.has('docs/a.md'));
+    assert.ok(!tracked.has('docs/draft.md'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: exclude_untracked true drops untracked files, including .gitignore\'d ones', () => {
+  // The measured case: the file that moved pollution.ratio 0.0517 -> 0.1066 was untracked *and*
+  // ignored, so `git ls-files --others --exclude-standard` would have filtered it back out.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-untracked-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs', 'plans'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    fs.writeFileSync(path.join(tmp, 'docs', 'plans', 'kept.md'), '# kept\n');
+    fs.writeFileSync(path.join(tmp, '.gitignore'), 'docs/plans/local-*\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nexclude: [docs/plans/]\n');
+    gitInit(tmp);
+    fs.writeFileSync(path.join(tmp, 'docs', 'draft.md'), '# untracked draft\n');
+    fs.writeFileSync(path.join(tmp, 'docs', 'plans', 'local-wip.md'), '# ignored + untracked\n');
+
+    const off = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(off.included, ['docs/a.md', 'docs/draft.md'], 'default: untracked files still counted');
+    assert.deepEqual(off.excluded, ['docs/plans/kept.md', 'docs/plans/local-wip.md']);
+
+    fs.appendFileSync(path.join(tmp, '.docgrad.yml'), 'exclude_untracked: true\n');
+    const on = collectFiles(tmp, loadConfig(tmp));
+    assert.deepEqual(on.included, ['docs/a.md'], 'opt-in: corpus matches a clean checkout');
+    assert.deepEqual(on.excluded, ['docs/plans/kept.md'], 'the pollution denominator shrinks too');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: exclude_untracked true without git throws instead of silently doing nothing', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-untracked-nogit-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nexclude_untracked: true\n');
+    assert.throws(() => collectFiles(tmp, loadConfig(tmp)), /exclude_untracked: true.*git/s);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('resolveRoot: --root wins, otherwise cwd', () => {
