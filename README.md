@@ -4,6 +4,8 @@
 
 [![release](https://img.shields.io/github/v/release/redtear1115/docgrad?filter=docgrad--*)](https://github.com/redtear1115/docgrad/releases/latest) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+> **Last updated:** 2026-09-13
+
 > Your documentation is now read by agents, and every file an agent loads has a price. docgrad
 > grades a repo's docs as an **AI-agent context source** on six dimensions, then fixes them round by
 > round until they hit the targets you set.

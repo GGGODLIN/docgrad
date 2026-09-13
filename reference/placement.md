@@ -1,6 +1,6 @@
 # placement — information placement policy
 
-> **Last updated:** 2026-07-26
+> **Last updated:** 2026-09-13
 
 The rule for deciding "which carrier each piece of information should live in." docgrad judges **placement** and
 **duplication** against this file; it doesn't grade the quality of comments or code itself (boundary: see

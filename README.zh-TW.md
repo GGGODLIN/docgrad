@@ -4,6 +4,8 @@
 
 [![release](https://img.shields.io/github/v/release/redtear1115/docgrad?filter=docgrad--*)](https://github.com/redtear1115/docgrad/releases/latest) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+> **Last updated:** 2026-09-13
+
 > 你的文件現在是 agent 在讀，而 agent 載入的每一份檔案都有價錢。docgrad 把一個 repo 的文件當成
 > **AI agent 的 context 來源**做六維評分，再逐輪修到你設定的目標為止。
 
