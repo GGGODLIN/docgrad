@@ -51,12 +51,25 @@ function resolveDocgradDir() {
     console.error(`docs-gate: could not find scripts/links.mjs under DOCGRAD_DIR=${dir} (looked there and in skills/docgrad/). Check that the path points at docgrad's root directory.`);
     process.exit(2);
   }
-  const candidates = [
-    path.join(os.homedir(), '.claude/skills/docgrad'),
-    ...['claude-plugins-official', 'docgrad'].map((m) =>
-      path.join(os.homedir(), '.claude/plugins/cache', m, 'docgrad')
-    ),
-  ];
+  // A real plugin install lands at <cache>/<marketplace>/docgrad/<version>/, so the plugin-cache
+  // candidates need that extra segment — without it this branch only ever matched the bare-clone
+  // symlink, and every DOCGRAD_DIR-less run against a plugin install exited 2.
+  const cacheRoots = ['claude-plugins-official', 'docgrad'].map((m) =>
+    path.join(os.homedir(), '.claude/plugins/cache', m, 'docgrad')
+  );
+  const versioned = cacheRoots.flatMap((root) => {
+    try {
+      return fs
+        .readdirSync(root, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => path.join(root, e.name))
+        .sort()
+        .reverse(); // newest version first, lexicographically
+    } catch {
+      return [];
+    }
+  });
+  const candidates = [path.join(os.homedir(), '.claude/skills/docgrad'), ...cacheRoots, ...versioned];
   for (const c of candidates) {
     const resolved = scriptsDirUnder(c);
     if (resolved) return resolved;

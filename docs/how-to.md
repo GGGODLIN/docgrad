@@ -63,7 +63,10 @@ Release steps:
 1. `node --test tests/*.test.mjs` all green.
 2. Run the [skill-level evals](#run-the-skill-level-evals) (required once access is granted).
 3. `claude plugin validate .` with no errors (checks both the marketplace and plugin manifest).
-4. Bump the `version` in `plugin.json`.
+4. Bump the `version` in **`.claude-plugin/plugin.json`** — that one is the authority — and in
+   `.codex-plugin/plugin.json`, which carries its own copy for Codex. The root `plugin.json`
+   (Antigravity) has no `version` field and needs nothing. A test asserts the two copies match, so a
+   half-done bump fails the suite rather than shipping two different answers.
 5. Add a section to [CHANGELOG.md](../CHANGELOG.md) (date + change list; a major bump must explicitly state breaking and the restart-from-baseline recommendation).
 6. commit -> merge into main.
 7. Tag on main and push:

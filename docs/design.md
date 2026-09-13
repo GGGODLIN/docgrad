@@ -10,7 +10,7 @@
 - [Repo layout (same skeleton as impeccable)](#repo-layout-same-skeleton-as-impeccable)
 - [Command surface](#command-surface)
 - [`init` and `.docgrad.yml`](#init-and-docgradyml)
-- [The six-dimension rubric (anchored in reference/rubric.md)](#the-six-dimension-rubric-anchored-in-referencerubricmd)
+- [The six-dimension rubric (anchored in skills/docgrad/reference/rubric.md)](#the-six-dimension-rubric-anchored-in-skillsdocgradreferencerubricmd)
 - [Conflict arbitration conventions](#conflict-arbitration-conventions)
 - [How `loop` works (core requirement: install it and it runs until targets are met)](#how-loop-works-core-requirement-install-it-and-it-runs-until-targets-are-met)
 - [Graduation (fixed closing section; artifacts produced, not installed)](#graduation-fixed-closing-section-artifacts-produced-not-installed)
@@ -128,7 +128,7 @@ targets:                           # target star rating per dimension (loop stop
   freshness: 4
   linkage: 4
   consistency: 4
-correctness_sample: 8              # number of claims drawn new each round (re-verification is a separate budget, see reference/audit.md step 3)
+correctness_sample: 8              # number of claims drawn new each round (re-verification is a separate budget, see skills/docgrad/reference/audit.md step 3)
 claim_candidates_cap: 60           # how many ranked claim candidates inventory.mjs emits; coverage can only grow as far as this window, and claim_population reports when it is truncated
 scenario: "add a typical new feature to <some module>"  # LLM simulation fallback when there are no scenarios
 scenarios: [src/foo/bar.ts]        # used by retrieval.mjs to mechanically simulate marginal cost + traceability (report-only)
@@ -139,7 +139,7 @@ The example above is **illustrative**; each field's default value is authoritati
 
 When a repo has no `.docgrad.yml`, `audit`/`improve`/`loop` always redirect to `init` first (the same blocker pattern as impeccable's "teach first when PRODUCT.md is missing").
 
-## The six-dimension rubric (anchored in reference/rubric.md)
+## The six-dimension rubric (anchored in skills/docgrad/reference/rubric.md)
 
 Scores need to be comparable across rounds, so the anchors must be fixed. The ★1–★5 anchors for each dimension were distilled from hands-on scoring; the frozen text is in [skills/docgrad/reference/rubric.md](../skills/docgrad/reference/rubric.md), this table is only a summary:
 

@@ -939,10 +939,11 @@ export function corpusHash(config) {
 
 // Resolved through realpath first, because the documented bare-clone install symlinks
 // `skills/docgrad` into `~/.claude/skills/` and the manifest search below walks *up* from here.
-// Node normally resolves the entry point's realpath itself, so this is inert on a default run —
-// it earns its place under `--preserve-symlinks-main`, where `import.meta.url` is the symlink path
-// and the walk would otherwise climb `~/.claude/skills/` and find nothing. Measured: with that
-// flag and without this call, `version` is null; with it, 1.7.0.
+// Node normally resolves realpaths itself, so this is inert on a default run. It earns its place
+// under `--preserve-symlinks --preserve-symlinks-main` *together*: `--preserve-symlinks-main` alone
+// keeps only the entry module on its symlink path, and this file is an imported module, so Node
+// still realpaths it. With both flags and without this call the walk climbs `~/.claude/skills/` and
+// `version` comes back null; with it, the real version. Measured on a symlinked install.
 function resolveSkillRoot() {
   const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   try {

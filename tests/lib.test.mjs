@@ -746,6 +746,21 @@ test('docgradMeta: corpus_hash is null without a config, and present with one (b
 // manifest and returns version: null — nothing throws, nothing warns, and the only trace is a
 // history.jsonl slowly filling with null versions. These two tests exist because that failure is
 // silent; without them the layout can regress and every other test stays green.
+// #47 gave the repo a second manifest for Codex carrying its own copy of the version, and a third
+// (Antigravity) that carries none. docs/how-to.md's release step names the authority; this makes a
+// half-done bump fail the suite instead of shipping two different answers to "what version is this".
+test('packaging: the Codex manifest version matches the Claude Code manifest, which is the authority', () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const authority = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin/plugin.json'), 'utf8'));
+  const codex = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin/plugin.json'), 'utf8'));
+  assert.match(authority.version, /^\d+\.\d+\.\d+$/);
+  assert.equal(codex.version, authority.version, '.codex-plugin/plugin.json drifted from the version authority');
+  // The Antigravity manifest deliberately has no version; asserting that keeps a well-meaning
+  // "consistency" edit from adding a third copy to keep in sync.
+  const antigravity = JSON.parse(fs.readFileSync(path.join(root, 'plugin.json'), 'utf8'));
+  assert.equal(antigravity.version, undefined);
+});
+
 test('docgradMeta: version is non-null from the real tree (the manifest is a level above the skill root)', () => {
   const meta = docgradMeta();
   assert.notEqual(meta.version, null, 'version went null — the manifest search no longer reaches .claude-plugin/plugin.json');
