@@ -449,6 +449,17 @@ function pushSingleFile(rootDir, rel, field, out) {
 // in a .gitignore'd directory, so it is untracked *and* ignored, and --exclude-standard would
 // filter it straight back out. "Not in git" is the property that matters here, and an ignored
 // file has it.
+// Set by gitTrackedFiles() on its way to returning null, so a caller can say **which** of the two
+// causes applied. They are not interchangeable: "git is not installed" is fixed by installing git
+// or running somewhere else, while "this is not a git working tree" means the check can never apply
+// here and the report should stop suggesting it. A note that only offers the disjunction leaves the
+// reader to guess which action to take (#52).
+let lastGitFailure = null;
+
+export function gitUnavailableReason() {
+  return lastGitFailure;
+}
+
 export function gitTrackedFiles(rootDir) {
   try {
     const out = execFileSync('git', ['ls-files', '-z'], {
@@ -457,9 +468,13 @@ export function gitTrackedFiles(rootDir) {
       stdio: ['ignore', 'pipe', 'ignore'],
       maxBuffer: 64 * 1024 * 1024,
     });
+    lastGitFailure = null;
     return new Set(out.split('\0').filter(Boolean)); // git already prints posix separators
-  } catch {
-    return null; // not a git work tree / git not installed — callers must report null, never zero
+  } catch (err) {
+    // ENOENT on the spawn itself = no git binary. Anything else means git ran and refused, which
+    // for `ls-files` is "not a work tree" in every case a user will hit.
+    lastGitFailure = err && err.code === 'ENOENT' ? 'no-git-binary' : 'not-a-work-tree';
+    return null;
   }
 }
 
@@ -472,8 +487,22 @@ export function matchesPathPrefix(p, list) {
 }
 
 const NO_GIT = 'git is unavailable or this is not a git working tree';
-export const GIT_UNAVAILABLE_NOTE =
-  `${NO_GIT}: tracked and untracked files cannot be told apart, so this is null rather than zero`;
+
+// The disjunction above is what a caller says when it genuinely does not know which applied; when
+// it does know, it must say so, because the two have different remedies.
+const GIT_FAILURE_TEXT = {
+  'no-git-binary': 'git is not installed (or not on PATH)',
+  'not-a-work-tree': 'this directory is not a git working tree',
+};
+
+export function gitUnavailableNote(reason = gitUnavailableReason()) {
+  const cause = GIT_FAILURE_TEXT[reason] ?? NO_GIT;
+  return `${cause}: tracked and untracked files cannot be told apart, so this is null rather than zero`;
+}
+
+// Retained as the cause-unknown wording; prefer gitUnavailableNote() at any call site that has just
+// made the failing call itself.
+export const GIT_UNAVAILABLE_NOTE = gitUnavailableNote(null);
 
 // tracked: pass a Set from gitTrackedFiles() to reuse one git call; undefined = look it up when
 // config.exclude_untracked needs it; null = caller already established git is unavailable.

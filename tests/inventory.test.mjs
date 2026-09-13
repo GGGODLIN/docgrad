@@ -733,3 +733,34 @@ test('inventory: a rule line anchored on an API symbol counts as anchored (#51)'
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// #52: the note used to offer both causes as one disjunction ("git is unavailable or this is not a
+// git working tree"), while audit.md told the reader that the note says which. It did not, and the
+// two have different remedies: install git / run elsewhere, versus the check can never apply here.
+test('inventory: the untracked note names which git failure occurred (#52)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-nogit-'));
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-bin-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs/a.md'), '# a\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+
+    // Not a work tree: git runs and refuses.
+    const notATree = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(notATree.untracked.count, null);
+    assert.match(notATree.untracked.note, /not a git working tree/);
+    assert.doesNotMatch(notATree.untracked.note, /git is unavailable or/, 'the disjunction must not survive when the cause is known');
+
+    // No git binary: the spawn itself fails with ENOENT. A PATH holding only node keeps the script
+    // runnable while git genuinely cannot be found.
+    fs.symlinkSync(process.execPath, path.join(binDir, 'node'));
+    const noBinary = JSON.parse(
+      execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8', env: { PATH: binDir } })
+    );
+    assert.match(noBinary.untracked.note, /git is not installed/);
+    assert.notEqual(noBinary.untracked.note, notATree.untracked.note, 'the two causes must be distinguishable');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(binDir, { recursive: true, force: true });
+  }
+});

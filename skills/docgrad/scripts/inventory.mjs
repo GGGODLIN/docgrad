@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   loadConfig, collectFiles, estimateTokens, parseArgs, fail,
   extractCodeRefs, extractApiRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
-  gitTrackedFiles, GIT_UNAVAILABLE_NOTE, matchesPathPrefix,
+  gitTrackedFiles, gitUnavailableNote, matchesPathPrefix,
   buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, AUTHORSHIP_UNAVAILABLE_NOTE,
   MAX_SRC_SYMBOL_FILE_BYTES, SHIPPED_TIERS, SHIPPED_POLLUTION_MAX,
 } from './lib.mjs';
@@ -210,7 +210,7 @@ try {
   const untrackedFiles = tracked === null ? null : collected.filter((f) => !tracked.has(f.path));
   const untracked =
     untrackedFiles === null
-      ? { count: null, tokens_est: null, files: null, note: GIT_UNAVAILABLE_NOTE }
+      ? { count: null, tokens_est: null, files: null, note: gitUnavailableNote() }
       : {
           count: untrackedFiles.length,
           tokens_est: untrackedFiles.reduce((s, f) => s + f.tokens_est, 0),
