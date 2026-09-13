@@ -199,3 +199,13 @@ test('freshness: date_concentration catches the signature of a big backfill', ()
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('freshness: output carries the docgrad fingerprint, right after scope (#45)', () => {
+  const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
+  assert.equal(typeof out.docgrad.version, 'string');
+  assert.notEqual(out.docgrad.version, null); // #47: a null version here is the silent failure mode
+  assert.match(out.docgrad.rubric_hash, /^[0-9a-f]{8}$/);
+  assert.match(out.docgrad.corpus_hash, /^[0-9a-f]{8}$/);
+  // Same placement as inventory.mjs, so the five scripts' JSON can be compared field by field.
+  assert.deepEqual(Object.keys(out).slice(0, 2), ['scope', 'docgrad']);
+});

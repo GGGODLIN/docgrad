@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  loadConfig, collectFiles, parseArgs, fail,
+  loadConfig, collectFiles, parseArgs, fail, docgradMeta,
   extractHeadings, extractLinks, githubSlug, CJK_RE,
 } from './lib.mjs';
 
@@ -81,6 +81,11 @@ try {
     `${JSON.stringify(
       {
         scope: scoped ? include : null,
+        // Same position as in inventory.mjs (right after scope) so two scripts' JSON can be
+        // compared field by field. It matters most here: orphans changed shape in v1.5.0
+        // ([] -> null when not computed, #39), and without this the output cannot say which
+        // version of the tool wrote it.
+        docgrad: docgradMeta(undefined, config),
         ...(scoped
           ? { note: 'scope-limited: orphans/reachable ratio not computed (reachability is a full-index concept), only dead links and bad anchors are counted' }
           : {}),
