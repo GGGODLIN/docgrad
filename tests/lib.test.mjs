@@ -111,6 +111,68 @@ test('loadConfig: unset fields get their defaults, nested maps deep-merge', () =
   }
 });
 
+// --- #38 part 2: list/bool fields fail loudly ------------------------------------------------
+
+const SCALAR_CASES = [
+  ['docs_dirs', 'documentation/', 'docs/'],
+  ['docs_files', 'PRODUCT.md', 'PRODUCT.md'],
+  ['entry_files', 'CLAUDE.md', 'CLAUDE.md'],
+  ['exclude', 'docs/archive/', 'docs/archive/'],
+  ['src_dirs', 'src/', 'src/'],
+  ['scenarios', 'src/foo/bar.ts', 'src/foo/bar.ts'],
+];
+
+for (const [field, scalar, example] of SCALAR_CASES) {
+  test(`loadConfig: ${field} written as a scalar throws instead of silently collecting nothing`, () => {
+    // Without the check, for…of iterates the string **character by character**: every character is
+    // tried as a path, every existsSync fails, and the only symptom is that files_total never moves.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-listtype-'));
+    try {
+      fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `${field}: ${scalar}\n`);
+      assert.throws(() => loadConfig(tmp), (err) => {
+        assert.match(err.message, new RegExp(`${field} must be a list`), 'names the field');
+        assert.ok(err.message.includes(JSON.stringify(scalar)), `shows what was given: ${err.message}`);
+        assert.ok(err.message.includes(`${field}: [${example}]`), `shows the correct inline-list form: ${err.message}`);
+        return true;
+      });
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
+
+test('loadConfig: a list entry that is not a non-empty string throws, pointing at the index', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-listentry-'));
+  try {
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/, 42]\n');
+    assert.throws(() => loadConfig(tmp), /docs_dirs\[1\] must be a non-empty path string, but got the number 42/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('loadConfig: a list key left empty throws rather than blowing up later inside collectFiles', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-listempty-'));
+  try {
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nexclude:\n');
+    assert.throws(() => loadConfig(tmp), /exclude must be a list, but got an empty value/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('loadConfig: exclude_untracked must be a boolean, and defaults to false', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-booltype-'));
+  try {
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+    assert.equal(loadConfig(tmp).exclude_untracked, false, 'default is today\'s behavior');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nexclude_untracked: yes\n');
+    assert.throws(() => loadConfig(tmp), /exclude_untracked must be true or false, but got the string "yes"[\s\S]*exclude_untracked: true/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // --- #36: corpus_hash -------------------------------------------------------------------------
 
 test('corpusHash: cosmetic differences that mean the same corpus hash the same', () => {

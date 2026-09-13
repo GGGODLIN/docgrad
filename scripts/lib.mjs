@@ -110,6 +110,75 @@ const DEFAULTS = {
   language: 'zh-TW',
 };
 
+// --- Config field type validation -------------------------------------------------
+//
+// A scalar written where a list belongs (`docs_files: PRODUCT.md`, missing the brackets) used to
+// be iterated **character by character** by the `for…of` loops in collectFiles: every single
+// character was tried as a path, every existsSync failed, and the corpus silently came back
+// without those files. The only symptom was that files_total didn't move — and nobody connects
+// "the number didn't change" to "the config is malformed", least of all right after adding a
+// field and expecting the number to grow.
+//
+// So: fail loudly, and cover every list field in one pass (validating only the newest field would
+// leave the older ones inconsistent). Deliberately **not** auto-wrapping a scalar into a
+// one-element list: a silent repair leaves the config still wrong in a version-controlled file,
+// for the next reader to trip over again.
+
+const LIST_FIELD_EXAMPLES = {
+  docs_dirs: 'docs/',
+  docs_files: 'PRODUCT.md',
+  entry_files: 'CLAUDE.md',
+  exclude: 'docs/archive/',
+  src_dirs: 'src/',
+  scenarios: 'src/foo/bar.ts',
+};
+
+const BOOL_FIELD_EXAMPLES = {
+  exclude_untracked: 'true',
+};
+
+function describeValue(v) {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'a list';
+  if (typeof v === 'object') {
+    return Object.keys(v).length === 0
+      ? 'an empty value (nothing after the colon, and no "- " item under it)'
+      : 'a map';
+  }
+  if (typeof v === 'string') return `the string ${JSON.stringify(v)}`;
+  return `the ${typeof v} ${JSON.stringify(v)}`;
+}
+
+export function validateConfigTypes(config, configFile = CONFIG_FILENAME) {
+  for (const [field, example] of Object.entries(LIST_FIELD_EXAMPLES)) {
+    const value = config[field];
+    if (!Array.isArray(value)) {
+      throw new Error(
+        `${configFile}: ${field} must be a list, but got ${describeValue(value)}. ` +
+          `Write it as an inline list — ${field}: [${example}] — or as a block list with one "- " item per line. ` +
+          `A bare scalar would be iterated character by character and collect nothing at all.`
+      );
+    }
+    const bad = value.findIndex((e) => typeof e !== 'string' || e.trim() === '');
+    if (bad >= 0) {
+      throw new Error(
+        `${configFile}: ${field}[${bad}] must be a non-empty path string, but got ${describeValue(value[bad])}. ` +
+          `Correct form: ${field}: [${example}]`
+      );
+    }
+  }
+  for (const [field, example] of Object.entries(BOOL_FIELD_EXAMPLES)) {
+    const value = config[field];
+    if (typeof value !== 'boolean') {
+      throw new Error(
+        `${configFile}: ${field} must be true or false, but got ${describeValue(value)}. ` +
+          `Correct form: ${field}: ${example}`
+      );
+    }
+  }
+  return config;
+}
+
 // configFile can be external (--config): for when the doc source itself can't take a written file
 // (an export directory, a read-only mount) and you want to point at a config file elsewhere.
 export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILENAME)) {
@@ -125,6 +194,7 @@ export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILEN
     targets: { ...DEFAULTS.targets, ...(parsed.targets ?? {}) },
     rules: { ...DEFAULTS.rules, ...(parsed.rules ?? {}) },
   };
+  validateConfigTypes(config, configFile);
   const needsField = parseFreshnessConventions(config.freshness.convention).some(
     (c) => c === 'frontmatter' || c === 'heading-line'
   );
