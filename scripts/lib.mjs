@@ -610,6 +610,10 @@ export function corpusFingerprint(config) {
     return [field, [...new Set(raw.map(normalizeCorpusEntry).filter(Boolean))].sort()];
   });
   pairs.push(['index_file', config?.index_file ? normalizeCorpusEntry(config.index_file) || null : null]);
+  // Not a path, but it selects a different corpus out of the same tree: flipping it moves
+  // files_total, the freshness denominator and the pollution denominator. Leaving it out would
+  // reproduce the exact blind spot #36 exists to close.
+  pairs.push(['exclude_untracked', config?.exclude_untracked === true]);
   return pairs;
 }
 

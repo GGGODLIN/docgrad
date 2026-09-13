@@ -70,8 +70,9 @@ test('inventory: exclude_untracked true shrinks the corpus to the clean checkout
     assert.ok(after.pollution.ratio < before.pollution.ratio);
     assert.equal(after.untracked.count, 0);
     assert.equal(after.pollution.note, undefined, 'nothing untracked left to warn about');
-    // exclude_untracked is not a corpus-defining field, so #36's break detector must stay quiet
-    assert.equal(after.docgrad.corpus_hash, before.docgrad.corpus_hash);
+    // exclude_untracked selects a different corpus out of the same tree, so #36's break detector
+    // must fire: the scores either side of this change are not comparable.
+    assert.notEqual(after.docgrad.corpus_hash, before.docgrad.corpus_hash);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
