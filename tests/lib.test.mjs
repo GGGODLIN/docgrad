@@ -445,6 +445,33 @@ test('extractHeadings: a word-internal underscore is literal; only an emphasis u
   assert.ok(extractHeadings('## 狀態圖例 (status / sot_level legend)\n').has('狀態圖例-status--sot_level-legend'));
 });
 
+// #42: the 0.6.1 fix only covered the word-internal case. An `_` whose *left* neighbour is
+// punctuation or the start of the line was still stripped, so the slug disagreed with GitHub and
+// links into those sections were reported as bad anchors — which always costs a star.
+test('extractHeadings: an unpaired underscore is literal, whatever sits next to it (#42)', () => {
+  const cases = [
+    ['### cmd._args', 'cmd_args'], // githubSlug drops the dot, keeps the underscore
+    ['### _private', '_private'],
+    ['### sot_level', 'sot_level'], // the 0.6.1 regression case
+    ['### a.b_c', 'ab_c'],
+    ['### my_var', 'my_var'],
+    ['### __dunder', '__dunder'],
+    ['### opts._flags and cfg._other', 'opts_flags-and-cfg_other'], // two lone `_` must not pair up
+  ];
+  for (const [heading, slug] of cases) {
+    assert.ok(
+      extractHeadings(`${heading}\n`).has(slug),
+      `${heading} should slug to ${slug}, got ${[...extractHeadings(`${heading}\n`)].join(', ')}`
+    );
+  }
+});
+
+test('extractHeadings: a matched underscore pair is still emphasis and is still stripped (#42)', () => {
+  assert.ok(extractHeadings('### _emphasis_\n').has('emphasis'));
+  assert.ok(extractHeadings('### __init__\n').has('init'), 'GitHub renders this as bold "init" too');
+  assert.ok(extractHeadings('### _emphasis_ and cmd._args\n').has('emphasis-and-cmd_args'));
+});
+
 test('extractHeadings: explicit anchors <a id>/<a name> are also indexed into the slug set', () => {
   const slugs = extractHeadings('# T\n\n<a id="canonical-contracts"></a>\n## 內容\n');
   assert.ok(slugs.has('canonical-contracts'), '<a id> should be indexed');

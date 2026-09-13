@@ -457,6 +457,27 @@ export function githubSlug(heading) {
 // were of this kind).
 const EXPLICIT_ANCHOR_RE = /<a\s[^>]*\b(?:id|name)\s*=\s*["']([^"']+)["']/gi;
 
+// Strips the emphasis markers out of a heading before it is slugged, so the slug describes what
+// GitHub actually *renders*. `*` and `` ` `` are stripped unconditionally. `_` is the hard case:
+// GFM only treats it as an emphasis delimiter when it comes in a **matched pair** whose outer
+// sides are non-alphanumeric and whose inner sides are not whitespace. A lone `_` sitting next to
+// punctuation, or at the start of a word, is literal — GitHub keeps it in the slug.
+//
+//   `_emphasis_` / `__bold__` / `__init__` -> stripped (GitHub renders these as emphasis too)
+//   `sot_level` / `cmd._args` / `_private` -> kept
+//
+// The previous implementation stripped an `_` whenever *either* neighbour was non-alphanumeric,
+// which turned `### cmd._args` into `cmdargs` and `### _private` into `private` while GitHub
+// produces `cmd_args` / `_private`. Every link pointing at such a section was reported as a bad
+// anchor, and a bad anchor always costs a star — measured on tj/commander.js, the convergence
+// loop went and added `<a id>` to a document that had nothing wrong with it (#42). The 0.6.1 fix
+// only covered the word-internal case (`sot_level`); pairing is what covers all of them.
+const EMPHASIS_PAIR_RE = /(?<![\p{L}\p{N}])(_{1,3})(?=[^\s_])(.+?)(?<=[^\s_])\1(?![\p{L}\p{N}])/gu;
+
+export function stripHeadingEmphasis(heading) {
+  return heading.replace(/[*`]/g, '').replace(EMPHASIS_PAIR_RE, '$2');
+}
+
 export function extractHeadings(text) {
   const counts = new Map();
   const slugs = new Set();
@@ -464,15 +485,7 @@ export function extractHeadings(text) {
     for (const m of line.matchAll(EXPLICIT_ANCHOR_RE)) slugs.add(m[1].trim());
     const m = line.match(/^#{1,6}\s+(.+?)\s*#*\s*$/);
     if (!m) continue;
-    // Strip markdown emphasis markers from the heading before computing the slug. `_` needs two
-    // cases: GFM's word-internal underscore is not emphasis (`sot_level` is literal, and GitHub's
-    // slug keeps it) — only an `_` with non-alphanumeric characters on both sides is a delimiter.
-    // The old implementation stripped it unconditionally, so
-    // `## 狀態圖例 (status / sot_level legend)` was computed as `…-sotlevel-…`, and every link
-    // pointing at that section was falsely reported as a bad anchor.
-    const base = githubSlug(
-      m[1].replace(/[*`]/g, '').replace(/_(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])_/gu, '')
-    );
+    const base = githubSlug(stripHeadingEmphasis(m[1]));
     const n = counts.get(base) ?? 0;
     counts.set(base, n + 1);
     slugs.add(n === 0 ? base : `${base}-${n}`);
