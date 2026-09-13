@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
 const RETRIEVAL_FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.meta.url));
+const DOCS_FILES_FIXTURE = fileURLToPath(new URL('./fixtures/docs-files/', import.meta.url));
 const SCRIPT = fileURLToPath(new URL('../scripts/inventory.mjs', import.meta.url));
 
 test('inventory: entry_cost 對 symlink 別名去重（同一實體只計一次）', () => {
@@ -41,6 +42,22 @@ test('inventory: 清單/型別/entry_cost/pollution', () => {
   assert.ok(out.entry_cost.tokens_est > 0);
   assert.deepEqual(out.pollution.excluded_files.map((f) => f.path), ['docs/archive/old.md']);
   assert.ok(out.pollution.ratio > 0 && out.pollution.ratio < 1);
+});
+
+test('inventory: docs_files 是一般文件（type doc），不灌水固定成本', () => {
+  // 這正是 docs_files 存在的理由：改列 entry_files 也收得到檔，但會被算成每次任務都付的稅。
+  const out = JSON.parse(
+    execFileSync(process.execPath, [SCRIPT, '--root', DOCS_FILES_FIXTURE], { encoding: 'utf8' })
+  );
+  assert.equal(out.totals.files, 5);
+  assert.equal(out.files.find((f) => f.path === 'PRODUCT.md').type, 'doc');
+  assert.equal(out.files.find((f) => f.path === 'DESIGN.md').type, 'doc');
+  assert.deepEqual(out.entry_cost.files, ['CLAUDE.md']);
+  assert.equal(
+    out.entry_cost.tokens_est,
+    out.files.find((f) => f.path === 'CLAUDE.md').tokens_est,
+    'entry_cost 只能是 entry_files 的量，docs_files 不得計入'
+  );
 });
 
 test('inventory: --include 限定範圍（scope 標明、entry 不在範圍則固定成本為 0）', () => {

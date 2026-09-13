@@ -117,6 +117,8 @@ links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊
 1. `entry_cost.files` 是不是真的每次任務都載入。把只有人看的落地頁（如 GitHub 用的 `README.md`）
    列進 `entry_files` 會讓固定成本灌水；反過來，agent 每次都必讀卻沒列進去則會低報。
    發現設定與現實不符 → 記為失分點並建議修 `.docgrad.yml`，**不要**自行改設定再評分。
+   - **條件式必讀檔**（入口檔寫著「動 UI 前先讀 `DESIGN.md`」這種）不算 always-loaded：
+     建議改列 `docs_files`，它照樣進語料與其他五維，但不計固定成本（見 [init.md](init.md) 問卷第 3 項）。
 2. 污染面 ≥ 10% 時本維上限 ★3（rubric 的降級規則），即使固定成本很低。
 
 ### 8. Token 經濟報告

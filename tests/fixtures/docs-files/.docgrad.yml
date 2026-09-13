@@ -1,0 +1,11 @@
+# PRODUCT.md／DESIGN.md 在 repo 根、不在 docs_dirs 內，也不是 entry_file——
+# 它們是條件式載入的一般文件（agent 只在做對應工作時才讀），列進 entry_files 會灌水固定成本。
+docs_dirs: [docs/]
+docs_files: [PRODUCT.md, DESIGN.md]
+entry_files: [CLAUDE.md]
+index_file: docs/README.md
+exclude: []
+freshness:
+  convention: heading-line
+  field: "Last updated:"
+language: zh-TW

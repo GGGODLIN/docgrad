@@ -7,6 +7,7 @@ import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, coll
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
+const DOCS_FILES_FIXTURE = fileURLToPath(new URL('./fixtures/docs-files/', import.meta.url));
 
 test('parseYamlSubset: 解析 .docgrad.yml 全樣板', () => {
   const doc = `
@@ -79,6 +80,7 @@ test('loadConfig: 未填欄位補預設值、巢狀深合併', () => {
     const cfg = loadConfig(tmp);
     assert.deepEqual(cfg.docs_dirs, ['documentation/']);
     assert.deepEqual(cfg.entry_files, []);
+    assert.deepEqual(cfg.docs_files, []); // v1.4.0 新欄位：舊設定沒寫也要補上空陣列（否則 collectFiles 會炸）
     assert.equal(cfg.index_file, null);
     assert.equal(cfg.targets.completeness, 4);
     assert.equal(cfg.targets.economy, 4); // v1.0.0 第六維：舊設定沒寫也要補上預設 target
@@ -162,6 +164,51 @@ test('collectFiles: include 縮到 scope 內；exclude 仍優先於 scope', () =
   assert.deepEqual(collectFiles(FIXTURE, cfg, { include: ['docs/*.md'] }).included, [
     'docs/README.md', 'docs/guide.md', 'docs/orphan.md',
   ]);
+});
+
+test('collectFiles: docs_files 把 docs_dirs 之外的單檔納入語料', () => {
+  // 這條就是 docs_files 的守門員：欄位被拿掉時 PRODUCT.md／DESIGN.md 收不到，此處立刻紅。
+  const cfg = loadConfig(DOCS_FILES_FIXTURE);
+  const { included } = collectFiles(DOCS_FILES_FIXTURE, cfg);
+  assert.deepEqual(included, [
+    'CLAUDE.md', 'DESIGN.md', 'PRODUCT.md', 'docs/README.md', 'docs/guide.md',
+  ]);
+});
+
+test('collectFiles: docs_files 去重、缺檔靜默略過、exclude 仍優先', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-docsfiles-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    fs.writeFileSync(path.join(tmp, 'ROOT.md'), '# root\n');
+    fs.writeFileSync(path.join(tmp, 'DROPPED.md'), '# dropped\n');
+    fs.writeFileSync(
+      path.join(tmp, '.docgrad.yml'),
+      'docs_dirs: [docs/]\ndocs_files: [docs/a.md, ROOT.md, DROPPED.md, GONE.md]\n' +
+        'exclude: [DROPPED.md]\nfreshness:\n  convention: none\n'
+    );
+    const { included, excluded } = collectFiles(tmp, loadConfig(tmp));
+    // docs/a.md 已被 docs_dirs 掃到 → 不重複；GONE.md 不存在 → 靜默略過（同 entry_files）
+    assert.deepEqual(included, ['ROOT.md', 'docs/a.md']);
+    assert.deepEqual(excluded, ['DROPPED.md']); // 列在 docs_files 也擋不住 exclude
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectFiles: docs_files 指到目錄 → 明確丟錯（不留給 inventory 爆 EISDIR）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-docsfiles-dir-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# a\n');
+    fs.writeFileSync(
+      path.join(tmp, '.docgrad.yml'),
+      'docs_dirs: [docs/]\ndocs_files: [docs/]\nfreshness:\n  convention: none\n'
+    );
+    assert.throws(() => collectFiles(tmp, loadConfig(tmp)), /docs_files 只能列單一檔案.*docs_dirs/s);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('estimateTokens: ASCII 每 4 字元 1 token', () => {

@@ -79,6 +79,9 @@ export function parseYamlSubset(text) {
 
 const DEFAULTS = {
   docs_dirs: ['docs/'],
+  // docs_files：docs_dirs 之外的**單一** markdown 檔，以一般文件（type: 'doc'）納入語料。
+  // 與 entry_files 的差別是「載入時機」不是「重要性」——見 reference/init.md 問卷第 3 項。
+  docs_files: [],
   entry_files: [],
   index_file: null,
   exclude: [],
@@ -224,18 +227,38 @@ export function matchesScope(relPath, include = []) {
   });
 }
 
+// 單檔入口（docs_files／entry_files／index_file）共用的收錄規則：
+//   - 不存在 → 靜默略過（`.docgrad.yml` 進版控、跨 branch 共用，檔案暫時缺席不該讓整支腳本掛掉）。
+//   - 指到目錄 → 明確丟錯。否則錯誤會延到 inventory.mjs 讀檔時才爆成看不出原因的
+//     `EISDIR: illegal operation on a directory`（`docs_dirs` 誤放單檔時的 ENOTDIR 的鏡像）。
+//   - 已收錄 → 不重複 push（同一檔同時列在 docs_dirs 掃到的結果與本清單時只算一次）。
+function pushSingleFile(rootDir, rel, field, out) {
+  if (!rel) return;
+  const abs = path.join(rootDir, rel);
+  if (!fs.existsSync(abs)) return;
+  if (fs.statSync(abs).isDirectory()) {
+    throw new Error(`${field} 只能列單一檔案，但 ${rel} 是目錄——整個目錄請改放 docs_dirs`);
+  }
+  if (!out.includes(rel)) out.push(rel);
+}
+
 export function collectFiles(rootDir, config, { include = [] } = {}) {
   const all = [];
   for (const dir of config.docs_dirs) {
     const abs = path.join(rootDir, dir);
     if (fs.existsSync(abs)) walkMarkdown(abs, rootDir, all);
   }
+  // docs_files：落在 docs_dirs 之外、但語意上是**一般文件**的單檔（典型是 repo 根的
+  // PRODUCT.md／DESIGN.md——條件式載入的必讀文件）。它們沒有被 docs_dirs 的目錄掃描收到，
+  // 而 docs_dirs 放單檔會炸（ENOTDIR）；改列 entry_files 雖收得到，卻會被 inventory.mjs 的
+  // fileType() 標成 'entry' 而灌水固定成本（oikos 實測 9,037 → 21,474，經濟性 ★3→★1），
+  // 且與 audit.md 的「entry_cost.files 必須真的每次任務都載入」相矛盾。故獨立一個欄位。
+  for (const f of config.docs_files) pushSingleFile(rootDir, f, 'docs_files', all);
   // entry_files 與 index_file 可能落在 docs_dirs 之外（如 repo 根的 SKILL.md／README.md），
   // 兩者都是文件體系的一部分，必須納入語料——index_file 漏收會讓它被 links.mjs 的
   // roots 過濾掉（roots 只認 includedSet 內的路徑），整棵只從索引可達的子樹被誤判成孤兒。
-  for (const f of [...config.entry_files, config.index_file]) {
-    if (f && fs.existsSync(path.join(rootDir, f)) && !all.includes(f)) all.push(f);
-  }
+  for (const f of config.entry_files) pushSingleFile(rootDir, f, 'entry_files', all);
+  pushSingleFile(rootDir, config.index_file, 'index_file', all);
   const isExcluded = (p) =>
     config.exclude.some((ex) => p === ex || p.startsWith(ex.endsWith('/') ? ex : `${ex}/`));
   const inScope = (p) => matchesScope(p, include);

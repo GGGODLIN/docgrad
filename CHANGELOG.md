@@ -3,6 +3,57 @@
 版本權威在 [.claude-plugin/plugin.json](.claude-plugin/plugin.json) 的 `version`；本檔記錄各版變更。
 版號語意（semver，docgrad 特化）見 [docs/how-to.md](docs/how-to.md) §發版。
 
+## 1.4.0 — 2026-09-13
+
+`.docgrad.yml` 新增欄位 `docs_files`：把 `docs_dirs` 之外的**單一** markdown 檔以**一般文件**
+（`type: 'doc'`）納入語料。**★1–★5 錨點文字一字未動**，`reference/rubric.md` 未改動，
+`rubric_hash` 不變。
+
+- **新增（欄位）`docs_files`**：起因是 oikos 要把 root 層的 `PRODUCT.md`（4,378 tokens／12 claims）
+  與 `DESIGN.md`（8,059 tokens／3 claims）納入評分，發現 **schema 做不到**——語料收集全站只有
+  `scripts/lib.mjs › collectFiles()` 一處，五支腳本都經過它，而它只吃目錄（`docs_dirs`）與
+  單檔入口（`entry_files`／`index_file`）。三條繞路各有代價：
+  - `docs_dirs` 放單檔**會炸**：`ENOTDIR: not a directory, scandir '…/PRODUCT.md'`
+    （寫成 `PRODUCT.md/` 也一樣，`path.join` 會把尾斜線正規化掉）。
+  - `entry_files` 收得到檔，但 `inventory.mjs › fileType()` 會把它們標成 `entry`，直接進
+    `entry_cost.tokens_est`：oikos 實測 **9,037 → 21,474**，跨過 `economy.entry_cost_tiers`
+    的 20,000 → 經濟性 **★3 → ★1**。**而且那個成本是假的**：這兩份在 oikos 是條件式載入
+    （入口檔寫「UI／視覺工作開始前」才讀），而 `reference/init.md` 的判準是「agent 每次任務
+    都會自動載入」。`reference/audit.md` §經濟性 又明訂稽核者查到 `entry_cost.files` 與現實
+    不符要記失分點——等於拿一個灌水的固定成本換一個永久扣分。
+  - `docs_dirs: [docs/, ./]`：`collectFiles` 對 `docs_dirs` **不去重**（去重只在單檔那圈），
+    整棵 `docs/` 會被算兩次；repo root 底下還有 `.claude/worktrees/` 這類會浮動的目錄，
+    分數變成機器相依、不可重現。
+- **與 `entry_files` 的差別是「載入時機」，不是「重要性」**：always-loaded → `entry_files`
+  （計固定成本）；條件式載入 → `docs_files`（不計）。兩邊都收得到檔，**選錯不會報錯，
+  只會讓經濟性失真**——往上灌水或往下低報，方向相反。判準與選錯代價寫進 `reference/init.md`
+  問卷（新增為第 3 項，其後各項順延）。
+- **語意與既有單檔入口對齊**：檔案不存在 → 靜默略過（同 `entry_files`）；`docs_dirs` 已掃到的
+  檔不重複計；`exclude` 仍然優先（列進 `docs_files` 也擋不住，該檔照算污染面）；
+  **不是可達性起點**——`links.mjs` 的 roots 仍只有 `index_file`＋`entry_files`，`docs_files`
+  比照一般文件判孤兒。這是刻意的：條件式文件若沒有任何文件連到它，agent 只能靠猜找到它。
+- **順手修（lib）單檔入口指到目錄時的錯誤訊息**：原本要延到 `inventory.mjs` 讀檔才爆
+  `EISDIR: illegal operation on a directory`，看不出是哪個設定欄位寫錯。改成在 `collectFiles()`
+  當場丟「`docs_files` 只能列單一檔案，但 `docs/` 是目錄——整個目錄請改放 `docs_dirs`」，
+  `entry_files`／`index_file` 共用同一條路徑。
+- **⚠️ 跨 1.4.0 的分數可比性——只影響實際設了 `docs_files` 的 repo**。納入新檔會同時動到
+  `files_total`／`claims_total`／`tokens_est`／新鮮度的分母／孤兒與可達率的母體，該 repo 跨
+  1.4.0 的分數**不可直接比較**，基準要從導入這個欄位的那一輪重算（性質同 1.3.0 的新鮮度註記：
+  是量測範圍修正，不是品質退步）。**沒設這個欄位的 repo 輸出完全不變**——預設空陣列，
+  不必重跑 `init`。
+  - oikos 實跑（`docs_files: [PRODUCT.md, DESIGN.md]`，`--config` 外置、未改動該 repo 任何檔）：
+    `files_total` 46 → 48、`claims_total` 317 → 332、`tokens_est` 134,253 → 146,690、
+    新鮮度 `coverage_ratio` 93.48% → 89.58%（新收的兩份沒有 frontmatter 日期，分母變大）、
+    污染面 11.77% → 10.88%。**`entry_cost.tokens_est` 維持 9,037**（這正是本欄位的重點），
+    死鏈／壞錨／孤兒 0／0／0、可達率 100%、`coverage.mjs` 的 undocumented／drifted 不變。
+  - `retrieval.mjs`（report-only，不計星）也會動：新檔進了連結圖之後，原本從 `index_file`
+    連不到的 doc 可能變成可達，`marginal_tokens`／`max_depth` 隨之上修（oikos 實測
+    `lib/balance.ts` 32,655 → 41,058、`max_depth` 1 → 3）。那是「本來就存在、只是先前看不到的
+    檢索路徑」被算進來，不是成本變貴。
+- **測試**：66 → 71（收錄 `docs_dirs` 之外的單檔、去重、缺檔靜默略過、`exclude` 優先、
+  指到目錄丟錯、`type: 'doc'` 且不進 `entry_cost`、孤兒判定比照一般文件）。新增 fixture
+  `tests/fixtures/docs-files/`，已實測把 `docs_files` 那圈拿掉後這 5 條全紅。
+
 ## 1.3.1 — 2026-09-13
 
 發版流程與官方工具鏈對齊；純 metadata／文件，不動任何判定語意。
