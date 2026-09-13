@@ -69,19 +69,37 @@ authoritative document.
 | ★4 | Sample pass rate ≥90%, and no zombie-mechanism documents. |
 | ★5 | Every sampled claim passes + zombie code and retired mechanisms are marked + authoritative lists refer to code instead of restating it. |
 
-Measurement: the claim ledger — sample `correctness_sample` concrete claims and verify each one
-against the code (see [audit.md](audit.md) step 3).
+Measurement: the claim ledger — draw `correctness_sample` concrete claims, re-verify part of the
+existing ledger, and verify every one of them against the code (see [audit.md](audit.md) step 3).
 **The script decides the sample**: the population is `inventory.totals.claims_total` (non-heading
 lines outside fences that carry a code coordinate), the draw order is
 `inventory.claim_candidates` (stably sorted by ref count → path → line), at most 2 per document.
-Entries in an existing `.docgrad/ledger.jsonl` are re-verified first (all `fail`/`stale`, half the
-`pass` entries) before new samples are drawn; the ledger accumulates rather than resampling.
+**`correctness_sample` is the number of claims drawn new each round, not the total verified that
+round.** A round verifies: every outstanding `fail`/`stale` entry in `.docgrad/ledger.jsonl` (no
+cap — otherwise a repo's score would improve as its documentation got worse), plus the
+`floor(correctness_sample / 2)` least-recently-verified `pass` entries (by ledger `round`
+ascending), plus `correctness_sample` claims that have never entered the ledger. Re-verification
+never reduces the new draws, so cumulative coverage grows by `correctness_sample` per round with no
+ceiling; the ledger accumulates rather than resampling. The pass rate that sets the star rating is
+computed over that whole verified set.
 
 > **Report pass rate and coverage separately**: the star rating for this dimension follows the
 > **pass rate** (passes ÷ claims verified this round). **Cumulative coverage** (distinct claims in
 > the ledger ÷ `claims_total`) does not affect the star rating, but **the report must include it** —
 > 8/8 at 5% coverage and 8/8 at 60% coverage are two different things, and giving only the star
 > rating lets the reader overestimate how much that number is worth.
+
+> **Zero verifiable claims: not measurable, not a star.** When the round's verified set is empty —
+> no outstanding `fail`/`stale`, no `pass` entries in the ledger, and `claims_total: 0` — the pass
+> rate is undefined and **none of the ★1–★5 anchors above apply**. Report the dimension as `n/a`
+> (not measurable) rather than guessing a star; four independent runs on the same library-repo
+> fixture, each reasoning defensibly, produced ★3, ★3, ★1 and ★2. A not-measurable correctness is
+> treated exactly like a design ceiling: excluded from the targets check, excluded from the loop's
+> dimension picking, and named in the report — the corpus having no claim that carries a code
+> coordinate is itself the finding worth acting on (see [audit.md](audit.md) step 3). The rated
+> value recorded in `history.jsonl` is `null`, not a number, so `report` never averages a guess.
+> This adds a case the anchors did not cover; it **changes none of the ★1–★5 thresholds**
+> (see [§Version history](#version-history-and-comparability-notes)).
 
 ## Freshness
 
@@ -246,6 +264,28 @@ individual dimension did not).
   A structural hash — over the thresholds and the anchor ordering rather than the file bytes —
   would tell translations apart from real rubric changes and remove this whole class of false
   breakpoint. It is not implemented; see the repo's open issues.
+- **`correctness_sample` now means new draws per round, and the empty-sample case is defined**
+  (see CHANGELOG; issue #37) (not an anchor change): the ★1–★5 thresholds (pass rate <50% / 50–79% /
+  ≥80% / ≥90% / all pass) are unchanged word for word. Two things changed underneath them. First,
+  what the number means: it used to be the *total* claims verified in a round, with re-verification
+  spending out of the same budget, so new draws were `correctness_sample − (#fail + ⌈#pass/2⌉)` and
+  hit zero at a ledger of `2 × correctness_sample − 1` claims — oikos froze at 23 of 335 candidates
+  (7%) and no further round could move it. It is now the number of claims drawn *new* each round,
+  and re-verification (all outstanding fail/stale, plus `floor(correctness_sample / 2)`
+  least-recently-verified passes) is a separate budget on top, so cumulative coverage grows by
+  `correctness_sample` per round without a ceiling. Second, the verified set's composition: it used
+  to be dominated by re-verified passes as the ledger grew — claims already known to be correct —
+  and is now always majority-fresh. **So pass rates before and after are computed over differently
+  composed sets and are only loosely comparable**: an old score leans on re-checks of claims that
+  already passed and therefore reads high, the more so the larger the ledger was at the time, while
+  a new score is mostly unseen claims and is the harsher measurement. Treat a pre-change ★4 as no
+  stronger than a post-change ★4, never the reverse, and re-read the cumulative coverage next to it
+  — coverage trajectories across this change are not comparable at all, since the old one was
+  approaching a ceiling that no longer exists. Also new: a corpus with `claims_total: 0` reports
+  correctness as `n/a` (not measurable) instead of receiving a star. That is an added case, not a
+  moved threshold — those repos previously had no applicable anchor and got whatever a given run
+  decided (★3, ★3, ★1 and ★2 on four runs of one fixture), so their historical correctness scores
+  are not meaningful values to compare against anything.
 - **v1.3.0 — freshness git comparison excludes docgrad's own commits** (not an anchor change): the
   ★1–★5 thresholds are untouched, but the basis for computing mismatches changed — a backfill round
   no longer pollutes itself. When comparing freshness scores across v1.3.0, older scores may be
