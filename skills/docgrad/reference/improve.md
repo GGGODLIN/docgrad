@@ -201,9 +201,31 @@ no number of further rounds will move it. Judging it as plateau would mislead th
 
 ## Graduation (do it when targets are met, do not just recommend it)
 
-**Why this section has a deliverable**: convergence without a gate decays naturally. On the **very day** oikos graduated, a new orphan appeared
-(`utm-convention.md`) along with files missing `last_updated`, and coverage went 95.1% → 90.7%; two months later
-it was still sitting there, unreclaimed. A prose-style "we recommend you build your own CI" has no deliverable, so nobody acts on it.
+**Why this section has a deliverable, and why that was not enough**: convergence without a gate decays naturally. On the
+**very day** oikos graduated, a new orphan appeared (`utm-convention.md`) along with files missing `last_updated`, and
+coverage went 95.1% → 90.7%. A prose-style "we recommend you build your own CI" has no deliverable, so nobody acts on it —
+that reasoning was right, and producing the files was the right response to it.
+
+**It did not work.** Measured on the same repo: the gate was produced at round 8 with `min_freshness_coverage: 0.93`
+("round 8 is at 0.9348, the threshold may only go up"). Running that same file today prints
+`✗ 新鮮度覆蓋率: 0.9（門檻 ≥ 0.93）`, and `.github/` contains no reference to it — it has never been executed since the day
+it was written. The cause is not that the documentation got worse; it is that **the corpus grew**: round 9 pulled
+`PRODUCT.md`/`DESIGN.md` in through `docs_files` and round 10 added two specs, so the denominator went 46 → 50 and the new
+files carried no `last_updated`. A pinned ratio threshold **expires by itself when the corpus grows**, and growing the
+corpus is something this tool actively encourages.
+
+So the honest form of the argument is: **a deliverable is necessary, not sufficient.** It also needs something that reports
+its state without being asked, because "the user will not go and do it" is the premise the whole section rests on — and that
+premise does not stop applying the moment the file exists. Note which way each failure points. A prose recommendation nobody
+follows leaves the team **knowing** they have no gatekeeper. A produced gate nobody runs leaves them **believing** they have
+one, with a green promise in version control and a red answer in reality. The second is worse, which is why
+[audit.md](audit.md) step 8b now evaluates a present gate's declared thresholds on every audit and report — without
+executing it — and says so when it is red or when no workflow references it.
+
+The same repo shows why the mechanical signal has to be fine-grained. `utm-convention.md` decayed in two ways at once: it
+became an orphan, and it lost its date signal. **The orphan half got fixed** — a script reported it by name every round. **The
+date-signal half is still missing today**, because it only ever appeared diluted inside `coverage_ratio`, one file among
+fifty. Same document, two kinds of rot, two outcomes, and the difference was whether a round's output named it.
 
 Blocker #3's "don't touch CI" means **don't automatically modify the user's CI**, not that you can't produce CI materials.
 
@@ -216,7 +238,12 @@ Do two things at graduation:
    ```bash
    mkdir -p .docgrad/graduation
    cp "$SKILL_DIR/templates/docs-gate.mjs" "$SKILL_DIR/templates/docs-gate.yml" .docgrad/graduation/
+   cp "$SKILL_DIR/templates/graduation-README.md" .docgrad/graduation/README.md
    ```
+
+   The README goes with them: it says how to run the gate, and that a ratio threshold expires on its own as the corpus
+   grows. Fill in the actual threshold values and today's measurements where it asks for them — a README describing
+   thresholds it does not name is the same failure one level up.
 
    **Never write into `.github/`**, and never modify any existing CI configuration.
 

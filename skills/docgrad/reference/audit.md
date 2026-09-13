@@ -13,6 +13,7 @@ This process **does not modify any file** and writes no state — pure report. R
 - [Step 4/5. Freshness / Linkage](#4-freshness--5-linkage)
 - [Step 6. Consistency (across documents and carriers)](#6-consistency-across-documents-and-carriers)
 - [Step 7. Economy](#7-economy)
+- [Step 8b. The graduation gate, if the repo has one](#8b-the-graduation-gate-if-the-repo-has-one)
 - [Step 8. Token economy report](#8-token-economy-report)
 - [Step 9. Emit the scorecard](#9-emit-the-scorecard)
 - [Scoped audit (limited scope / single dimension)](#scoped-audit-limited-scope--single-dimension)
@@ -326,6 +327,56 @@ Also include a "Traceability" subsection (report-only, not rated, see rubric.md'
 `retrieval.mjs`'s `code_pointer_ratio` (list the low-ratio areas — meaning that once code changes there's no path back to the spec),
 `index_hotness` (call it out when `ratio` is noticeably high, with `top5` attached); files whose `inventory.mjs` per-file `structure.rules`
 have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_ratio` — suggest splitting into a contract layer and a detail layer.
+
+### 8b. The graduation gate, if the repo has one
+
+A graduated repo carries `.docgrad/graduation/docs-gate.mjs` + `docs-gate.yml`, produced by
+[improve.md](improve.md) §Graduation with its thresholds pinned to that round's state. Field
+evidence says producing the file solved "there is no deliverable" and not "nobody runs it": on one
+repo the gate went red four rounds before anyone noticed, and `.github/` never referenced it at all.
+A green promise sitting in version control while the real answer is red is worse than no gate, so
+**every audit and report says what state it is in**.
+
+**docgrad does not execute it.** Not when it looks unmodified, not behind a config flag. It is a
+Node module committed into the repo being graded, so running it would mean executing
+repository-controlled code with the operator's privileges — and this tool's documented use includes
+auditing clones of repos you did not write (see the commander.js case study). An executed gate also
+decides its own verdict, so a gate that always prints "passed" would be indistinguishable from a
+real one: execution carries the whole risk and buys no integrity. None of this costs anything,
+because the gate consumes exactly the three script outputs step 1 already produced.
+
+When `.docgrad/graduation/docs-gate.mjs` exists, report all four of these:
+
+1. **That it exists**, with its path and the literal command to run it:
+   `DOCGRAD_DIR=<docgrad install> node .docgrad/graduation/docs-gate.mjs --root .`
+2. **Whether anything actually runs it.** Grep `.github/workflows/**` (and any other CI config the
+   repo uses) for a reference to the gate. Nothing referencing it → report
+   **"produced but not installed: no workflow references it"**. That was the single highest-value
+   finding on the repo above, and it is a text search.
+3. **The declared thresholds against this round's numbers.** Read the `THRESHOLDS` object out of the
+   file — it is a literal block of `key: <number>` lines near the top — and compare each to what step
+   1 already measured: `max_dead_links` / `max_bad_anchors` / `max_orphans` against `links.mjs`,
+   `min_freshness_coverage` against `freshness.coverage_ratio`, `max_entry_cost_tokens` against
+   `inventory.entry_cost.tokens_est`. Report the verdict as the gate's, not as docgrad's:
+   *"the committed gate is red: freshness coverage 0.90 < its declared 0.93"*.
+   This is what catches the real failure mode, which is not that the gate is wrong but that it
+   **expires**: a ratio threshold pinned at graduation goes red by itself when the corpus grows, and
+   growing the corpus is something docgrad actively encourages. On the measured repo the denominator
+   went 46 → 50 as `docs_files` and two new specs came in, and 0.9348 became 0.90 against a pinned
+   0.93.
+4. **Whether the judging logic still matches the template docgrad ships.** Compare the file against
+   `$SKILL_DIR/templates/docs-gate.mjs` ignoring the `THRESHOLDS` block (that block is meant to be
+   edited). Differences elsewhere are worth one line of report — *"its judging logic differs from the
+   template docgrad ships"* — as information, not as a fault.
+
+**Fail closed.** If the `THRESHOLDS` block is not a plain list of `key: <number>` lines — a computed
+value, an interpolation, extra statements — do **not** guess at what it evaluates to, and do not
+partially parse it. Report *"the gate has been modified beyond its thresholds; docgrad cannot
+evaluate it — run it yourself with the command above"* and stop at that. Never `import` it, never
+evaluate it, never shell out to it.
+
+No gate file → say nothing. An absent gate is the normal state for a repo that has not graduated,
+and reporting its absence every round would be noise.
 
 ### 9. Emit the scorecard
 
