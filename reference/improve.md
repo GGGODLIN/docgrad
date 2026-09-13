@@ -15,6 +15,12 @@
 - Always work on the `docgrad/converge` branch: doesn't exist → create it from the current branch; already exists → checkout and continue (resumable after interruption).
 - Only commit docs changes and `.docgrad/` state files — "docs changes" = files covered by `.docgrad.yml`'s `docs_dirs`/`docs_files`/
   `entry_files`, **not source code files** (including their comments). **Never touch the target repo's CI config.**
+- **`.docgrad/` belongs in version control, all of it.** It is not scratch space, it is this tool's state: `history.jsonl` is
+  what the next round compares its `rubric_hash`/`corpus_hash` against, `ledger.jsonl` is the cumulative coverage that the
+  sampling rule in [audit.md](audit.md) §3. Correctness (claim ledger) draws down, `scorecard-latest.md` is what `report`
+  reprints, and `graduation/` holds deliverables the team copies into `.github/` by hand. Gitignore any of them and the
+  feature that reads it silently stops working — a cloned repo restarts coverage at zero and never draws a comparability
+  break, with no error to notice.
 - Branch isolation lets the user review the whole batch before merging; one commit per round guarantees you can roll back.
 
 ## Steps in each round
@@ -87,6 +93,12 @@
      `claim_id` = `<path>:<line>`. When document reshuffling causes the line number to drift, keep using the old `claim_id` based on the claim's content
      and add `"moved_from": "<old id>"` on that line — don't treat it as a new claim, that would inflate cumulative coverage artificially.
    - Overwrite `.docgrad/scorecard-latest.md` (the full scorecard text from audit.md).
+   - **Before committing the scorecard, check `inventory.untracked.count`.** Non-zero means the pollution surface — and
+     therefore the economy rating — was measured against files that exist only on this machine, so the numbers you are about
+     to commit are ones nobody else can reproduce (measured: ratio 0.1066 in a working checkout against 0.0517 in a clean
+     worktree of the same commit, with the `pollution_max: 0.1` downgrade threshold between them). Either stash the
+     untracked files and re-run, or set `exclude_untracked: true`, or commit as-is and **write the count and token total
+     into the scorecard** so the next reader knows which numbers are checkout-bound. Do not commit it silently.
    - Commit. Write the message in the target repo's own language — the `language:` field in its
      `.docgrad.yml`, falling back to the language its recent commits are written in. The structure
      below is fixed; only the prose is translated:
@@ -158,6 +170,10 @@ Do two things at graduation:
    ```
 
    **Never write into `.github/`**, and never modify any existing CI configuration.
+
+   **Commit the two produced files** along with the round's other `.docgrad/` state. They are a deliverable, not a
+   by-product: the team copies them into `.github/` by hand, and if they are not in version control the only way to get
+   them back is to run another convergence round to graduation.
 
 2. **Always attach this passage to the report** (fill in the actual path values):
 

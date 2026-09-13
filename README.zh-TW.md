@@ -83,6 +83,9 @@ scoped 報告一律**不寫入 `.docgrad/`**——歷輪走勢只認全量 audit
 每輪挑**最低分維度**、只修那一維（收斂不是重寫），重評確認該維上升、其他維不降，然後 commit。
 所有變更落在 `docgrad/converge` branch，每輪一個 commit——中斷可續、可回退、可整批 review 後再合併。
 
+分數、claim ledger 與最近一份 scorecard 放在 `.docgrad/`，**而且該進版控**。它們是狀態不是暫存檔：
+沒有它們，重新 clone 的人覆蓋率會從零開始，也永遠偵測不到尺或語料定義在他腳下變過。
+
 `loop` 跑到三種停止條件之一：
 
 - **達標**——全維 ≥ 你在 `.docgrad.yml` 設的 targets（預設 ★4），或已判設計性天花板。

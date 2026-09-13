@@ -155,6 +155,14 @@ The authoritative operating procedure is in [reference/improve.md](../reference/
 4. Rerun the measurements to confirm that dimension's score went up and no other dimension went down.
 5. Commit on a dedicated branch (`docgrad/converge`), with the commit message including a summary of this round's scorecard; state is written to `.docgrad/` (one line appended to history, and ledger accumulates by appending).
 
+**`.docgrad/` is version-controlled, deliberately.** It holds state, not scratch: `history.jsonl` is the baseline the next
+round compares its `rubric_hash`/`corpus_hash` against, `ledger.jsonl` is the cumulative coverage the sampling rule draws
+down, `scorecard-latest.md` is what `report` reprints, and `graduation/` holds the CI deliverables the team copies into
+`.github/` by hand. Gitignoring any of them disables the feature that reads it, silently — a fresh clone would restart
+coverage at zero and never draw a comparability break, with nothing to indicate why. The one discipline it requires is
+stated in [improve.md](../reference/improve.md) §Steps in each round: do not commit a scorecard measured against untracked
+local files without saying so, because the pollution surface and the economy rating it feeds are checkout-bound.
+
 **Why scores need to be reproducible (v1.1.0, issue #12)**: in the 2026-07-13 oikos production run, re-verifying consistency the same day after closing out dropped it from ★4 to ★2 — not because the ruler changed, but because **sampling wasn't constrained**: four rounds of sampling never hit the one balance sign that was the opposite of what the code said. The fix is not to write the anchors in more detail (finer anchors still can't control "which items get sampled"), but to take sampling itself back out of the LLM's hands: the population and draw order are mechanically produced by `inventory.mjs` (stable ordering), verification results accumulate in `.docgrad/ledger.jsonl`, and the next round re-verifies old entries before sampling new ones. The report gives both the pass rate and the cumulative coverage rate — **a star rating alone doesn't reveal how large a sample it's built on**. This matches Anthropic's skill-authoring principle: operations that must be consistent should have their degrees of freedom reduced, not get more explanatory text.
 
 **Stop conditions** (stops as soon as any one holds):

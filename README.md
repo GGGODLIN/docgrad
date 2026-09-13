@@ -95,6 +95,10 @@ rewrite), re-rates to confirm that dimension rose and none of the others fell, t
 change lands on the `docgrad/converge` branch, one commit per round — interruptible, revertible,
 reviewable as a batch before you merge.
 
+The scores, the claim ledger and the latest scorecard live in `.docgrad/`, **and they belong in version
+control**. They are state, not scratch: without them a fresh clone restarts coverage at zero and can
+never detect that the rubric or the corpus definition changed under it.
+
 `loop` stops on one of three conditions:
 
 - **Targets met** — every dimension is at or above the targets in `.docgrad.yml` (★4 by default),
