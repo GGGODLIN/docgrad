@@ -1,89 +1,109 @@
-# placement — 資訊安置政策
+# placement — information placement policy
 
-> **Last updated:** 2026-07-26
+> **Last updated:** 2026-09-13
 
-決定「每一則資訊該住哪個載體」的規則。docgrad 依本檔判**落點**與**重複**，
-不評註解或 code 本身的品質（界線見 [design.md](../docs/design.md) §定位與邊界）。
+The rule for deciding "which carrier each piece of information should live in." docgrad judges **placement** and
+**duplication** against this file; it doesn't grade the quality of comments or code itself (boundary: see
+[design.md](../docs/design.md) §Positioning and boundaries).
 
-同一則事實散在 code 註解、docs、issue、wiki，代價是三重的：agent 每次都要重新判斷該信哪一份、
-人不知道新資訊該寫去哪、兩份會各自漂移到互相矛盾。政策的目的就是**先定落點，安置後只改權威處**。
+When the same fact is scattered across code comments, docs, issues, and wiki, the cost is threefold: the agent has to
+re-decide which copy to trust every time, people don't know where new information should go, and the two copies drift apart
+until they contradict each other. The point of this policy is to **fix the placement first, then only update the
+authoritative copy after that**.
 
-## 三軸取捨
+## Three trade-off axes
 
-「按 agent 查閱難度安置」只講了一半——只看取用成本，最優解會是「全部塞進 entry file」，
-但那是固定 token 稅最貴、也最容易腐爛的位置。落點由三軸共同決定：
+"Place it by how hard it is for the agent to look up" is only half the story — if you optimize for access cost alone, the
+optimal solution is "cram everything into the entry file," but that's the most expensive fixed token tax and the position
+most prone to rot. Placement is decided by three axes together:
 
-| 載體 | 取用成本 | 漂移風險 | 適合的受眾廣度 |
+| Carrier | Access cost | Drift risk | Suitable audience breadth |
 |---|---|---|---|
-| entry file（`CLAUDE.md` 等） | 零（always-loaded） | **高**（離描述對象最遠，沒人記得回頭改） | 每個任務都要 |
-| docs 索引可達的檔案 | 低（一兩跳） | 中 | 跨模組／多個任務 |
-| code 註解／docstring | 中（要先定位檔案） | **最低**（同檔同 MR，改 code 時就在眼前） | 只有改到該處才需要 |
-| spec／設計文件 | 中 | 中（定案後易成殭屍；根據與結論同住可降低） | 介面契約的當事人，以及要判斷「這能不能改」的人 |
-| issue／PR 討論 | 高（要查 API、常被關掉） | 極高 | 回溯**過程**的人（結論本身該搬進 docs） |
-| wiki／外部站 | 極高（docgrad 判為不支援） | 極高 | 非開發用途 |
+| entry file (`CLAUDE.md`, etc.) | Zero (always-loaded) | **High** (farthest from the thing it describes; nobody remembers to go back and update it) | Needed for every task |
+| Files reachable from the docs index | Low (one or two hops) | Medium | Cross-module / multiple tasks |
+| code comments/docstrings | Medium (have to locate the file first) | **Lowest** (same file, same MR — right in front of you when you touch the code) | Needed only when that spot is being changed |
+| spec/design docs | Medium | Medium (prone to going zombie once finalized; keeping the rationale with the conclusion lowers this) | Parties to the interface contract, and anyone who needs to judge "can this be changed" |
+| issue/PR discussion | High (requires querying the API, frequently closed) | Extreme | People tracing back the **process** (the conclusion itself should move into docs) |
+| wiki/external site | Extreme (docgrad treats this as unsupported) | Extreme | Non-development use |
 
-取用成本與漂移風險是反向的：**放得越近越好拿，就越容易忘記更新**。第三軸（受眾廣度）是仲裁者。
+Access cost and drift risk run in opposite directions: **the closer and easier it is to grab, the easier it is to forget to
+update.** The third axis (audience breadth) is the arbiter.
 
-## 判定規則
+## Decision rules
 
-| # | 判準 | 落點 | 反例（放錯的樣子） |
+| # | Criterion | Placement | Counter-example (what getting it wrong looks like) |
 |---|---|---|---|
-| 1 | 每個任務都要遵守 **且** 篇幅極小 | entry file | 只有改 `src/auth` 才需要的細節寫進 `CLAUDE.md`——每個任務都在付它的 token 稅 |
-| 2 | 跨模組的機制、架構、how-to；多個任務會查 | docs（索引可達） | 只寫在某個 PR 描述裡，索引到不了 |
-| 3 | 只有改到那段 code 才需要的 why／坑／不變式 | code 註解／docstring | 把它抄一份進 docs：受眾窄卻多養一個會漂移的副本 |
-| 4 | **當前結論的根據**：為什麼是 A、B 為何被否決且否決條件現在仍成立 | **它所約束的那份 spec／docs 本身**（根據與結論同住一份） | 只留在已關閉的 issue——半年後 agent 重提 B，沒人記得為什麼不行 |
-| 5 | **辯論過程**：討論串、中間方案、誰說了什麼、已失效的顧慮 | issue／PR 留痕 | 整串貼進 docs——之後每次讀那份文件都在付它的 token |
-| 6 | 非開發用途（對外文件、營運手冊） | 外部 wiki | 開發要用的權威事實住在 wiki：agent 拿不到，該搬進 repo |
+| 1 | Needed for every task **and** extremely short | entry file | Details only needed when changing `src/auth` are written into `CLAUDE.md` — every task pays its token tax |
+| 2 | Cross-module mechanisms, architecture, how-tos; looked up by multiple tasks | docs (reachable from the index) | Written only in some PR description, unreachable from the index |
+| 3 | why/gotchas/invariants needed only when changing that piece of code | code comment/docstring | Copying it into docs too: narrow audience but now maintaining an extra copy that will drift |
+| 4 | **The rationale for the current conclusion**: why A was chosen, why B was rejected, and whether the rejection condition still holds | **the spec/docs it constrains, itself** (rationale lives with the conclusion in the same document) | Left only in a closed issue — six months later the agent re-proposes B and nobody remembers why it doesn't work |
+| 5 | **The debate itself**: the discussion thread, intermediate proposals, who said what, concerns that no longer apply | issue/PR record | Pasting the whole thread into docs — every future read of that document pays for it in tokens |
+| 6 | Non-development use (external-facing docs, operations manuals) | external wiki | Authoritative facts needed for development living in a wiki: the agent can't reach them, they should move into the repo |
 
-規則 4／5 的分界只有一句話：**這條理由還會約束未來的修改嗎？** 會 → 進 spec；純歷史 → 留 issue。
-三個推論：
+The line between rules 4 and 5 comes down to one question: **will this reason still constrain future changes?** Yes → goes
+into the spec; purely historical → stays in the issue.
 
-- **根據與結論不分家。** 別把 rationale 拆成獨立的決策記錄檔——agent 讀到 spec 沒讀到那份記錄，
-  就不知道為什麼不能改；spec 改了記錄沒跟上，就留下一條已失效卻還掛著的理由。同住一份、同一個 MR
-  更新，漂移風險最低；拆兩份講同一個決定，按本政策就是「重複」失分。這與規則 3 是同一個論證
-  （理由要貼在它約束的對象旁邊），只是層級更高。
-- **根據是覆寫的，不是累積的。** 同一件事可能在多個 issue 來回調整；每次收斂就覆寫 spec 的根據段落，
-  永遠只留最新版本。演進史留在 issue 與 git history，不在 spec 裡疊層。
-- **根據要含被否決的方案。** 只寫「選 A 因為 X」擋不住重提 B；要寫「B 已否決，因為 Z——Z 現在仍成立」。
-  否決條件哪天不成立了，那段就該改寫或刪除，而不是留著誤導。
+Three corollaries:
 
-issue 是本表取用成本第二高、漂移風險最高的載體：把還在生效的約束放進去，等於讓 agent 拿不到它必須遵守的規則。
+- **Rationale and conclusion don't separate.** Don't split the rationale into a standalone decision-record file — if the
+  agent reads the spec but not that record, it won't know why something can't be changed; if the spec changes and the record
+  doesn't keep up, a reason is left hanging around after it's stopped applying. Keeping them in one document, updated in the
+  same MR, minimizes drift risk; splitting the same decision across two documents is a "duplication" deduction under this
+  policy. This is the same argument as rule 3 (the reason belongs next to the thing it constrains), just one level up.
+- **Rationale is overwritten, not accumulated.** The same matter may go back and forth across several issues; every time it
+  converges, overwrite the spec's rationale section, keeping only the latest version. The evolution history stays in issues
+  and git history, not stacked up inside the spec.
+- **The rationale must include the rejected options.** Writing only "chose A because X" doesn't stop someone re-proposing B;
+  write "B was rejected because Z — Z still holds." The day the rejection condition stops holding, that section should be
+  rewritten or deleted, not left there to mislead.
 
-規則 6 的反向用法是本政策最有價值的一條建議：**權威事實若住在 agent 拿不到的地方，先搬進來再談評分**
-（wiki／遠端源不支援的邊界見 [design.md](../docs/design.md) §定位與邊界）。
+issue is the carrier with the second-highest access cost and the highest drift risk in this table: putting a still-active
+constraint there means the agent can't reach a rule it has to follow.
 
-## 安置後就固定
+Rule 6 used in reverse is this policy's single most valuable piece of advice: **if an authoritative fact lives somewhere the
+agent can't reach, move it in before you even talk about scoring**
+(the boundary on unsupported wiki/remote sources: see [design.md](../docs/design.md) §Positioning and boundaries).
 
-- 一則資訊只有**一個**權威落點；其餘載體只留指標（連結，或一行 `見 path › symbol()`），不複述內容。
-- 更新只改權威處。複製即債務——第二份從被建立的那一刻起就開始漂移。
-- 允許的例外是**摘要**：必須一眼看得出是摘要且附權威連結（呼應一致性 ★4／★5 錨點）。
+## Placement is fixed once decided
 
-## 失分點怎麼寫
+- A piece of information has exactly **one** authoritative placement; every other carrier keeps only a pointer (a link, or a
+  one-line `see path › symbol()`), never restating the content.
+- Updates only touch the authoritative copy. Copying is debt — a second copy starts drifting the moment it's created.
+- The allowed exception is a **summary**: it must be obviously a summary at a glance and carry a link to the authoritative
+  source (this echoes the consistency ★4/★5 anchors).
 
-判定結果一律分兩類，供 audit 的一致性維度與 improve 消費：
+## How to write the deduction
 
-- **落點**：資訊在單一位置，但位置不對（依三軸判斷）。最常見的一種：spec 有結論卻沒有根據，
-  根據還躺在某個已關閉的 issue 裡（規則 4）。
-- **重複**：同一事實有兩處以上各自展開，無單一權威。
+Findings are always sorted into two categories, consumed by audit's consistency dimension and by improve:
 
-每條失分點要寫齊四欄，缺一不可：**資訊／目前落點／建議落點／理由（是哪一軸不合）**。
-沒有理由欄的建議不要提——「搬到 docs 比較好」不構成判定。
+- **placement**: the information is in a single location, but the wrong one (judged against the three axes). The most
+  common case: the spec has a conclusion but no rationale, and the rationale is still sitting in some closed issue (rule 4).
+- **duplication**: the same fact is spelled out independently in two or more places, with no single authority.
 
-## 與 token 經濟的相互約束
+Every deduction must fill all four columns, none optional: **information / current placement / suggested placement / reason
+(which axis it violates)**. Don't raise a suggestion without a reason column — "moving it to docs would be better" isn't a
+finding.
 
-任何「往上搬到 entry file」的建議都必須附固定成本影響（`inventory.entry_cost.tokens_est`），
-否則本政策會變成 token 通膨的正當理由：placement 說「往上搬比較好拿」，
-token 經濟說「上面每個任務都要付錢」，兩者必須互相約束才是完整判斷。
+## Mutual constraint with token economy
 
-## 與既有維度的關係
+Any suggestion to "move this up into the entry file" must come with its fixed-cost impact
+(`inventory.entry_cost.tokens_est`), or this policy becomes a license for token inflation: placement says "moving it up
+makes it easier to grab," token economy says "up there, every task pays for it" — only when the two constrain each other is
+the judgment complete.
 
-本政策不是新維度，是既有錨點的上位規則（形式決議見 issue #4）：
+## Relationship to the existing dimensions
 
-- 一致性 ★5「一主題一權威（其餘只留摘要＋連結）」＝本政策在 **docs 內部**的特例。
-- 正確性 ★5「權威列表 refer-to-code 不複述」＝本政策在 **docs ↔ code** 之間的特例。
-- 新鮮度：漂移風險軸就是新鮮度失分的上游成因——放錯位置的資訊注定會過期。
+This policy isn't a new dimension; it's a higher-level rule over the existing anchors (formally decided in issue #4):
 
-## 每個 repo 可覆寫
+- consistency ★5, "one topic, one authority (everything else keeps only a summary + link)" = this policy's special case
+  **within docs**.
+- correctness ★5, "authoritative lists refer to code, don't restate it" = this policy's special case **between docs and
+  code**.
+- freshness: the drift-risk axis is the upstream cause of freshness deductions — misplaced information is destined to go
+  stale.
 
-上表是預設，不是唯一解（例：有些團隊以 spec 為介面契約的唯一權威，docs 只留指標）。
-覆寫請在該 repo 的 entry file 或 docs 索引明文寫下，評分時以該 repo 的宣告為準。
+## Every repo can override this
+
+The table above is a default, not the only valid answer (example: some teams treat the spec as the sole authority for
+interface contracts, with docs keeping only pointers). Write any override explicitly in that repo's entry file or docs
+index; scoring defers to that repo's stated declaration.

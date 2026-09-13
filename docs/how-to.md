@@ -1,113 +1,97 @@
-# docgrad how-to — 常見開發任務
+# docgrad how-to — common development tasks
 
 > **Last updated:** 2026-09-13
 
-## 減少跑腳本的權限提示（選用，由使用者自行設定）
+## Fewer permission prompts when running the scripts (optional, user-configured)
 
-`audit` 每次固定跑五支腳本，`loop` 每輪都跑，每次都會問一次權限。可以在**自己的** settings
-加一條 allow 規則免問：
+`audit` always runs the same five scripts every time, and `loop` runs them every round, so each run prompts for permission once. You can add an allow rule to **your own** settings to skip the prompt:
 
 ```jsonc
-// ~/.claude/settings.json 或目標 repo 的 .claude/settings.local.json
-{ "permissions": { "allow": ["Bash(node /絕對路徑/到/docgrad/scripts/*)"] } }
+// ~/.claude/settings.json or the target repo's .claude/settings.local.json
+{ "permissions": { "allow": ["Bash(node /absolute/path/to/docgrad/scripts/*)"] } }
 ```
 
-絕對路徑用 `/docgrad` 觸發後實際跑的那一行（plugin 安裝路徑因機器而異）。
+Use the absolute path from the line that actually runs after `/docgrad` is triggered (the plugin install path differs machine to machine).
 
-**為什麼 SKILL.md 不直接放 `allowed-tools`**：Bash 規則第一個 `*` 之前的字必須逐字相符，
-而 skill 在撰寫時不知道自己的安裝絕對路徑；唯一寫得出來的可攜 pattern 是 `Bash(node *)`，
-那等於把「執行任意 node 指令」預先放行一輪——對一個只讀文件的評分工具，這個代價不值得。
-路徑只有使用者知道，所以這條規則由使用者自己加。
+**Why SKILL.md doesn't just ship `allowed-tools`**: a Bash rule must match verbatim up to its first `*`, and a skill doesn't know its own install absolute path at write time; the only portable pattern that could be written is `Bash(node *)`, which is equivalent to pre-authorizing "run any node command" — not worth the cost for a tool that only scores docs read-only. Only the user knows the path, so this rule is added by the user themselves.
 
-## 新增一個評分維度
+## Add a scoring dimension
 
-1. **錨點先行**：在 [reference/rubric.md](../reference/rubric.md) 增加維度小節（★1–★5 完整錨點＋量測方式）。錨點修改＝breaking change，見下節。
-2. 更新 rubric 的「機械訊號 → 維度對照」表；維度順序（tie-break 依據）以 rubric 表序為準。
-3. `.docgrad.yml` 的 `targets` 加新維度鍵；`scripts/lib.mjs › DEFAULTS.targets` 同步（欄位清單以 code 為權威，本檔不複述）。
-4. [reference/audit.md](../reference/audit.md) 補該維度的評分步驟；scorecard 模板加一列。
-5. 若需要新機械訊號：加 `scripts/<name>.mjs`（契約見 [design.md](design.md) §scripts 契約——零依賴、JSON→stdout、錯誤→stderr＋非零 exit、共用旗標一律走 `scripts/lib.mjs › parseArgs()`），並在 `tests/` 加對應 `*.test.mjs`。
+1. **Anchors first**: add a dimension subsection in [reference/rubric.md](../reference/rubric.md) (full ★1–★5 anchors + measurement method). Anchor changes = a breaking change, see the next section.
+2. Update the rubric's "mechanical signal -> dimension map" table; dimension order (the tie-break basis) follows the rubric table's order.
+3. Add the new dimension key to `targets` in `.docgrad.yml`; sync `scripts/lib.mjs › DEFAULTS.targets` (the field list is authoritative in code, not repeated here).
+4. Add the scoring steps for that dimension to [reference/audit.md](../reference/audit.md); add a row to the scorecard template.
+5. If a new mechanical signal is needed: add `scripts/<name>.mjs` (contract in [design.md](design.md) §Scripts contract — zero dependencies, JSON->stdout, errors->stderr with a non-zero exit code, shared flags always go through `scripts/lib.mjs › parseArgs()`), and add a corresponding `*.test.mjs` in `tests/`.
 
-## 修改 rubric 錨點的正確姿勢
+## Change a rubric anchor the right way
 
-- 錨點寫入即凍結；語意變更會使各 repo `.docgrad/history.jsonl` 的歷史分數失去可比性。
-- 非改不可時：commit message 明示 breaking、建議受影響 repo 的收斂輪從基線重新起算。
-- 純排版、補日期行不算 breaking。
+- Once written, an anchor is frozen; a semantic change makes the historical scores in every repo's `.docgrad/history.jsonl` no longer comparable.
+- When a change is unavoidable: state breaking explicitly in the commit message, and recommend affected repos restart their convergence rounds from baseline.
+- Pure formatting or adding a date line doesn't count as breaking.
 
-## 擴充量測腳本（lib.mjs）
+## Extend the measurement scripts (lib.mjs)
 
-- `scripts/lib.mjs` 是五支 CLI 的共用模組；函式契約以 code 為權威（refer-to-code，docs 不複述簽名）。
-- 共用旗標（`--root`／`--config`／`--include`）由 `parseArgs()` 一處解析：新增旗標改那裡，五支同時吃到；
-  未知旗標一律丟錯，不靜默忽略。scope 過濾語意見 `matchesScope()`，新腳本若不適用 scope（如 `coverage.mjs`、
-  `retrieval.mjs`）要在輸出的 `note` 明講為什麼。
-- YAML 解析是**兩層子集**（頂層 scalar／inline list／block list＋一層 nested map），新設定欄位不要超出這個結構。
-- 開發驗證：`node --test tests/*.test.mjs`（Node ≥18；v25 起目錄參數不可用）。
+- `scripts/lib.mjs` is the shared module for the five CLIs; function contracts are authoritative in code (refer-to-code, docs don't restate signatures).
+- Shared flags (`--root`/`--config`/`--include`) are parsed in one place, `parseArgs()`: add a new flag there and all five scripts pick it up; unknown flags always throw an error, never get silently ignored. Scope-filtering semantics are in `matchesScope()`; if a new script doesn't apply scope (like `coverage.mjs`, `retrieval.mjs`), its output `note` must explicitly say why.
+- YAML parsing is a **two-level subset** (top-level scalar / inline list / block list, plus one level of nested map); new config fields shouldn't go beyond this structure.
+- Development verification: `node --test tests/*.test.mjs` (Node >=18; directory arguments aren't available starting from v25).
 
-## 跑 skill 級 eval
+## Run the skill-level evals
 
-`tests/` 測腳本輸出，**測不到星等穩不穩**——oikos 那次一致性 ★4→★2，單元測試一個都沒紅。
-星等的可重現性由 `evals/` 負責（三個 case 與 fixture 基準值見 [evals/README.md](../evals/README.md)）：
+`tests/` tests the scripts' output — it **cannot test whether star ratings are stable** — in the oikos incident, consistency went ★4->★2 and not a single unit test turned red. The reproducibility of star ratings is the job of `evals/` (three cases and fixture baselines are in [evals/README.md](../evals/README.md)):
 
 ```bash
 claude plugin eval . --runs 5
 ```
 
-`--runs` 不是跑多次取眾數：**星等分布本身就是指標**。同一個 fixture 跑出 ★2／★2／★3
-代表該處還留著自由度，要當缺陷追。
+`--runs` isn't about running multiple times and taking the mode: **the distribution of star ratings is itself the metric**. If the same fixture comes out ★2/★2/★3, that means there's still slack there, and it should be tracked as a defect.
 
-改動 rubric 錨點、audit 抽樣流程、或任何一支腳本的判定語意後，**發版前必跑**。
-目前 `claude plugin eval` 仍是 early access，取得權限前 case 只能維持「已撰寫、未執行」的狀態，
-不要在任何報告裡填沒跑過的分數。
+After changing a rubric anchor, the audit sampling flow, or the judgment semantics of any script, **this must run before release**. `claude plugin eval` is currently early access; until access is granted, the cases can only stay in a "written, not yet run" state — don't fill in scores that were never actually run in any report.
 
-## 發版
+## Cut a release
 
-版本權威＝[.claude-plugin/plugin.json](../.claude-plugin/plugin.json) 的 `version`（semver；
-SKILL.md frontmatter 不放版號——官方規格無此欄位、無機制消費）。plugin 更新通知按此欄位比對。
+The version authority = the `version` field in [.claude-plugin/plugin.json](../.claude-plugin/plugin.json) (semver; SKILL.md's frontmatter doesn't carry a version — the official spec has no such field and nothing consumes it there). Plugin update notifications compare against this field.
 
-版號語意（docgrad 特化）：
+Version number semantics (docgrad-specific):
 
-- **major**：rubric 星等錨點的語意變更——歷史分數失去可比性，受影響 repo 的收斂輪應從基線重新起算。
-- **minor**：新維度、新量測訊號、新指令、`.docgrad.yml` 新欄位（向後相容）。
-- **patch**：修錯、文件修正、量測腳本 bug fix（不改判定語意）。
+- **major**: a semantic change to a rubric star anchor — historical scores lose comparability, and affected repos' convergence rounds should restart from baseline.
+- **minor**: a new dimension, a new measurement signal, a new command, or a new `.docgrad.yml` field (backward compatible).
+- **patch**: bug fixes, document corrections, measurement script bug fixes (no change to judgment semantics).
 
-發版步驟：
+Release steps:
 
-1. `node --test tests/*.test.mjs` 全綠。
-2. 跑 [skill 級 eval](#跑-skill-級-eval)（取得權限後為必要條件）。
-3. `claude plugin validate .` 無 error（marketplace 與 plugin manifest 都會檢）。
-4. bump `plugin.json` 的 `version`。
-5. [CHANGELOG.md](../CHANGELOG.md) 補一節（日期＋變更清單，major 要明示 breaking 與重新起算建議）。
-6. commit → merge 進 main。
-7. 在 main 上打 tag 並推：
+1. `node --test tests/*.test.mjs` all green.
+2. Run the [skill-level evals](#run-the-skill-level-evals) (required once access is granted).
+3. `claude plugin validate .` with no errors (checks both the marketplace and plugin manifest).
+4. Bump the `version` in `plugin.json`.
+5. Add a section to [CHANGELOG.md](../CHANGELOG.md) (date + change list; a major bump must explicitly state breaking and the restart-from-baseline recommendation).
+6. commit -> merge into main.
+7. Tag on main and push:
 
    ```bash
    claude plugin tag --push
    ```
 
-   官方工具的格式是 `docgrad--v<version>`（annotated tag），會先驗 `plugin.json` 與
-   marketplace entry 是否一致才建立——**這是發版 tag 的權威格式**，不要手打。
+   The official tool's format is `docgrad--v<version>` (an annotated tag); it verifies that `plugin.json` and the marketplace entry are consistent before creating it — **this is the authoritative format for release tags**, don't type it by hand.
 
-> **舊的 `vX.Y.Z` 系列**：v0.2.0～v1.3.0 每個版本都另有一個同 commit 的 lightweight tag，
-> 是 `claude plugin tag` 出現前的慣例，保留著不刪（外部連結可能指向它們）。
-> **新版本只打官方格式**，不再補舊格式——兩套並存只需要涵蓋既有歷史，不需要繼續長。
+> **The old `vX.Y.Z` series**: every version from v0.2.0 to v1.3.0 also has a lightweight tag on the same commit; that was the convention before `claude plugin tag` existed, and they're kept, not deleted (external links may point to them).
+> **New versions only get the official format**, the old format is no longer added — the two sets coexisting only needs to cover existing history, it doesn't need to keep growing.
 
-## 引用 code 的錨點慣例
+## Anchor convention for citing code
 
-docs 指到 code 時用 `` `path › symbol()` ``，不用行號——行號一改就漂移：
+When docs point to code, use `` `path › symbol()` ``, not line numbers — line numbers drift the moment they're edited:
 
-- ✅ `` `scripts/lib.mjs › DEFAULTS.targets` ``、`` `scripts/lib.mjs › parseYamlSubset()` ``
-- ❌ `scripts/lib.mjs:84`（下次編輯就失準）
+- ✅ `` `scripts/lib.mjs › DEFAULTS.targets` ``, `` `scripts/lib.mjs › parseYamlSubset()` ``
+- ❌ `scripts/lib.mjs:84` (inaccurate the next time it's edited)
 
-符號夠定位就好，不必連完整簽名。這與連結度 ★5 錨點同源，見 [reference/rubric.md](../reference/rubric.md) 連結度。
+It's enough for the symbol to locate the spot, no need for the full signature. This shares its origin with the linkage ★5 anchor, see the Linkage section in [reference/rubric.md](../reference/rubric.md).
 
-## 標註退役／被取代的文件
+## Marking retired or superseded documents
 
-docgrad 對別的 repo 評「退役機制有無標註」，自家 docs 也照做（dogfood）：
+docgrad scores other repos on "whether retirement mechanisms are marked," and its own docs do the same (dogfooding):
 
-- **整份文件被取代**：頂端加狀態橫幅 `> **狀態**：已退役 — 勿用於新功能，改用〈對應新文件〉`，
-  保留檔案讓舊連結不斷、讓讀者知道往哪去。
-- **整塊機制移除**：直接刪檔（例：`docs/superpowers/` 歷史 plan 已移除），並在**同一 commit**
-  清掉其他文件對它的殘留引用——移除不留死鏈才算乾淨。
-- **段落層級的舊敘述**：就地改寫為現況，或標「（已於 vX 移除）」，不留無標註的殭屍描述。
+- **Full document superseded**: add a status banner at the top, `> **Status:** retired — do not use for new features, use <corresponding new document> instead`, and keep the file in place so old links don't break and readers know where to go.
+- **A whole mechanism removed**: delete the file outright (example: the historical plan in `docs/superpowers/` has been removed), and in **the same commit** clean up any remaining references to it in other documents — removal isn't clean unless it leaves no dead links.
+- **Paragraph-level stale narrative**: rewrite it in place to reflect the current state, or mark it "(removed in vX)" — don't leave an unmarked zombie description.
 
-判準：留著有導引價值（舊連結多、遷移路徑重要）就標橫幅；純歷史包袱就刪乾淨。這與新鮮度的
-生命週期管理（superseded 即處理）同源，錨點見 [reference/rubric.md](../reference/rubric.md)。
+Criterion: keep it with a banner if it still has guidance value (many old links, an important migration path); if it's pure historical baggage, delete it cleanly. This shares its origin with freshness's lifecycle management (superseded docs handled promptly); the anchor is in [reference/rubric.md](../reference/rubric.md).

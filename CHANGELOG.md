@@ -1,350 +1,642 @@
 # Changelog
 
-版本權威在 [.claude-plugin/plugin.json](.claude-plugin/plugin.json) 的 `version`；本檔記錄各版變更。
-版號語意（semver，docgrad 特化）見 [docs/how-to.md](docs/how-to.md) §發版。
+Version authority is `version` in [.claude-plugin/plugin.json](.claude-plugin/plugin.json); this file records changes per version.
+For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](docs/how-to.md) §Cut a release.
+
+## 1.5.0 — 2026-09-13
+
+The repository's working language becomes English, `case-studies/` is added, and five measurement
+defects are fixed (#35-#39). **No ★1-★5 threshold moved and the set of dimensions is unchanged**, but
+`reference/rubric.md` did change in substance as well as in language, so `rubric_hash` moves and
+`report` draws a comparability break here. A second break signal, `corpus_hash`, is introduced. Read
+the comparability entry below before deciding what either break means for your history.
+
+- **Changed (language) the whole repo is now English**: `SKILL.md`, all five files under
+  `reference/`, `docs/design.md`, `docs/how-to.md`, `evals/` prompts and grader criteria, this
+  changelog, `NOTICE.md`, and the comments and test names under `scripts/`, `tests/` and
+  `templates/`. `README.md` is English; the Traditional Chinese README is kept in full as
+  [README.zh-TW.md](README.zh-TW.md). The skill's `description` keeps its Chinese trigger keywords,
+  so `/docgrad` still fires on Chinese phrasing.
+  - **Fixtures under `tests/fixtures/` and `evals/fixtures/` were deliberately left in Chinese.**
+    They are frozen corpora: their byte and token counts are asserted in the unit tests and recorded
+    as baselines in `evals/README.md`, and several of them exist specifically to exercise CJK
+    behaviour (`githubSlug()` on CJK headings, CJK-aware token estimation). Translating them would
+    silently invalidate the baselines that make the evals meaningful.
+  - **Machine-readable strings that tests assert on** (`note` fields, thrown-error text) were
+    translated together with their assertions, in the same change. 71/71 unit tests pass.
+- **Changed (comparability) `rubric_hash` f46f90cc → 21e957e5.** Three things moved it, and they are
+  not equally serious. (1) The file was translated, so the qualitative anchor text is now different
+  prose. (2) #37 changed what `correctness_sample` means and added a rule for an unmeasurable
+  correctness dimension. (3) #35's evidence about the pollution surface was added under Economy. What
+  survived untouched: **every numeric threshold, every ★1-★5 band, and the dimension order that
+  breaks ties**. On (1) the honest position is that the qualitative anchors *are* the ruler a model
+  reads, and "the same meaning in another language" is an assertion nobody can mechanically check —
+  so this is recorded as a **real** break rather than papered over with a hash alias. Consequences:
+  - **Mechanical dimensions are unaffected**: linkage, economy, and the mechanical part of freshness
+    are computed by scripts, and no model reads the rubric to produce them. Scores across this
+    version are directly comparable.
+  - **Judged dimensions** (completeness, correctness, consistency) were read off different text
+    before and after. Treat a one-star difference across this boundary as unexplained.
+  - **No baseline restart is required.** Unlike 1.0.0, the set of dimensions and every threshold are
+    unchanged, so the history stays meaningful; `report` draws the break line and you decide.
+  - A structural hash — over the thresholds and the anchor ordering rather than the file bytes —
+    would distinguish a translation from a real rubric change and remove this class of false break
+    entirely. Not implemented; it is in the repo's open issues.
+- **Changed (instruction) the convergence commit message is no longer hard-coded to Traditional
+  Chinese**: `reference/improve.md` now says to write it in the target repo's own language, taken
+  from `language:` in its `.docgrad.yml`. The message structure is unchanged.
+- **Added `case-studies/`**: measured runs with the commands to reproduce them —
+  [commander.js](case-studies/01-commander-js.md) (real agent token usage on one feature-design task,
+  before and after convergence), [docgrad on itself](case-studies/02-docgrad-self.md) (nine real
+  rounds, re-measured under one ruler), and [the eval fixtures](case-studies/03-fixtures.md)
+  (is the star rating reproducible, and does the English rubric rate the same as the Chinese one).
+  `case-studies/measure/token-usage.mjs` reads Claude Code's own subagent transcripts and reports
+  real per-run token usage.
+- **Added (README) agent-executable install and update instructions**: blocks you can paste into any
+  Claude Code session to have the agent install, update, or go from zero to a first scorecard, plus
+  docgrad's own always-on and on-invoke token cost as reported by `claude plugin details docgrad`.
+- **Fixed (#39) `links.mjs` reported `orphans: []` when it had not computed orphans at all.**
+  `reachable_ratio` correctly returned `null` under the same condition; `orphans` returned a value
+  indistinguishable from "computed, and there are none". Measured on `tj/commander.js`: all seven of
+  its documents were mutually unreachable, `index_file` was unset, and the JSON said zero orphans.
+  `orphans` is now `null` whenever reachability was not computed — no `index_file`, or a scoped run —
+  which is what `reference/audit.md` already claimed for scoped audits. **This changes the output
+  type**: anything reading `orphans.length` must handle `null`. `templates/docs-gate.mjs` now treats
+  "not computed" as its own violation rather than a silent pass.
+- **Fixed (#38) `retrieval.mjs` counted entry files twice in `marginal_tokens`** when an entry file
+  also sat on the index chain, and again when the same path was listed twice in `entry_files`. Every
+  file is now counted once, which is what `reference/rubric.md` already specified — the code was
+  wrong, not the spec. Report-only: **no star rating changes**, but scenarios whose entry file is
+  reachable from the index will report a lower `marginal_tokens` than v1.4.0 did. `max_depth` was
+  examined and left alone; it is a per-document maximum with no summation, so it could not
+  double-count.
+- **Fixed (#38) misconfigured fields failed silently.** `docs_files: PRODUCT.md` — a scalar where a
+  list belongs — made `for…of` iterate the string character by character, every character failed
+  `existsSync`, and **no files were collected with no error raised**; the only symptom was that
+  `files_total` did not move. All list fields (`docs_dirs`, `docs_files`, `entry_files`, `exclude`,
+  `src_dirs`, `scenarios`), the new boolean, and single-path fields (`index_file`) now throw an error
+  that names the field and shows the correct form. `index_file: null` remains a legitimate answer; a
+  key with nothing after the colon does not, because that parses as an empty mapping rather than as
+  null. **Repos that have been quietly collecting nothing will now fail loudly** — that is the point.
+- **Fixed (#37) the claim ledger's coverage had a hard ceiling, and worse documentation sampled
+  less.** The old rule topped the round up to `correctness_sample` *total* verifications, so
+  re-verification crowded out new draws; the fixed point sat at `2 × correctness_sample − 1` distinct
+  claims and one real repo froze at 23 of 335 (≈7%) no matter how many rounds it ran. Because every
+  `fail` was re-verified while only half the passes were, a repo with more failures got *fewer* new
+  samples — the incentive pointed the wrong way. **`correctness_sample` now means new claims drawn
+  per round, not claims verified per round.** A round verifies: every outstanding `fail`/`stale` (no
+  cap, so the pass rate stays honest), up to `floor(correctness_sample / 2)` least-recently-verified
+  passes, plus `correctness_sample` new draws that re-verification can no longer reduce. Coverage now
+  grows by `correctness_sample` every round without a ceiling. **Comparability**: no threshold moved,
+  but old pass rates were increasingly dominated by claims already known to be correct, so they read
+  high — the more so the larger the ledger. Treat a pre-change ★4 as no stronger than a post-change
+  ★4, never the reverse; coverage *trajectories* across this change are not comparable at all.
+- **Added (#37) a rule for a correctness dimension that cannot be measured.** Every correctness anchor
+  is phrased as a pass rate, and a pass rate over zero claims is undefined — which is the normal case
+  for a library whose documentation describes an API rather than file paths. Four independent runs on
+  the same fixture rated it ★3, ★3, ★1 and ★2, each defensibly. Correctness is now reported as
+  `n/a (not measurable)`, recorded as `null` in `history.jsonl`, counted as met for targets and
+  removed from the loop's working set — the same handling as a design ceiling, for a different
+  reason. The report must say what to do about it: the corpus needs claims anchored to real code
+  coordinates, which is completeness and placement work, not correctness work.
+- **Added (#36) `corpus_hash`**, alongside `rubric_hash` in every `inventory.mjs` run and in each
+  `history.jsonl` round. Changing `docs_dirs`, `docs_files`, `entry_files`, `exclude`, `index_file`
+  or `exclude_untracked` moves `files_total`, `claims_total`, the freshness denominator and the
+  pollution denominator at once — every score across that round becomes incomparable while
+  `rubric_hash` does not move a character. Until now the only defence was a hand-written line in
+  `history.jsonl`'s `notes`, and a hand-written record is exactly what docgrad marks other repos down
+  for. `report` now draws a break on this field too. Rounds recorded before this version carry no
+  `corpus_hash` and are treated as unknown, which does not block anything.
+- **Added (#35) visibility for the pollution surface's irreproducibility, and an opt-in fix.** The
+  pollution ratio is a **rated** input, and it is computed by walking the filesystem rather than
+  asking git — so an untracked local draft inside an excluded directory changes a star rating.
+  Measured on one repo at a single commit: ratio 0.1066 in a working checkout against 0.0517 in a
+  clean worktree, with the `pollution_max: 0.1` downgrade threshold sitting between them. Two people
+  can rate the same commit differently, and nothing in the output said why. Now: `inventory.mjs`
+  reports an `untracked` block (count, tokens, paths — all `null` rather than zero when git is
+  unavailable), `pollution` carries a `note` whenever a collected file is untracked, and
+  `.docgrad.yml` accepts `exclude_untracked` to measure the clean-checkout corpus instead.
+  **The default is `false`, so no existing rating changes** — a silent change to everyone's economy
+  star is precisely the failure this tool exists to catch. Untracked files are detected as the
+  complement of `git ls-files`, deliberately **not** via `--exclude-standard`, which would have
+  filtered out the gitignored draft that motivated the whole issue.
+- **Known, not fixed**: `exclude` still cannot distinguish "WIP I am ashamed of" from "content I
+  deliberately scoped out of this run". On `tj/commander.js`, scoping out translated mirrors charged
+  40.6% pollution and capped economy at ★3 while the fixed cost was a perfect 0 — the one dimension
+  the convergence loop could not move. That needs a second field and a rubric decision about what the
+  pollution surface is actually measuring; it is not addressed here.
 
 ## 1.4.0 — 2026-09-13
 
-`.docgrad.yml` 新增欄位 `docs_files`：把 `docs_dirs` 之外的**單一** markdown 檔以**一般文件**
-（`type: 'doc'`）納入語料。**★1–★5 錨點文字一字未動**，`reference/rubric.md` 未改動，
-`rubric_hash` 不變。
+`.docgrad.yml` adds a new field `docs_files`: brings **single** markdown files outside
+`docs_dirs` into the corpus as **ordinary documents** (`type: 'doc'`). **The ★1–★5 anchor text
+is unchanged, word for word**, `reference/rubric.md` is unmodified, `rubric_hash` is unchanged.
 
-- **新增（欄位）`docs_files`**：起因是 oikos 要把 root 層的 `PRODUCT.md`（4,378 tokens／12 claims）
-  與 `DESIGN.md`（8,059 tokens／3 claims）納入評分，發現 **schema 做不到**——語料收集全站只有
-  `scripts/lib.mjs › collectFiles()` 一處，五支腳本都經過它，而它只吃目錄（`docs_dirs`）與
-  單檔入口（`entry_files`／`index_file`）。三條繞路各有代價：
-  - `docs_dirs` 放單檔**會炸**：`ENOTDIR: not a directory, scandir '…/PRODUCT.md'`
-    （寫成 `PRODUCT.md/` 也一樣，`path.join` 會把尾斜線正規化掉）。
-  - `entry_files` 收得到檔，但 `inventory.mjs › fileType()` 會把它們標成 `entry`，直接進
-    `entry_cost.tokens_est`：oikos 實測 **9,037 → 21,474**，跨過 `economy.entry_cost_tiers`
-    的 20,000 → 經濟性 **★3 → ★1**。**而且那個成本是假的**：這兩份在 oikos 是條件式載入
-    （入口檔寫「UI／視覺工作開始前」才讀），而 `reference/init.md` 的判準是「agent 每次任務
-    都會自動載入」。`reference/audit.md` §經濟性 又明訂稽核者查到 `entry_cost.files` 與現實
-    不符要記失分點——等於拿一個灌水的固定成本換一個永久扣分。
-  - `docs_dirs: [docs/, ./]`：`collectFiles` 對 `docs_dirs` **不去重**（去重只在單檔那圈），
-    整棵 `docs/` 會被算兩次；repo root 底下還有 `.claude/worktrees/` 這類會浮動的目錄，
-    分數變成機器相依、不可重現。
-- **與 `entry_files` 的差別是「載入時機」，不是「重要性」**：always-loaded → `entry_files`
-  （計固定成本）；條件式載入 → `docs_files`（不計）。兩邊都收得到檔，**選錯不會報錯，
-  只會讓經濟性失真**——往上灌水或往下低報，方向相反。判準與選錯代價寫進 `reference/init.md`
-  問卷（新增為第 3 項，其後各項順延）。
-- **語意與既有單檔入口對齊**：檔案不存在 → 靜默略過（同 `entry_files`）；`docs_dirs` 已掃到的
-  檔不重複計；`exclude` 仍然優先（列進 `docs_files` 也擋不住，該檔照算污染面）；
-  **不是可達性起點**——`links.mjs` 的 roots 仍只有 `index_file`＋`entry_files`，`docs_files`
-  比照一般文件判孤兒。這是刻意的：條件式文件若沒有任何文件連到它，agent 只能靠猜找到它。
-- **順手修（lib）單檔入口指到目錄時的錯誤訊息**：原本要延到 `inventory.mjs` 讀檔才爆
-  `EISDIR: illegal operation on a directory`，看不出是哪個設定欄位寫錯。改成在 `collectFiles()`
-  當場丟「`docs_files` 只能列單一檔案，但 `docs/` 是目錄——整個目錄請改放 `docs_dirs`」，
-  `entry_files`／`index_file` 共用同一條路徑。
-- **⚠️ 跨 1.4.0 的分數可比性——只影響實際設了 `docs_files` 的 repo**。納入新檔會同時動到
-  `files_total`／`claims_total`／`tokens_est`／新鮮度的分母／孤兒與可達率的母體，該 repo 跨
-  1.4.0 的分數**不可直接比較**，基準要從導入這個欄位的那一輪重算（性質同 1.3.0 的新鮮度註記：
-  是量測範圍修正，不是品質退步）。**沒設這個欄位的 repo 輸出完全不變**——預設空陣列，
-  不必重跑 `init`。
-  - oikos 實跑（`docs_files: [PRODUCT.md, DESIGN.md]`，`--config` 外置、未改動該 repo 任何檔）：
-    `files_total` 46 → 48、`claims_total` 317 → 332、`tokens_est` 134,253 → 146,690、
-    新鮮度 `coverage_ratio` 93.48% → 89.58%（新收的兩份沒有 frontmatter 日期，分母變大）、
-    污染面 11.77% → 10.88%。**`entry_cost.tokens_est` 維持 9,037**（這正是本欄位的重點），
-    死鏈／壞錨／孤兒 0／0／0、可達率 100%、`coverage.mjs` 的 undocumented／drifted 不變。
-  - `retrieval.mjs`（report-only，不計星）也會動：新檔進了連結圖之後，原本從 `index_file`
-    連不到的 doc 可能變成可達，`marginal_tokens`／`max_depth` 隨之上修（oikos 實測
-    `lib/balance.ts` 32,655 → 41,058、`max_depth` 1 → 3）。那是「本來就存在、只是先前看不到的
-    檢索路徑」被算進來，不是成本變貴。
-- **測試**：66 → 71（收錄 `docs_dirs` 之外的單檔、去重、缺檔靜默略過、`exclude` 優先、
-  指到目錄丟錯、`type: 'doc'` 且不進 `entry_cost`、孤兒判定比照一般文件）。新增 fixture
-  `tests/fixtures/docs-files/`，已實測把 `docs_files` 那圈拿掉後這 5 條全紅。
+- **Added (field) `docs_files`**: prompted by oikos wanting to bring root-level `PRODUCT.md`
+  (4,378 tokens / 12 claims) and `DESIGN.md` (8,059 tokens / 3 claims) into scoring, which
+  revealed the **schema couldn't do it** — corpus collection has exactly one site-wide chokepoint,
+  `scripts/lib.mjs › collectFiles()`, all five scripts go through it, and it only accepts
+  directories (`docs_dirs`) and single-file entries (`entry_files`/`index_file`). Three workarounds,
+  each with a cost:
+  - Putting a single file in `docs_dirs` **blows up**: `ENOTDIR: not a directory, scandir
+    '…/PRODUCT.md'` (writing it as `PRODUCT.md/` doesn't help either — `path.join` normalizes
+    away the trailing slash).
+  - `entry_files` picks up the file, but `inventory.mjs › fileType()` labels it `entry`, sending
+    it straight into `entry_cost.tokens_est`: oikos measured **9,037 → 21,474**, crossing the
+    20,000 threshold in `economy.entry_cost_tiers` → economy **★3 → ★1**. **And that cost is
+    fake**: in oikos, these two files are conditionally loaded (the entry file says to read them
+    "before starting UI/visual work"), while `reference/init.md`'s criterion is "the agent
+    auto-loads it on every task." `reference/audit.md` §Economy also mandates that an auditor
+    who finds `entry_cost.files` mismatching reality must record it as a deduction — which
+    amounts to trading an inflated fixed cost for a permanent deduction.
+  - `docs_dirs: [docs/, ./]`: `collectFiles` does **not** dedupe across `docs_dirs` (dedup only
+    happens in the single-file loop), so the whole of `docs/` gets counted twice; and under repo
+    root there are floating directories like `.claude/worktrees/` too, so the score becomes
+    machine-dependent and non-reproducible.
+- **The difference from `entry_files` is "when it's loaded," not "how important it is"**:
+  always-loaded → `entry_files` (counts toward fixed cost); conditionally loaded → `docs_files`
+  (doesn't count). Either one will pick up the file, and **picking the wrong one won't error —
+  it will just distort economy**, inflating it in one direction or underreporting it in the
+  other. The criterion and the cost of choosing wrong are written into `reference/init.md`'s
+  questionnaire (added as item 3, with later items renumbered).
+- **Semantics aligned with the existing single-file entry**: file doesn't exist → silently
+  skipped (same as `entry_files`); files already scanned by `docs_dirs` aren't double-counted;
+  `exclude` still takes priority (listing a file in `docs_files` doesn't override it — it's still
+  counted toward the pollution surface); **it is not a reachability root** — `links.mjs`'s roots
+  are still only `index_file` + `entry_files`, and `docs_files` is judged for orphan status the
+  same way as an ordinary document. This is deliberate: if no document links to a conditional
+  document, the agent can only find it by guessing.
+- **Fixed in passing (lib)**: the error message when a single-file entry points at a directory.
+  It used to blow up only once `inventory.mjs` tried to read the file, with
+  `EISDIR: illegal operation on a directory`, giving no clue which config field was wrong. Changed
+  to throw immediately in `collectFiles()`: "`docs_files` may only list a single file, but
+  `docs/` is a directory — put the whole directory in `docs_dirs` instead," shared across
+  `entry_files`/`index_file` on the same code path.
+- **⚠️ Score comparability across 1.4.0 — affects only repos that actually set `docs_files`**.
+  Bringing in new files also moves `files_total`/`claims_total`/`tokens_est`, freshness's
+  denominator, and the population behind orphans and reachable ratio — that repo's scores
+  **cannot be directly compared** across 1.4.0; the baseline should be recalculated from the round
+  in which this field was introduced (same nature as the 1.3.0 freshness note: a measurement-scope
+  correction, not a quality regression). **Repos that don't set this field see no change in
+  output at all** — it defaults to an empty array, no need to rerun `init`.
+  - oikos actually ran it (`docs_files: [PRODUCT.md, DESIGN.md]`, `--config` external, no file in
+    that repo modified): `files_total` 46 → 48, `claims_total` 317 → 332, `tokens_est` 134,253 →
+    146,690, freshness `coverage_ratio` 93.48% → 89.58% (the two newly added files have no
+    frontmatter date, so the denominator grows), pollution surface 11.77% → 10.88%.
+    **`entry_cost.tokens_est` stays at 9,037** (which is exactly the point of this field), dead
+    links/broken anchors/orphans 0/0/0, reachable ratio 100%, `coverage.mjs`'s
+    undocumented/drifted are unchanged.
+  - `retrieval.mjs` (report-only, doesn't count toward stars) also moves: once the new files are
+    in the link graph, a doc that was previously unreachable from `index_file` may become
+    reachable, and `marginal_tokens`/`max_depth` shift upward accordingly (oikos measured
+    `lib/balance.ts` 32,655 → 41,058, `max_depth` 1 → 3). That's a retrieval path that already
+    existed but wasn't visible before now being counted — it isn't the cost getting more expensive.
+- **Tests**: 66 → 71 (collecting single files outside `docs_dirs`, dedup, silently skipping
+  missing files, `exclude` priority, throwing on a path that points to a directory, `type: 'doc'`
+  and excluded from `entry_cost`, orphan detection matching ordinary documents). Added fixture
+  `tests/fixtures/docs-files/`, and confirmed by actually removing the `docs_files` loop that all
+  5 of these go red.
 
 ## 1.3.1 — 2026-09-13
 
-發版流程與官方工具鏈對齊；純 metadata／文件，不動任何判定語意。
+Release process aligned with the official toolchain; pure metadata/docs, no change to any
+judgment semantics.
 
-- **`marketplace.json` 補 marketplace 層的 `description`**：原本只有 plugin entry 有描述，
-  marketplace 本身沒有，`claude plugin validate .` 會報 warning，別人瀏覽時看到的是空的。
-  補完後 validate 全綠無 warning。
-- **發版 tag 改用 `claude plugin tag --push`**：官方格式為 `docgrad--v<version>`（annotated），
-  建立前會驗 `plugin.json` 與 marketplace entry 是否一致，不再手打 tag。
-  - v0.2.0～v1.3.0 已補齊官方格式的 tag，指向與舊 tag**完全相同的 commit**（逐一核對過
-    `plugin.json` 的版號）。
-  - 舊的 `vX.Y.Z` lightweight 系列保留不刪（外部連結可能指向它們），但**新版本只打官方格式**
-    ——兩套並存只需涵蓋既有歷史，不需要繼續長。
-- **`docs/how-to.md` §發版**：步驟改寫為 7 步，新增 `claude plugin validate .` 為發版前置。
+- **`marketplace.json` gets a marketplace-level `description`**: previously only the plugin entry
+  had a description, the marketplace itself didn't, `claude plugin validate .` reported a
+  warning, and browsers saw an empty field. After the fix, validate is fully green with no
+  warnings.
+- **Release tags now use `claude plugin tag --push`**: official format is `docgrad--v<version>`
+  (annotated); before creating a tag it verifies `plugin.json` matches the marketplace entry, so
+  tags are no longer typed by hand.
+  - v0.2.0 through v1.3.0 have been backfilled with official-format tags pointing at **exactly
+    the same commit** as the old tags (verified one by one against `plugin.json`'s version
+    number).
+  - The old `vX.Y.Z` lightweight series is kept, not deleted (external links may point to them),
+    but **new versions only get the official format** — the two series coexisting only needs to
+    cover existing history, not keep growing.
+- **`docs/how-to.md` §Cut a release**: rewritten as 7 steps, adding `claude plugin validate .`
+  as a pre-release step.
 
 ## 1.3.0 — 2026-09-13
 
-一批 P1：都來自 oikos／dream-calm-true 的實跑痕跡，不是設想出來的。
-**★1–★5 錨點文字一字未動。**
+A batch of P1s: all come from real runs against oikos/dream-calm-true, not hypothesized.
+**The ★1–★5 anchor text is unchanged, word for word.**
 
-- **修正（#15，freshness）backfill 自我污染**：git 日期比對排除 docgrad 自己的收斂 commit
-  （`docs(docgrad):` 前綴），取最近一筆非 docgrad commit。
-  - 原狀：oikos round 1 backfill 39 檔的 `last_updated`，那個 commit 本身把這些檔的 git 日期
-    整批推到當天，round 2 於是收到 **38 筆假 mismatch**——第二輪有一半在收拾第一輪的量測殘局。
-  - **跨 1.3.0 比較新鮮度分數**：舊分數可能含假 mismatch 而偏低，屬修正不是退步。
-- **新增（#15）`date_concentration`**（report-only，不影響星等）：最大同日佔比。
-  oikos 實測 **0.68**（28/41 檔卡在 backfill 當天）——這些檔會同步老化、同步變 stale，
-  `coverage_ratio` 95% 也分辨不出誰真的久未維護。
-  它分不出「backfill」與「本來就同時改」，只提示不下判斷。
-- **新增（#14）畢業交付物**：`templates/docs-gate.mjs` ＋ `templates/docs-gate.yml`。
-  收官時複製到目標 repo 的 `.docgrad/graduation/` 並按現況設好門檻，**產出但不安裝**，
-  絕不寫入 `.github/`。Blocker #3 的「不碰 CI」是不自動改動，不是不得產出素材。
-  - 起因：沒有 gate 的收斂會自然衰減。oikos 收官**當天**就冒出新孤兒（`utm-convention.md`）
-    與缺 `last_updated` 的檔案（coverage 95.1%→90.7%），兩個月後仍在原地。散文式建議沒有
-    交付物，所以沒有人執行。
-  - `docs-gate.mjs` 刻意**不 import** `lib.mjs`（它會被複製出去、與 docgrad 安裝路徑脫鉤），
-    改成呼叫已安裝的腳本讀 JSON。`exit 1` ＝文件不合格、`exit 2` ＝環境問題，CI 分得出誰的錯。
-  - 範本明講死鏈／格式可改用更成熟的現成工具（lychee、markdown-link-check、markdownlint、Vale）；
-    docgrad 腳本的差異化價值在孤兒／可達性與入口檔 token 預算。
-- **新增（#17）`.docgrad/out-of-scope.jsonl`**：職權外發現（code 註解 stale、CI、產品決策）
-  改落機器可讀的檔案，只增不重寫，收官報告必須列出所有 `status: open` 的項目與筆數。
-  - 起因：oikos round 3 抓到 `lib/supabase/server.ts` docstring stale，只能寫進 notes，
-    兩個月後還在原地——自然語言的 notes 沒有任何東西會去追蹤它。
-- **修正（#13）`report` 的 branch 分岔**：先查 `git rev-list --count HEAD..docgrad/converge`，
-  > 0 就在報告最上方警示走勢可能不完整；標頭固定標注資料來源 `<branch> @ <short-sha>`。
-  - 起因：oikos main 的 history 停在 round 4「全維 ★4 達標」，真相在未合併的 converge branch
-    （round 5 記一致性 ★2）。在 main 跑 report 會得到過度樂觀且與事實不符的走勢，且無任何警告。
-- **放寬（#18）「一輪只修一維」**，兩個例外，都要在報告寫明：
-  - **trivial-fix 白名單**（死鏈、孤兒補索引、錯字級一致性）任何輪次可順手修——這三類有全量
-    機械驗證，不存在「改一半留矛盾」的風險，規則擋著它們只是把零風險修正推到下一輪。
-  - **小語料模式**（`tokens_est` < 10,000 或 `files` < 5）允許單輪多維。
-    dream-calm-true 的 scorecard 自己記著「install 兩法可統一，但改它會違反一輪只修一維」，
-    一個兩行的零風險修正就這樣被推了出去。
-  - 兩個例外都不豁免步驟 4 的驗證：任一維下降照樣 revert。
-- **測試**：64 → 66（docgrad commit 不算內容更新、`date_concentration` 抓 backfill 痕跡）。
+- **Fixed (#15, freshness) backfill self-pollution**: git date comparison now excludes docgrad's
+  own convergence commits (the `docs(docgrad):` prefix), taking the most recent non-docgrad
+  commit instead.
+  - Before: after oikos round 1 backfilled `last_updated` for 39 files, that very commit pushed
+    the git date of all those files to that same day, so round 2 got **38 false mismatches** —
+    half of the second round was spent cleaning up the measurement fallout from the first.
+  - **Comparing freshness scores across 1.3.0**: old scores may include false mismatches and run
+    low; that's a correction, not a regression.
+- **Added (#15) `date_concentration`** (report-only, doesn't affect the star rating): the largest
+  same-day share. oikos measured **0.68** (28/41 files stuck on the backfill day) — these files
+  will age in lockstep and go stale in lockstep; a `coverage_ratio` of 95% can't tell you who's
+  actually been neglected.
+  It can't distinguish "backfill" from "genuinely edited at the same time" — it only flags, it
+  doesn't judge.
+- **Added (#14) graduation artifact**: `templates/docs-gate.mjs` + `templates/docs-gate.yml`. At
+  closeout these get copied into the target repo's `.docgrad/graduation/`, with thresholds set to
+  match current state — **produced but not installed**, and never written into `.github/`.
+  Blocker #3's "don't touch CI" means not auto-modifying it, not that materials can't be produced.
+  - Motivation: convergence naturally decays without a gate. On the **same day** oikos closed
+    out, a new orphan appeared (`utm-convention.md`) along with a file missing `last_updated`
+    (coverage 95.1%→90.7%), and both were still there two months later. Prose recommendations
+    produce no artifact, so no one acts on them.
+  - `docs-gate.mjs` deliberately does **not** import `lib.mjs` (it gets copied out, decoupled from
+    docgrad's install path); instead it calls the already-installed scripts to read the JSON.
+    `exit 1` = docs don't meet the bar, `exit 2` = environment problem, so CI can tell whose fault
+    it is.
+  - The template explicitly notes that dead links/formatting can use more mature off-the-shelf
+    tools instead (lychee, markdown-link-check, markdownlint, Vale); docgrad's scripts add
+    differentiated value on orphans/reachability and entry-file token budgets.
+- **Added (#17) `.docgrad/out-of-scope.jsonl`**: findings outside docgrad's remit (stale code
+  comments, CI, product decisions) now land in a machine-readable file, append-only never
+  rewritten, and the closeout report must list all `status: open` items with their count.
+  - Motivation: oikos round 3 caught `lib/supabase/server.ts`'s docstring going stale, and could
+    only write it into notes — still there two months later, because natural-language notes have
+    nothing tracking them.
+- **Fixed (#13) `report`'s branch divergence**: now checks
+  `git rev-list --count HEAD..docgrad/converge` first; if it's > 0, the report warns at the top
+  that the trend may be incomplete; the header always states the data source as
+  `<branch> @ <short-sha>`.
+  - Motivation: oikos's main history stopped at round 4 ("all dimensions ★4, targets met"), but
+    the truth was on an unmerged converge branch (round 5 recorded consistency at ★2). Running
+    `report` on main gave an overly optimistic trend that didn't match reality, with no warning
+    at all.
+- **Relaxed (#18) "one dimension per round"**, with two exceptions, both of which must be noted
+  in the report:
+  - A **trivial-fix allowlist** (dead links, orphans missing from the index, typo-level
+    consistency) may be fixed opportunistically in any round — these three categories have full
+    mechanical verification, there's no risk of "fixing it halfway and leaving a contradiction,"
+    and the rule blocking them just pushes zero-risk fixes to the next round.
+  - **Small-corpus mode** (`tokens_est` < 10,000 or `files` < 5) allows multiple dimensions in one
+    round. dream-calm-true's scorecard noted to itself that "the two install methods could be
+    unified, but changing it would violate one-dimension-per-round" — and a two-line, zero-risk
+    fix got pushed out just like that.
+  - Neither exception waives step 4's verification: if any dimension drops, revert regardless.
+- **Tests**: 64 → 66 (a docgrad commit doesn't count as a content update, `date_concentration`
+  catches backfill traces).
 
 ## 1.2.0 — 2026-09-13
 
-補上 Anthropic skill authoring checklist 的 Testing 三項（#19），並修掉建 eval 時才暴露出來的
-抽樣盲點。
+Filled in the three Testing items from the Anthropic skill authoring checklist (#19), and fixed a
+sampling blind spot exposed only while building the evals.
 
-- **新增（#19）skill 級 eval suite**：`evals/`，依 `claude plugin eval` 的 `prompt.md` +
-  `graders/*.md` 佈局，三個 case 各守一種失效模式：
-  - `linkage-known` — **可重現性**：死鏈 1/12 ＝ 8.33%，依錨點只能是連結度 ★2，沒有解釋空間。
-    多次執行星等必須完全一致；出現分歧就是該處還留著自由度，當缺陷追。
-  - `planted-contradiction` — **抽樣覆蓋率**：矛盾句刻意放在錨點行的鄰句（該行本身無 code ref）。
-  - `clean-baseline` — **偽陽性**：全乾淨的 repo 不得被扣分。沒有這條，每次提高敏感度都可能悄悄
-    變成到處誤報。
-  - `evals/fixtures/` 三個迷你 repo 的機械基準值列在 `evals/README.md`，grader 的斷言建立在
-    這些實跑數字上，不是估的。
-  - **尚未執行**：`claude plugin eval` 在本機回報 early access。case 已寫好但一次都沒跑過，
-    文件不列任何分數。`case.yaml` 的欄位 schema 未公開，本 suite 刻意不寫 `case.yaml`——
-    寧可少用進階功能也不猜格式，`--runs`／`--model` 一律走 CLI 旗標。
-- **修正（lib）`extractClaimLines` 漏掉錨點行的鄰句**：這是建 `planted-contradiction` 時才發現的。
-  1.1.0 的實作只收「自己那一行帶得到 code ref」的行，但**矛盾常寫在錨點行的下一句**——
-  oikos 那條 balance 正負號正是如此，於是新機制會重演它原本要修掉的漏抽。
-  - 候選改為額外帶 `section`（所屬標題）與 `section_lines`（該段起訖行號）。
-  - `reference/audit.md` 步驟 3 明訂**驗證範圍是 `section_lines` 整段**，段內任何一句與 code
-    不符都記 `fail`，`claim_id` 指向出錯那一行。
-  - `claims_total` 的定義未變（仍是自帶 code ref 的行），累積覆蓋率的分母不受影響。
-- **發版流程**：`docs/how-to.md` §發版 加入「跑 eval」為必要步驟（取得權限後），
-  並明訂不得在報告裡填沒跑過的分數。
-- **測試**：63 → 64（section 範圍必須涵蓋鄰句、且不可越過下一個標題）。
+- **Added (#19) skill-level eval suite**: `evals/`, laid out per `claude plugin eval`'s
+  `prompt.md` + `graders/*.md` convention, three cases each guarding one failure mode:
+  - `linkage-known` — **reproducibility**: dead links 1/12 = 8.33%, and per the anchors that can
+    only be linkage ★2, with no room for interpretation. The star rating must be perfectly
+    consistent across multiple runs; any divergence gets tracked as a defect.
+  - `planted-contradiction` — **sampling coverage**: the contradicting sentence is deliberately
+    placed next to the anchor line (that line itself carries no code ref).
+  - `clean-baseline` — **false positives**: a fully clean repo must not be docked. Without this
+    check, every increase in sensitivity risks quietly turning into false positives everywhere.
+  - The mechanical baselines for the three mini-repos in `evals/fixtures/` are listed in
+    `evals/README.md`; the graders' assertions are built on these actually-measured numbers, not
+    estimates.
+  - **Not yet executed**: `claude plugin eval` reports early access locally. The cases are
+    written but have never been run once; the docs list no scores. `case.yaml`'s field schema is
+    undocumented, so this suite deliberately doesn't write `case.yaml` — better to forgo advanced
+    features than guess the format; `--runs`/`--model` are always passed as CLI flags.
+- **Fixed (lib) `extractClaimLines` missed the sentence next to an anchor line**: discovered while
+  building `planted-contradiction`. The 1.1.0 implementation only picked up lines that themselves
+  carried a code ref, but **contradictions are often written in the sentence right after the
+  anchor line** — exactly what happened with oikos's balance sign issue, so the new mechanism
+  would have reproduced the very blind spot it was meant to fix.
+  - Candidates now additionally carry `section` (the heading they belong to) and `section_lines`
+    (the start/end line numbers of that section).
+  - `reference/audit.md` step 3 now specifies that **the verification scope is the entire
+    `section_lines` range**; any sentence within the section that mismatches the code is recorded
+    as `fail`, with `claim_id` pointing at the offending line.
+  - The definition of `claims_total` is unchanged (still lines that themselves carry a code ref),
+    so the cumulative coverage denominator is unaffected.
+- **Release process**: `docs/how-to.md` §Cut a release adds "run the evals" as a required step
+  (once access is granted), and states explicitly that a report may not fill in scores that were
+  never run.
+- **Tests**: 63 → 64 (section scope must cover the neighboring sentence, and must not cross into
+  the next heading).
 
 ## 1.1.0 — 2026-09-13
 
-正確性的抽樣從「每輪由 LLM 自由挑」改成機械決定並累積落檔，history 補上版本指紋。
-**既有 ★1–★5 錨點文字一字未動**——變的是抽哪些、以及分數旁邊附什麼數字。
+Correctness sampling changed from "the LLM picks freely each round" to mechanically determined
+and accumulated to disk, with history now carrying a version fingerprint.
+**The existing ★1–★5 anchor text is unchanged, word for word** — what changes is which claims get
+sampled, and what numbers sit next to the score.
 
-- **修正（#12）正確性分數不可重現**：2026-07-13 oikos 收官後同日重驗，一致性 ★4→★2
-  （`transactions-design.md` 的 balance 正負號與 `lib/balance.ts` 相反，「前四輪抽樣未覆蓋」）。
-  根因不是錨點不夠細，是**抽樣沒被約束**——錨點再細也管不到「抽哪些」。
-  - **抽樣母體與取用序改由腳本產出**：`inventory.mjs` 新增 `totals.claims_total`
-    （fence 外、帶得到 code 座標的非標題行）與 `claim_candidates`（依 ref 數 → path → line
-    穩定排序，取前 60）。同一份語料每次跑出的順序完全相同（已加測試驗證）。
-  - **ledger 累積落檔**：`improve`／`loop` 每輪 append `.docgrad/ledger.jsonl`
-    （`claim_id`＝`<path>:<line>`、只增不重寫，重驗時 append 新一行，看得出何時壞何時修好）。
-    行號漂移時沿用舊 `claim_id` 並標 `moved_from`，避免累積覆蓋率虛增。
-  - **下一輪先重驗再抽新**：`fail`／`stale` 全部重驗，`pass` 抽半數（依 `claim_id` 排序取偶數位，
-    可重現）。`audit` **讀** ledger 但不寫——與「audit 純報告不落檔」的鐵則一致。
-  - **報告改為「星等＋覆蓋率」**：`正確性 ★4（通過率 8/8，累積覆蓋 23/68 ＝ 34%）`。
-    通過率 8/8 在覆蓋 5% 與 60% 下是兩回事，只給星等會讓讀者高估可信度。覆蓋率不影響星等。
-  - scoped audit 下**不可報**累積覆蓋率（分母被 `--include` 縮過，與全量不同義），ledger 照讀不寫。
-- **新增（#16）history 的版本指紋**：每行補 `docgrad_version` 與 `rubric_hash`
-  （`reference/rubric.md` 內容的 sha256 前 8 碼），由 `inventory.mjs` 的新 `docgrad` 區塊提供，
-  不由 LLM 自己填。`report` 在 `rubric_hash` 改變處畫可比性斷點——修掉「尺變了卻被畫成品質退步」
-  （本 repo round 9 的一致性 ★5→★4 就是這種情況，當時只能寫在 notes 的自然語言裡）。
-  缺欄位的舊紀錄視為 unknown，不阻擋。
-- **新增（lib）**：`docgradMeta()`（版本＋rubric 指紋，讀不到檔時回 `null` 不丟錯）、
-  `extractClaimLines()`、`rankClaimCandidates()`。
-- **`report`**：有 `.docgrad/ledger.jsonl` 時一併報累積覆蓋率與目前仍為 `fail`／`stale` 的宣稱。
-- **測試**：59 → 63（rubric 指紋會隨內容變、缺檔回 null、claim 行抽取排除 fence/標題、候選排序穩定）。
+- **Fixed (#12) correctness score not reproducible**: re-verifying on the same day as oikos's
+  closeout on 2026-07-13, consistency went ★4→★2 (`transactions-design.md`'s balance sign was
+  the opposite of `lib/balance.ts`, "not covered by the first four rounds' sampling"). The root
+  cause wasn't that the anchors weren't fine-grained enough — it was that **sampling was
+  unconstrained**: no matter how fine the anchors, they don't control "which ones get sampled."
+  - **The sampling population and draw order are now produced by scripts**: `inventory.mjs`
+    adds `totals.claims_total` (non-heading lines outside fences that carry code coordinates) and
+    `claim_candidates` (stably sorted by ref count → path → line, top 60 taken). The same corpus
+    produces exactly the same order every run (verified with tests).
+  - **The ledger accumulates to disk**: `improve`/`loop` append to `.docgrad/ledger.jsonl` each
+    round (`claim_id` = `<path>:<line>`, append-only, never rewritten; a new line is appended on
+    re-verification, so you can see when something broke and when it was fixed). When line
+    numbers drift, the old `claim_id` is kept and marked `moved_from`, to avoid inflating
+    cumulative coverage.
+  - **Each round re-verifies before sampling new ones**: everything `fail`/`stale` is fully
+    re-verified; half of `pass` gets resampled (taking even-indexed positions by sorted
+    `claim_id`, reproducible). `audit` **reads** the ledger but doesn't write to it — consistent
+    with the rule that "audit is a pure report, it doesn't write to disk."
+  - **The report now reads "star rating + coverage"**: `correctness ★4 (pass rate 8/8, cumulative
+    coverage 23/68 = 34%)`. A pass rate of 8/8 means something very different at 5% coverage
+    versus 60% — giving only the star rating would let readers overestimate confidence. Coverage
+    doesn't affect the star rating.
+  - Under a scoped audit, cumulative coverage **cannot be reported** (the denominator has been
+    narrowed by `--include`, so it means something different from the full-repo figure); the
+    ledger is still read, not written.
+- **Added (#16) version fingerprint in history**: every line now carries `docgrad_version` and
+  `rubric_hash` (the first 8 chars of the sha256 of `reference/rubric.md`'s contents), supplied
+  by `inventory.mjs`'s new `docgrad` block, not filled in by the LLM itself. `report` now draws a
+  comparability break wherever `rubric_hash` changes — fixing "the ruler changed, but it got
+  drawn as a quality regression" (this repo's own round 9 consistency ★5→★4 was exactly this
+  case, and at the time it could only be written up as prose in the notes). Old records missing
+  the field are treated as unknown and don't block anything.
+- **Added (lib)**: `docgradMeta()` (version + rubric fingerprint, returns `null` instead of
+  throwing when the file can't be read), `extractClaimLines()`, `rankClaimCandidates()`.
+- **`report`**: when `.docgrad/ledger.jsonl` exists, it now also reports cumulative coverage and
+  which claims are currently still `fail`/`stale`.
+- **Tests**: 59 → 63 (rubric fingerprint changes with content, missing file returns null, claim
+  line extraction excludes fences/headings, candidate ranking is stable).
 
 ## 1.0.0 — 2026-09-13
 
-> ### ⚠️ BREAKING — rubric 結構變更，歷史分數需重新起算
+> ### ⚠️ BREAKING — rubric structure changed, historical scores need to be recalculated
 >
-> 新增第六維**經濟性**。各 repo `.docgrad/history.jsonl` 的舊紀錄缺 `economy` 鍵，
-> **跨 1.0.0 的「達標與否」與總體分數不可比**，收斂輪應從基線重新起算（舊紀錄保留，不要刪）。
-> **既有五維的 ★1–★5 錨點文字一字未動**——不可比的是維度組成，不是各維自身的尺。
+> Adds a sixth dimension, **economy**. Existing `.docgrad/history.jsonl` records in each repo are
+> missing the `economy` key, and **"targets met" and overall scores are not comparable across
+> 1.0.0** — a convergence loop should restart its baseline (keep the old records, don't delete
+> them). **The existing five dimensions' ★1–★5 anchor text is unchanged, word for word** —
+> what's incomparable is the dimension composition, not each dimension's own scale.
 >
-> 升級動作：對每個已導入的 repo 重跑 `/docgrad audit` 取得六維基線；`.docgrad.yml` 不改也能跑
-> （`targets.economy` 與 `economy.*` 未設時走預設），想調目標才需補欄位。
+> Upgrade action: rerun `/docgrad audit` on each already-onboarded repo to get a six-dimension
+> baseline; `.docgrad.yml` doesn't need to change to run (when `targets.economy` and `economy.*`
+> aren't set, defaults apply) — only add fields if you want to adjust the target.
 
-- **新增（維度）經濟性 economy**（issue #11）：固定成本與污染面從 report-only 升格為計星維度。
-  - 錨點：★1 固定成本 > 20,000 tokens／★2 > 10,000 ≤ 20,000／★3 > 5,000 ≤ 10,000／
-    ★4 ≤ 5,000 且污染面 < 10%／★5 ≤ 3,000、污染面 < 10% 且入口檔 token 預算有機械 gate 強制。
-  - 降級規則：污染面 ≥ 10% 時本維上限 ★3（否則「成本低但污染重」會落在錨點縫隙裡無星可定）。
-  - 全量機械（`inventory.mjs` 的 `entry_cost.tokens_est` 與 `pollution.ratio`），不經 LLM 判斷。
-  - **★5 判設計性天花板**：要求的機械 gate 得動 CI，撞 Blocker #3 → loop 內上限 ★4，
-    與新鮮度 ★5 同一性質（`reference/improve.md` §維度封頂現有兩例）。
-  - 維度順序排最後：它與完整性方向相反（補文件會推高固定成本），同分時先讓內容維度動，
-    避免 loop 在「補了又刪」之間來回。
-- **為什麼加維度而不是只報告**：完整性獎勵覆蓋，只報不計星時 loop 每一輪的合法動作都是「補文件」，
-  沒有任何力量把不值得它的 token 的內容搬出入口檔。外部實證（多個 coding agent 在 SWE-Bench Lite
-  與 AgentBench 上的對照）指出 context 檔變長會提高成本而未必提高成功率。加維度的代價
-  （major＋歷史重算）是知情下付的——對比 0.5.0 一致性擴範圍時刻意**不**加第六維：那次改的是既有
-  維度的判定範圍，這次改的是獎勵方向本身。
-- **`improve` 的經濟性修法有護欄**：只允許「把入口檔內容搬出去、只留指路」與「把 WIP／歷史包袱移出
-  語料」。搬移必須落在 `docs_dirs` 內且從索引連得到，否則完整性／連結度會掉、驗證步驟會擋下。
-  **禁止為降成本刪掉仍然正確、仍被需要的內容**；只剩「刪了才降得下來」時判 plateau，取捨攤給使用者。
-- **`report` 的斷點處理**：缺 `economy` 鍵的輪次屬五維時代，該維畫 `—`，走勢表在該處畫斷點線並註明
-  不可與新輪次相比。
-- **設定**：`targets.economy`（預設 4）與 `economy.entry_cost_tiers`／`economy.pollution_max`
-  （預設 `[20000, 10000, 5000, 3000]`／`0.1`）。未設時走預設，既有 repo 不必重跑 `init`。
-  改門檻＝改 rubric 錨點＝歷史分數失去可比性，`init` 已明示「寧可降 target 也不要改門檻」。
-- **`init` 問卷**：`entry_files` 補上判準說明——「agent 每次任務都會自動載入」而非「重要」。
-  給人看的 GitHub 落地頁列進去就是憑空多付的固定稅（本 repo 自己踩過，見 0.6.2 的 #22）。
-- **scoped audit**：經濟性**不可在 scoped 下定星**（固定成本與污染面都是全量概念），
-  報「不適用（需全量 audit）」，不可因此打 ★1——同連結度的孤兒／可達率。
-- **測試**：59（新增 `targets.economy` 與 `economy.*` 的預設值斷言）。
+- **Added (dimension) economy** (issue #11): fixed cost and pollution surface are promoted from
+  report-only to a star-rated dimension.
+  - Anchors: ★1 fixed cost > 20,000 tokens / ★2 > 10,000 ≤ 20,000 / ★3 > 5,000 ≤ 10,000 /
+    ★4 ≤ 5,000 and pollution surface < 10% / ★5 ≤ 3,000, pollution surface < 10%, and the
+    entry-file token budget is enforced by a mechanical gate.
+  - Downgrade rule: when pollution surface ≥ 10%, this dimension is capped at ★3 (otherwise "low
+    cost but heavily polluted" would fall into a gap between anchors with no star to assign).
+  - Fully mechanical (`inventory.mjs`'s `entry_cost.tokens_est` and `pollution.ratio`), no LLM
+    judgment involved.
+  - **★5 is judged a design ceiling**: the required mechanical gate touches CI, hitting
+    Blocker #3 → capped at ★4 within loop, the same nature as freshness ★5
+    (`reference/improve.md` §Dimension cap already has two such examples).
+  - Dimension ordered last: it runs counter to completeness (adding documentation pushes fixed
+    cost up), so on a tie, content dimensions move first, avoiding loop oscillating between
+    "add it back then remove it."
+- **Why add a dimension instead of just reporting**: completeness rewards coverage, and when it's
+  report-only, every legal move for loop each round is "add more documentation," with nothing
+  pushing content not worth its tokens out of the entry file. External evidence (comparisons of
+  multiple coding agents on SWE-Bench Lite and AgentBench) shows longer context files raise cost
+  without necessarily raising success rate. The cost of adding a dimension (major bump + history
+  recalculation) was paid knowingly — contrast with 0.5.0, which deliberately did **not** add a
+  sixth dimension when widening consistency's scope: that change was to the judging scope of an
+  existing dimension, this one changes the reward direction itself.
+- **`improve`'s fix for economy has guardrails**: only "move entry-file content out, leaving just
+  a pointer" and "move WIP/historical baggage out of the corpus" are allowed. Anything moved must
+  land inside `docs_dirs` and be reachable from the index, otherwise completeness/linkage would
+  drop and the verification step blocks it. **Deleting content that's still correct and still
+  needed, just to cut cost, is forbidden**; when the only way to bring the cost down is deletion,
+  it's judged a plateau, and the trade-off is handed to the user.
+- **`report`'s handling of the break point**: rounds missing the `economy` key belong to the
+  five-dimension era; that dimension is drawn as `—`, the trend chart draws a break line there
+  with a note that it can't be compared to newer rounds.
+- **Config**: `targets.economy` (default 4) and `economy.entry_cost_tiers`/`economy.pollution_max`
+  (default `[20000, 10000, 5000, 3000]`/`0.1`). Defaults apply when unset; existing repos don't
+  need to rerun `init`. Changing the thresholds = changing the rubric anchors = historical scores
+  losing comparability; `init` already states "lower the target rather than change the
+  threshold."
+- **`init` questionnaire**: `entry_files`'s criterion now spelled out explicitly — "the agent
+  auto-loads it on every task," not "important." Listing a customer-facing GitHub landing page
+  here is a fixed tax paid for nothing (this repo stepped on this itself, see #22 in 0.6.2).
+- **scoped audit**: economy **cannot be star-rated under scope** (both fixed cost and pollution
+  surface are full-corpus concepts); it reports "not applicable (requires a full audit)," and
+  must not be marked ★1 because of that — same as linkage's orphans/reachable ratio.
+- **Tests**: 59 (added assertions for the defaults of `targets.economy` and `economy.*`).
 
 ## 0.6.2 — 2026-09-13
 
-跨專案回顧（oikos／dream-calm-true／本 repo／kdan-bpm）＋對照 Anthropic 官方 skill authoring
-best practices 後的結構修正。**不改動任何星等錨點語意，歷史分數可比性不受影響。**
+Structural fixes following a cross-project retrospective (oikos/dream-calm-true/this repo/
+kdan-bpm) and comparison against Anthropic's official skill authoring best practices.
+**No star-anchor semantics changed; historical score comparability is unaffected.**
 
-- **修正（#20）文件內部不一致**：四處仍寫「四支腳本」，`retrieval.mjs` 自 0.6.0 起是第五支。
-  - `reference/rubric.md` 評分總則第 1 條、`reference/improve.md` 兩處（落點界線、畢業建議）改為五支。
-  - `reference/audit.md` §scoped audit「四支腳本加 `--include`」是雙重錯誤：只有
-    inventory／links／freshness 吃該旗標，coverage／retrieval 刻意不吃（`SKILL.md` 已明載）。改為三支並寫明。
-- **修正（#21）引用層級與長檔目錄**：官方要求 reference 檔一律自 SKILL.md 一層可達、>100 行需附 Contents。
-  - `reference/placement.md` 原本只能經 rubric.md／audit.md 到達（第二層），而它是一致性維度
-    落點／重複的判定依據。Blocker #2 新增一句直接點名，改為一層可達。
-  - `docs/design.md`（161 行）、`reference/audit.md`（151 行）、`reference/rubric.md`（126 行）補 Contents。
-- **修正（#24）rubric 正文瘦身**：版本沿革改收進檔末 `<details>` 的「版本沿革與可比性註記」，
-  正文各維量測欄留一行指路。rubric.md 是 Blocker #2 強制必讀，每次評分都要付它的 token；
-  版本沿革只在跨版本比較分數時才需要。
-  - **錨點表與量測方式一字未動**，僅移動歷史註記。新鮮度 ★5 的 graduation-only 說明屬**現行規則**
-    （improve.md 的設計性天花板依賴它）而非沿革，故留在正文，只把可比性那句移入 details。
-  - 一併補記 0.2.0（完整性改以 coverage 為機械基礎）到沿革清單。
-- **修正（#26，lib）`collectFiles()` 漏收 `index_file`**：`index_file` 落在 `docs_dirs` 之外且不在
-  `entry_files` 時不進語料，於是被 `links.mjs` 的 roots 過濾掉（roots 只認語料內路徑），
-  **整棵只從索引可達的子樹被誤判成孤兒**，`reachable_ratio` 一併下修且無任何 note。
-  索引本來就是文件體系的一部分，改為比照 `entry_files` 補進語料。
-  - 受影響：把索引放 repo 根的 repo——這些 repo 過去的連結度星等**偏低**，失分點還會指向沒問題的檔案。
-    `index_file` 在 `docs_dirs` 內者數字不變。
-  - 回歸測試：新增 `tests/fixtures/root-index/`，已驗證未修復時為紅。
-- **修正（#22）本 repo 自身 `.docgrad.yml` 誤報固定成本**：`entry_files` 原含 `README.md`，
-  但它是 GitHub 落地頁、不進 agent context。移除後固定成本 2,823 → **1,047 tokens**（原值灌水 1.7 倍）。
-  一併補 `src_dirs: [scripts/]` 與 `scenarios:`，讓 coverage／retrieval 脫離降級模式。
-- **修正（#23）frontmatter**：`license` 改為合法 SPDX 標識 `MIT`（原值 `MIT. See NOTICE.md for
-  attribution.` 混入說明文字）；移除 `user-invocable: true`（該欄位預設即為 true，用途是設成 false）。
-  - **未採用 `allowed-tools`**：Bash 規則第一個 `*` 之前必須逐字相符，而 skill 撰寫時不知道自己的
-    安裝絕對路徑；唯一可攜的 pattern 是 `Bash(node *)`，等於預先放行任意 node 指令。改為在
-    `docs/how-to.md` 教使用者用自己的絕對路徑加規則。
-- **驗證**：`node --test tests/*.test.mjs` **59 pass**；本 repo dead 0／bad_anchors 0／orphans 0／
-  reachable 1.0、freshness coverage 1.0／stale 0／mismatch 0／污染面 0%
-  （新增的 Contents 錨點全數通過 GitHub slug 對齊後的檢查）。
+- **Fixed (#20) internal inconsistency in the docs**: four places still said "four scripts,"
+  but `retrieval.mjs` has been the fifth since 0.6.0.
+  - `reference/rubric.md`'s scoring principles item 1, and two places in `reference/improve.md`
+    (the placement boundary, graduation recommendations), changed to five.
+  - `reference/audit.md` §scoped audit's "four scripts plus `--include`" was doubly wrong: only
+    inventory/links/freshness accept that flag, coverage/retrieval deliberately don't
+    (`SKILL.md` already documented this). Changed to three, and stated explicitly.
+- **Fixed (#21) reference depth and long-file table of contents**: official guidance requires
+  every reference file to be reachable from SKILL.md in one hop, and files >100 lines need a
+  Contents section.
+  - `reference/placement.md` was previously only reachable via rubric.md/audit.md (two hops), yet
+    it's the basis for judging consistency's placement/duplication. Blocker #2 now names it
+    directly, and it's been made reachable in one hop.
+  - `docs/design.md` (161 lines), `reference/audit.md` (151 lines), and `reference/rubric.md`
+    (126 lines) got a Contents section added.
+- **Fixed (#24) trimmed the rubric body**: version history moved into a `<details>` block titled
+  "Version history and comparability notes" at the end of the file; the main body's measurement
+  column for each dimension now just points to it in one line. rubric.md is mandatory reading per
+  Blocker #2, so every scoring pass pays its token cost; version history is only needed when
+  comparing scores across versions.
+  - **The anchor table and measurement methods are unchanged, word for word** — only the
+    historical notes moved. Freshness ★5's graduation-only note remains a **current rule**
+    (improve.md's design ceiling depends on it), not history, so it stays in the main body — only
+    the comparability sentence moved into details.
+  - Also backfilled 0.2.0 (completeness moved to a mechanical basis via coverage) into the history
+    list.
+- **Fixed (#26, lib) `collectFiles()` missed `index_file`**: when `index_file` sat outside
+  `docs_dirs` and wasn't in `entry_files`, it didn't enter the corpus, so it got filtered out of
+  `links.mjs`'s roots (roots only recognize in-corpus paths), and **the entire subtree only
+  reachable from the index was misjudged as orphans**, with `reachable_ratio` also marked down
+  and no note at all. The index is inherently part of the documentation system, so it's now
+  brought into the corpus the same way `entry_files` is.
+  - Affected: repos with the index at repo root — their linkage rating was **understated** in
+    the past, with deductions even pointing at files that had no problem.
+    `index_file` inside `docs_dirs` is unaffected.
+  - Regression test: added `tests/fixtures/root-index/`, confirmed red before the fix.
+- **Fixed (#22) this repo's own `.docgrad.yml` misreported fixed cost**: `entry_files` used to
+  include `README.md`, but that's a GitHub landing page, not part of agent context. After
+  removal, fixed cost went 2,823 → **1,047 tokens** (the old value was inflated 1.7x). Also added
+  `src_dirs: [scripts/]` and `scenarios:`, taking coverage/retrieval out of degraded mode.
+- **Fixed (#23) frontmatter**: `license` changed to the valid SPDX identifier `MIT` (the old value
+  `MIT. See NOTICE.md for attribution.` mixed in explanatory text); removed `user-invocable: true`
+  (that field defaults to true anyway; it's only meant for setting to false).
+  - **`allowed-tools` not adopted**: a Bash rule must match exactly up to the first `*`, and a
+    skill doesn't know its own installed absolute path at authoring time; the only portable
+    pattern is `Bash(node *)`, which effectively pre-authorizes any node command. Instead,
+    `docs/how-to.md` teaches users to add a rule using their own absolute path.
+- **Verification**: `node --test tests/*.test.mjs` **59 pass**; this repo's dead 0/bad_anchors
+  0/orphans 0/reachable 1.0, freshness coverage 1.0/stale 0/mismatch 0/pollution surface 0%
+  (the newly added Contents anchors all pass the check after aligning with GitHub slug rules).
 
 ## 0.6.1 — 2026-09-05
 
-- **修正（links／lib）**：三個一族的壞錨誤報，全部源自 slug 產生與 GitHub 不一致。在 kdan-bpm 實測
-  18 筆 `bad_anchors` 於修正後歸零（dead 0／orphans 0／reachable 1.0 不變）。
-  - `githubSlug()` 逐個空白換一個 dash（原用 `\s+` 收成單一 dash）。標點被移除後留下的相鄰空白，
-    GitHub 會產生雙 dash：`## 狀態圖例 (status / sot_level legend)` → `狀態圖例-status--sot_level-legend`。
-  - `extractHeadings()` 只移除**強調用**的底線，詞內底線是字面值（GFM 規則）。原本一律移除，
-    `sot_level` 被算成 `sotlevel`，指向該節的連結全成壞錨。
-  - `extractHeadings()` 納入顯式錨 `<a id="x">`／`<a name='x'>`（含前置其他屬性）。長期連結常改用顯式錨，
-    原本只認 `#` 標題，於是全被誤報。
-- **修正（inventory）**：`entry_cost` 對 symlink 別名去重——多個 entry 名指向同一實體檔時
-  （如 `CLAUDE.md -> AGENTS.md`）agent 只載入一份，逐名相加會讓固定成本翻倍（實測 5,792 vs 真值 2,896）。
-  `files` 仍列出全部名稱，新增 `symlink_aliases` 標出被折疊的別名。
-- **文件**：`reference/audit.md`／`reference/rubric.md` 移除「`cjk_uncertain` 壞錨先人工確認再計入」的
-  例外——該例外原是為了掩蓋上述 bug，修好後壞錨一律計入，`cjk_uncertain` 降為提示欄位。
-- **測試**：54 → 58（slug 雙 dash、詞內底線、顯式錨、symlink 去重各一）。
+- **Fixed (links/lib)**: a family of three false broken-anchor reports, all traced to slug
+  generation being inconsistent with GitHub. Measured against kdan-bpm, 18 `bad_anchors` went to
+  zero after the fix (dead 0/orphans 0/reachable 1.0 unchanged).
+  - `githubSlug()` now converts each run of whitespace to one dash (previously collapsed `\s+`
+    into a single dash). Adjacent whitespace left behind after punctuation is stripped produces a
+    double dash on GitHub: `## 狀態圖例 (status / sot_level legend)` →
+    `狀態圖例-status--sot_level-legend`.
+  - `extractHeadings()` now only strips underscores used **for emphasis**; underscores inside a
+    word are literal (per GFM rules). It used to strip them unconditionally, so `sot_level` got
+    computed as `sotlevel`, breaking every link to that section.
+  - `extractHeadings()` now recognizes explicit anchors `<a id="x">`/`<a name='x'>` (including
+    ones with other attributes before them). Long-lived links often switch to explicit anchors;
+    previously only `#` headings were recognized, so all of these were misreported.
+- **Fixed (inventory)**: `entry_cost` now dedupes symlink aliases — when multiple entry names
+  point at the same physical file (e.g. `CLAUDE.md -> AGENTS.md`), the agent only loads it once,
+  but summing per name doubled the fixed cost (measured 5,792 vs a true value of 2,896). `files`
+  still lists every name; a new `symlink_aliases` marks the collapsed aliases.
+- **Docs**: `reference/audit.md`/`reference/rubric.md` removed the exception "manually confirm
+  `cjk_uncertain` broken anchors before counting them" — that exception existed only to paper
+  over the bug above; now that it's fixed, broken anchors are always counted, and
+  `cjk_uncertain` is downgraded to an informational field.
+- **Tests**: 54 → 58 (one each for the double-dash slug, in-word underscores, explicit anchors,
+  symlink dedup).
 
 ## 0.6.0 — 2026-09-04
 
-- **新增（腳本）**：第五支量測腳本 `scripts/retrieval.mjs`——可回溯性＋邊際成本，report-only（不計星）。
-  對 `.docgrad.yml` 新欄位 `scenarios:`（代表性 code 路徑清單）逐條算 `marginal_tokens`（entry_files＋索引鏈
-  ＋錨定 doc 的 tokens，各檔只算一次）、`max_depth`（從 `index_file` BFS 到最遠一份錨定 doc 要幾跳）、
-  `fan_in`（錨定它的 doc 數）、`code_pointer`（該路徑的 code 有沒有指回任一 docs）、`churn_commits`
-  （近 90 天 commit 數，加權指出「稅最重」的 scenario）；沒有 `scenarios:` 時仍給 `areas`
-  （`src_dirs` 各一級子目錄的 `code_pointer`／`fan_in`）與 `index_hotness`（`index_file`／`entry_files`
-  近 90 天 commit 數 vs 全部 docs 中位數的 `ratio`＋`top5`）。不吃 `--include`（理由同 `coverage.mjs`，
-  可回溯性是全量索引/檢索概念）。新增純函式 `lib.mjs › extractCodeRefs()`：抽 backtick 內以 `src_dirs`
-  前綴開頭的路徑、`` `path › symbol` `` 形式、裸檔名（比 basename），供 `retrieval.mjs`／`inventory.mjs`
-  共用，不寫死任何目錄名。祖先方向的命中（doc 指到 query 的上層目錄）只認**嚴格深於所屬 `src_dirs`**
-  的 ref——泛指整個 app 的提及不算「管這個檔的 doc」，否則同一份 doc 會是每條 scenario 的固定命中。
-- **新增（欄位）**：`inventory.mjs` 每檔輸出 `structure: {h2: [{title, tokens_est}], rules: {count,
-  median_chars, p90_chars, anchored_ratio}}`（`rules.pattern` 新設定鍵，預設 `**MUST`，判定：清單項
-  含該字串即算規則行；`anchored`＝該行本身可用 `extractCodeRefs` 抽到座標）；`totals` 加
-  `rules_total`／`rules_anchored_ratio`（全檔彙總，非逐檔平均）。無 H2 的檔 `structure` 仍存在但為空。
-- **修正（假象）**：`freshness.mjs` 的 `freshness.convention` 改吃逗號/`+` 分隔的多值（`frontmatter,
-  heading-line`），`extractClaimedDate` 依序嘗試、第一個抽到的為準；輸出 `convention` 一律回傳實際採用
-  的清單（原本單值也是字串，此為輸出形狀變更，非量測語意變更——`coverage_ratio` 判法本身未動）。新增
-  `freshness.heading_field`（heading-line 用的行內關鍵字），只設 `field` 且 convention 含 heading-line
-  時 fallback 用 `field`（相容舊設定）。修掉「一次只認一種日期慣例，混用慣例的 repo coverage_ratio
-  顯示假性偏低、每輪要人工扣除」的量測假象（動機：kdan-workforce 實測 `docs/superpowers/specs/` 用
-  frontmatter、`docs/integrations/`+`docs/runbooks/` 用 heading-line，單值只認得到約 76%）。
-- **相容性**：本版**非 rubric 錨點變更**——★1–★5 判定門檻一字未動，歷史分數可比性不受影響
-  （Token 經濟＋新增的「可回溯性」小節皆 report-only）。`.docgrad.yml` 新欄位（`scenarios`／`rules`／
-  `freshness.heading_field`）全部可選，未設定時四支既有腳本輸出不變；`freshness.convention` 單值行為
-  不變。既有 repo 不需重跑 `/docgrad init` 即可繼續用舊設定，想用新訊號才需要補欄位。
+- **Added (script)**: fifth measurement script `scripts/retrieval.mjs` — traceability and
+  marginal cost, report-only (doesn't count toward stars). For each entry in `.docgrad.yml`'s new
+  `scenarios:` field (a list of representative code paths), it computes `marginal_tokens`
+  (entry_files + index chain + anchoring doc tokens, each file counted once), `max_depth` (how
+  many hops a BFS from `index_file` needs to reach the farthest anchoring doc), `fan_in` (how
+  many docs anchor it), `code_pointer` (whether that path's code points back to any doc), and
+  `churn_commits` (commit count over the past 90 days, weighted to flag the "most heavily taxed"
+  scenario); when there's no `scenarios:`, it still gives `areas` (`code_pointer`/`fan_in` per
+  top-level subdirectory of `src_dirs`) and `index_hotness` (`index_file`/`entry_files`'s
+  90-day commit count `ratio` against the median across all docs, plus `top5`). Doesn't accept
+  `--include` (same reasoning as `coverage.mjs` — traceability is a full-index/retrieval concept).
+  Added the pure function `lib.mjs › extractCodeRefs()`: extracts backtick-wrapped paths that
+  start with a `src_dirs` prefix, `` `path › symbol` `` form, and bare filenames (matched against
+  basename), shared by `retrieval.mjs`/`inventory.mjs`, with no directory name hardcoded. A hit in
+  the ancestor direction (a doc pointing at a parent directory of the query) only counts a ref
+  **strictly deeper than the owning `src_dirs`** — a mention of the whole app in general doesn't
+  count as "a doc that governs this file," otherwise the same doc would be a fixed hit for every
+  scenario.
+- **Added (field)**: `inventory.mjs` now outputs `structure: {h2: [{title, tokens_est}], rules:
+  {count, median_chars, p90_chars, anchored_ratio}}` per file (`rules.pattern` is a new config key,
+  default `**MUST`; a list item containing that string counts as a rule line; `anchored` means
+  that line itself yields coordinates via `extractCodeRefs`); `totals` adds `rules_total`/
+  `rules_anchored_ratio` (aggregated across all files, not a per-file average). Files with no H2
+  still get a `structure`, just empty.
+- **Fixed (measurement artifact)**: `freshness.mjs`'s `freshness.convention` now accepts multiple
+  values separated by comma/`+` (`frontmatter, heading-line`), and `extractClaimedDate` tries them
+  in order, taking the first one it extracts; the output `convention` always returns the actual
+  list adopted (previously a single value was also a string — this is an output shape change, not
+  a measurement semantics change — `coverage_ratio`'s judgment logic itself is unchanged). Added
+  `freshness.heading_field` (the in-line keyword used for heading-line); when only `field` is set
+  and convention includes heading-line, it falls back to using `field` (backward compatible with
+  old config). Fixes the measurement artifact where "only one date convention is recognized at a
+  time, so repos mixing conventions show a falsely low `coverage_ratio`, requiring manual
+  deduction every round" (motivation: kdan-workforce measured that
+  `docs/superpowers/specs/` uses frontmatter while `docs/integrations/`+`docs/runbooks/` use
+  heading-line, and a single value only recognized about 76%).
+- **Compatibility**: this version is **not a rubric anchor change** — the ★1–★5 judgment
+  thresholds are unchanged, word for word, and historical score comparability is unaffected
+  (both the Token Economy and the new "traceability" section are report-only). The new
+  `.docgrad.yml` fields (`scenarios`/`rules`/`freshness.heading_field`) are all optional; when
+  unset, the four existing scripts' output is unchanged; `freshness.convention`'s single-value
+  behavior is unchanged. Existing repos don't need to rerun `/docgrad init` to keep using the old
+  config — only add fields to use the new signals.
 
 ## 0.5.0 — 2026-07-26
 
-- **新增**：`reference/placement.md` —— 資訊安置政策。三軸取捨（取用成本／漂移風險／受眾廣度）決定
-  每類資訊的權威落點：全塞 entry file 是取用成本最低但 token 稅最貴、最易腐爛的解，故以受眾廣度仲裁。
-  六條判定規則含決策資訊的切法——**當前結論的根據寫進它所約束的那份 spec 本身**（根據與結論不分家、
-  覆寫而非累積、要含被否決方案與否決條件），辯論過程才留 issue。（issue #4）
-- **量測範圍變更（非錨點變更）**：一致性維度的判定範圍從「docs 內部」擴到 **docs ↔ code 註解／spec**
-  的落點與重複；失分點分 `[矛盾]`／`[重複]`／`[落點]` 三類。★1–★5 錨點文字未動，但原本 ★5 的 repo
-  可能因跨載體重複而下修——跨 0.5.0 比較一致性分數時報告要註明範圍已擴大（同 0.2.0 完整性改以
-  coverage 為機械基礎的性質）。決議走擴充維度而非新增第六維：加維度＝rubric 結構變更＝major＋
-  所有 repo 歷史分數重新起算。
-- **收斂紀律**：`improve`/`loop` 選中一致性時，一輪只修一類失分（`[矛盾]` → `[重複]` → `[落點]`）。
-  落點類**只動 docs 範圍內的檔案**——要搬進 code 註解或其他 source 檔的建議一律不自動執行
-  （超出「只 commit docs 變更」的 branch 紀律，且腳本驗證不到 code 註解），改列入報告的
-  「建議由人處理」清單；因此卡住時判設計性天花板而非 plateau。
-- **定位**：`docs/design.md` 補「資訊落點 vs code 品質」的界線——為判落點會讀 code 註解，
-  但不評註解品質，否則一致性維度會滑成 code review。
+- **Added**: `reference/placement.md` — information placement policy. Three trade-off axes
+  (access cost / drift risk / audience breadth) decide the authoritative home for each category of
+  information: putting everything in the entry file is the lowest access cost but the most
+  expensive in token tax and the most prone to rot, so audience breadth arbitrates. Six decision
+  rules, including how to cut decision-relevant information — **the rationale for a current
+  conclusion is written into the spec it constrains**, not into a separate log (rationale and
+  conclusion travel together, overwritten rather than accumulated, and must include the rejected
+  alternatives and the conditions that rejected them); debate history stays in an issue. (issue #4)
+- **Measurement scope change (not an anchor change)**: consistency's judgment scope widens from
+  "within docs" to **docs ↔ code comments/spec** placement and duplication; deductions are split
+  into `[contradiction]`/`[duplication]`/`[placement]`. The ★1–★5 anchor text is unchanged, but a
+  repo previously at ★5 may get marked down due to cross-carrier duplication — when comparing
+  consistency scores across 0.5.0, the report should note the scope has widened (same nature as
+  0.2.0's move of completeness to a mechanical coverage basis). Decided to widen the dimension
+  rather than add a sixth: adding a dimension = rubric structure change = major bump + recalculating
+  every repo's history.
+- **Convergence discipline**: when `improve`/`loop` picks consistency, one round fixes one class of
+  deduction (`[contradiction]` → `[duplication]` → `[placement]`). For the placement class, **only
+  files within docs scope are touched** — recommendations to move content into code comments or
+  other source files are never auto-executed (beyond the "commit only docs changes" branch
+  discipline, and scripts can't verify code comments anyway); instead they go into the report's
+  "needs human handling" list, so getting stuck here is judged a design ceiling, not a plateau.
+- **Positioning**: `docs/design.md` adds the boundary between "information placement" and "code
+  quality" — judging placement means reading code comments, but not evaluating comment quality,
+  otherwise the consistency dimension would slide into a code review.
 
 ## 0.4.0 — 2026-07-26
 
-- **新增（指令）**：`audit <scope>`／`audit --dim <維度>` —— scoped audit，限定目錄／glob／主題或單一
-  維度。一律純報告且**絕不寫入 `.docgrad/`**（scoped 分數混進 history 會毀掉跨輪可比性）；各維度在
-  範圍限定下的效力與報告標頭格式見 `reference/audit.md` §scoped audit。（issue #2）
-- **新增（CLI）**：四支腳本的共用旗標改由 `scripts/lib.mjs › parseArgs()` 一處解析，新增
-  `--include <glob>`（可重複／逗號分隔，支援 `**`／`*`／`?` 與目錄前綴）與 `--config <file>`
-  （設定檔外置——文件源本身不能落檔時用）。未知旗標一律丟錯，不再靜默忽略。（issue #2、#3 建議 2）
-- **量測語意**：`links.mjs` 在 scope 限定時孤兒回 `[]`、可達率回 `null`（可達性是全量索引概念，
-  範圍一縮就失真，不得因此扣星）；`coverage.mjs` 刻意不吃 `--include`（docs 端一縮會把範圍外的提及
-  誤判成 undocumented），並在 `note` 說明；`inventory.mjs` 的 `entry_cost.files` 改列實際計入的 entry 檔。
-- **相容性**：不加旗標時四支輸出除多一個 `scope: null` 欄位外與 0.3.0 相同；rubric 錨點未動。
+- **Added (command)**: `audit <scope>`/`audit --dim <dimension>` — scoped audit, limited to a
+  directory/glob/topic or a single dimension. Always pure report and **never writes to
+  `.docgrad/`** (mixing scoped scores into history would wreck cross-round comparability); each
+  dimension's validity and report header format under a limited scope is in `reference/audit.md`
+  §scoped audit. (issue #2)
+- **Added (CLI)**: shared flags for the four scripts are now parsed in one place,
+  `scripts/lib.mjs › parseArgs()`, adding `--include <glob>` (repeatable/comma-separated,
+  supports `**`/`*`/`?` and directory prefixes) and `--config <file>` (external config — used when
+  the doc source itself can't hold files on disk). Unknown flags always throw, no longer silently
+  ignored. (issue #2, #3 suggestion 2)
+- **Measurement semantics**: `links.mjs` returns `[]` for orphans and `null` for reachable ratio
+  when scope is limited (reachability is a full-index concept and gets distorted the moment scope
+  narrows — it must not be docked for that); `coverage.mjs` deliberately doesn't accept
+  `--include` (narrowing the docs side would misjudge out-of-scope mentions as undocumented), and
+  says so in `note`; `inventory.mjs`'s `entry_cost.files` now lists the entry files actually
+  counted.
+- **Compatibility**: without flags, the four scripts' output is the same as 0.3.0 except for one
+  added `scope: null` field; rubric anchors unchanged.
 
 ## 0.3.0 — 2026-07-26
 
-- **新增（loop 行為）**：`reference/improve.md` 新增**設計性天花板**——某維的下一星錨點落在 Blocker
-  禁區時直接判該維「docgrad 範圍內已收斂」、移出挑維度與達標判定，並在畢業建議點名它。修掉
-  「新鮮度 ★5 要 CI gate ／ Blocker #3 不碰 CI」的結構性矛盾被誤報成 plateau 的問題（issue #1）。
-- **文件（適用邊界）**：README／SKILL.md／`docs/design.md` 明示前提——本地 markdown 檔案樹＋
-  可寫入 `.docgrad.yml`；git 非硬需求（無 git 時新鮮度降級為 claimed-only）；wiki／遠端文件源不支援，
-  該場景可獨立借用 rubric 五維錨點做人工評分（issue #3 之邊界文件化部分）。
-- **註記（非錨點變更）**：rubric 新鮮度 ★5 標註為畢業後範圍（graduation-only）。
-  ★1–★5 判定門檻一字未動，歷史分數可比性保留。
+- **Added (loop behavior)**: `reference/improve.md` adds the **design ceiling** — when a
+  dimension's next star anchor falls inside a Blocker's forbidden zone, that dimension is
+  directly judged "converged within docgrad's remit," removed from dimension selection and
+  targets-met judgment, and named in the graduation recommendation. Fixes the structural
+  contradiction of "freshness ★5 requires a CI gate / Blocker #3 says don't touch CI" being
+  misreported as a plateau (issue #1).
+- **Docs (applicability boundary)**: README/SKILL.md/`docs/design.md` now state the precondition
+  up front — a local markdown file tree with a writable `.docgrad.yml`; git isn't a hard
+  requirement (without git, freshness degrades to claimed-only); wiki/remote doc sources aren't
+  supported, though that scenario can independently borrow the rubric's five-dimension anchors for
+  manual scoring (the boundary-documentation part of issue #3).
+- **Note (not an anchor change)**: the rubric marks freshness ★5 as graduation-only scope.
+  The ★1–★5 judgment thresholds are unchanged, word for word; historical score comparability is
+  preserved.
 
 ## 0.2.0 — 2026-07-13
 
-- **新增**：第四支量測腳本 `scripts/coverage.mjs`（覆蓋漂移）——git 比對每個 code 區域與提及它的
-  docs 的時滯，機械偵測 `undocumented`／`drifted` 區域，餵給完整性定星。修掉「新功能長在既有
-  模組內部而沒寫文件時，完整性 ★5 虛掛不動」的漏洞。
-- **設定**：`.docgrad.yml` 新增 `src_dirs` 與 `coverage:`（`drift_after_days: 30`、`min_commits: 3`）。
-  既有 repo 需重跑 `/docgrad init` 或手動補 `src_dirs`；未設定時完整性降級為純 LLM 對照（同舊版行為）。
-- **量測方法變更（非錨點變更）**：rubric 完整性「量測」行改以 coverage 輸出為機械基礎；
-  星等錨點一字未動，歷史分數可比性保留。
-- **發佈**：plugin 化（`.claude-plugin/plugin.json`＋`marketplace.json`），支援
-  `/plugin marketplace add redtear1115/docgrad` 安裝與版本更新通知。
+- **Added**: fourth measurement script `scripts/coverage.mjs` (coverage drift) — git-compares each
+  code area against the docs mentioning it, mechanically detecting `undocumented`/`drifted`
+  areas, and feeds that into completeness's star rating. Fixes the hole where "a new feature grows
+  inside an existing module with no docs written, and completeness ★5 stays falsely pinned."
+- **Config**: `.docgrad.yml` adds `src_dirs` and `coverage:` (`drift_after_days: 30`,
+  `min_commits: 3`). Existing repos need to rerun `/docgrad init` or manually add `src_dirs`; when
+  unset, completeness degrades to pure LLM comparison (same as the old behavior).
+- **Measurement method change (not an anchor change)**: the rubric's completeness "measurement"
+  line now uses coverage output as its mechanical basis; the star anchors are unchanged, word for
+  word, and historical score comparability is preserved.
+- **Release**: turned into a plugin (`.claude-plugin/plugin.json` + `marketplace.json`), supporting
+  install and version-update notifications via
+  `/plugin marketplace add redtear1115/docgrad`.
 
 ## 0.1.0 — 2026-07-12
 
-- 首發：五維 rubric（完整性/正確性/新鮮度/連結度/一致性）＋token 經濟報告；
-  `init · audit · improve · loop · report` 五指令；三支零依賴量測腳本（inventory/links/freshness）。
+- Initial release: five-dimension rubric (completeness/correctness/freshness/linkage/consistency)
+  + token economy report; five commands `init · audit · improve · loop · report`; three
+  zero-dependency measurement scripts (inventory/links/freshness).

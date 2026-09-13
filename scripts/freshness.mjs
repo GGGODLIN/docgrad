@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// freshness.mjs — 日期訊號覆蓋率＋git log 真實日期對照
-// 用法: node freshness.mjs [--root <repo>] [--config <file>] [--include <glob>]；JSON → stdout。
-// env DOCGRAD_TODAY=YYYY-MM-DD 可覆寫「今天」（測試可重現）。
+// freshness.mjs — date-signal coverage + comparison against real git log dates
+// Usage: node freshness.mjs [--root <repo>] [--config <file>] [--include <glob>]; JSON -> stdout.
+// env DOCGRAD_TODAY=YYYY-MM-DD can override "today" (for reproducible tests).
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -9,15 +9,18 @@ import { loadConfig, collectFiles, parseArgs, fail, extractClaimedDate, parseFre
 
 const MISMATCH_TOLERANCE_DAYS = 7;
 
-// docgrad 自己的收斂 commit 不算「內容有更新」——improve/loop 的 commit message 一律是
-// `docs(docgrad): 第 N 輪收斂 …`（見 reference/improve.md 步驟 5）。
-// 不排除的話會自我污染：round 1 backfill 39 檔的 last_updated，那個 commit 本身把這些檔的
-// git 日期整批推到當天，於是 round 2 收到 38 筆假 mismatch（oikos 2026-07-13 實際發生）。
+// docgrad's own convergence commits don't count as "content was updated" — improve/loop's commit
+// message always follows the pattern `docs(docgrad): round N convergence …` (see
+// reference/improve.md step 5).
+// Without this exclusion the process self-pollutes: round 1 backfills last_updated on 39 files,
+// and that commit itself pushes those files' git dates to that same day, so round 2 sees 38 false
+// mismatches (this actually happened on oikos on 2026-07-13).
 const DOCGRAD_COMMIT_PREFIX = 'docs(docgrad):';
 
 function gitDate(root, rel) {
   try {
-    // 取最近一筆**非 docgrad** commit 的日期：一次多撈幾筆再過濾，避免逐筆呼叫 git。
+    // Get the date of the most recent **non-docgrad** commit: fetch a handful at once and filter,
+    // to avoid calling git one commit at a time.
     const out = execFileSync('git', ['log', '-20', '--format=%as%x00%s', '--', rel], {
       cwd: root,
       encoding: 'utf8',
@@ -29,15 +32,17 @@ function gitDate(root, rel) {
       return { date, subject };
     });
     const authored = entries.find((e) => !e.subject.startsWith(DOCGRAD_COMMIT_PREFIX));
-    // 全部 20 筆都是 docgrad commit（極少見）→ 退回最舊那筆，寧可偏保守也不要回 null。
+    // All 20 are docgrad commits (rare) -> fall back to the oldest one; better to be conservative than to return null.
     return (authored ?? entries.at(-1)).date || null;
   } catch {
     return null;
   }
 }
 
-// 日期訊號的鑑別力：同一天佔比過高＝大批 backfill 的痕跡，這些檔會同步老化、同步變 stale，
-// coverage_ratio 再高也分辨不出「哪份文件真的久未維護」。只報告，不影響 coverage_ratio 判法。
+// Discriminative power of the date signal: a too-high share of the same day is a sign of a large
+// backfill — those files will age and go stale in lockstep, and no matter how high
+// coverage_ratio is, it can't tell which document is genuinely unmaintained. Report-only; doesn't
+// affect how coverage_ratio is judged.
 function dateConcentration(claimedDates) {
   if (!claimedDates.length) return { max_same_day_ratio: 0, date: null, files: 0 };
   const counts = new Map();
@@ -71,7 +76,8 @@ try {
     `${JSON.stringify(
       {
         scope: include.length ? include : null,
-        // 實際採用的慣例清單（單值也回陣列；多值時依序嘗試，見 lib.mjs › extractClaimedDate）。
+        // the actual convention list applied (a single value is still returned as an array;
+        // with multiple values they're tried in order, see lib.mjs's extractClaimedDate).
         convention: parseFreshnessConventions(config.freshness.convention),
         files_total: results.length,
         files_with_signal: withSignal.length,

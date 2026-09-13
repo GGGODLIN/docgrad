@@ -1,18 +1,23 @@
-這個 fixture 的機械訊號是固定的，可直接以腳本重跑核對：
+This fixture's mechanical signals are fixed and can be verified directly by rerunning the scripts:
 
 ```
 total_links 12, dead_links 1, bad_anchors 0, orphans 0, reachable_ratio 1.0
 ```
 
-死鏈比例 = 1/12 = 8.33%。依 rubric 連結度錨點，這**唯一**落在 ★2
-（「死鏈 2–10%」）：★3 要求失效 ≤2%、★4 要求零死鏈，都不滿足。
+Dead-link ratio = 1/12 = 8.33%. Per the rubric's linkage star anchors, this falls **uniquely**
+into ★2 ("dead links 2-10%"): ★3 requires failures ≤2%, ★4 requires zero dead links —
+neither is satisfied.
 
-必須全部成立：
+All of the following must hold:
 
-1. 連結度判為 **★2**。判成 ★1、★3 或更高都算錯——錨點在這個數字上沒有解釋空間。
-2. 失分點明確點出 `docs/guide.md` 指向 `./install.md` 的死鏈。
-3. **沒有**把 `docs/orphan.md` 之類不存在的孤兒列進失分點（本 fixture 零孤兒）。
-4. 新鮮度不因這個 fixture 被扣到 ★3 以下（日期訊號 100% 覆蓋、零 stale、零 mismatch）。
+1. Linkage is judged **★2**. ★1, ★3, or higher all count as wrong — the anchor leaves no room
+   for interpretation at this number.
+2. The deductions explicitly name the dead link from `docs/guide.md` to `./install.md`.
+3. `docs/orphan.md` and the like are **not** listed as an orphan deduction (this fixture has zero
+   orphans).
+4. Freshness is not docked below ★3 because of this fixture (date signal has 100% coverage,
+   zero stale, zero mismatches).
 
-這個 case 測的是**同一組固定輸入是否每次都得到同一個星等**。跨多次執行的星等必須完全一致；
-出現分歧就是 rubric 或流程在該處留了自由度，要當成缺陷追。
+This case tests whether **the same fixed input gets the same star rating every time**. The
+rating must be perfectly consistent across multiple runs; any divergence means the rubric or
+process has left room for discretion at this point, and that must be tracked as a defect.

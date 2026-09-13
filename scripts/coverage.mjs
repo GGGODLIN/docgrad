@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// coverage.mjs — 覆蓋漂移偵測:用 git 機械偵測「code 動了但 docs 沒跟上」。
-// 用法: node coverage.mjs [--root <repo>] [--config <file>]；JSON → stdout。
-// 以 src_dirs 下第一層子目錄為「區域」,對照 docs 是否提及＋比對 git 時戳。
-// --include 對本腳本刻意不生效:docs 端一縮,範圍外的提及會被誤判成 undocumented。
+// coverage.mjs — coverage drift detection: mechanically detects "code moved but docs didn't keep up" via git.
+// Usage: node coverage.mjs [--root <repo>] [--config <file>]; JSON -> stdout.
+// Treats each first-level subdirectory under src_dirs as an "area", checks whether docs mention it
+// and compares git timestamps.
+// --include is deliberately a no-op for this script: narrowing the docs side would misjudge
+// mentions outside scope as undocumented.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -14,12 +16,12 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// area 提及偵測:能匹配 src/auth、src/auth/login.js；不匹配 src/authx、mysrc/auth。
+// Area mention detection: matches src/auth, src/auth/login.js; does not match src/authx, mysrc/auth.
 function mentionRegex(area) {
   return new RegExp('(?<![\\w./-])' + escapeRegex(area) + '(?![\\w-])');
 }
 
-// git 最後一次 commit 的完整 ISO 時戳(%cI)；失敗或空 → null。
+// The full ISO timestamp (%cI) of git's last commit; failure or empty -> null.
 function gitLastCommit(root, rel) {
   try {
     const out = execFileSync('git', ['log', '-1', '--format=%cI', '--', rel], {
@@ -33,9 +35,10 @@ function gitLastCommit(root, rel) {
   }
 }
 
-// 自 doc 最後更新「之後」起,area 有多少次 commit；失敗 → null。
-// git --since 對同秒時戳為含端點(inclusive):同一 commit 同時改到 doc 與 code
-// 不算漂移,故以 doc 時戳 +1 秒為界,排除該 commit 本身。
+// How many commits have touched the area **since** the doc's last update; failure -> null.
+// git --since is inclusive of the exact same second: if a single commit touches both the doc and
+// the code, that doesn't count as drift, so the boundary is set to the doc's timestamp + 1 second,
+// excluding that commit itself.
 function gitCountSince(root, docIso, rel) {
   const sinceIso = new Date(Date.parse(docIso) + 1000).toISOString();
   try {
@@ -50,7 +53,7 @@ function gitCountSince(root, docIso, rel) {
   }
 }
 
-// 遞迴數 area 內檔案（跳過 node_modules/.git）。
+// Recursively counts files inside an area (skipping node_modules/.git).
 function countFiles(absDir) {
   let n = 0;
   for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
@@ -71,10 +74,10 @@ try {
   const { root, configFile, include } = parseArgs();
   const config = loadConfig(root, configFile);
   const scopeNote = include.length
-    ? { scope: include, note: 'scope 不套用於覆蓋漂移:docs 端一縮會把範圍外的提及誤判成 undocumented,故一律全量比對' }
+    ? { scope: include, note: 'scope does not apply to coverage drift: narrowing the docs side would misjudge mentions outside scope as undocumented, so this always compares the full corpus' }
     : { scope: null };
 
-  // src_dirs 未設定 → 降級:不量測,交回 LLM 純對照。
+  // src_dirs unset -> degrade: don't measure, hand it back to the LLM for a plain comparison.
   if (config.src_dirs.length === 0) {
     process.stdout.write(
       `${JSON.stringify(
@@ -82,7 +85,7 @@ try {
           ...scopeNote,
           src_dirs: [],
           areas: [],
-          note: [scopeNote.note, 'src_dirs 未設定,無法量測覆蓋漂移'].filter(Boolean).join('；'),
+          note: [scopeNote.note, 'src_dirs is unset, coverage drift cannot be measured'].filter(Boolean).join('; '),
         },
         null,
         2
@@ -94,16 +97,16 @@ try {
   const { included } = collectFiles(root, config);
   const docTexts = included.map((rel) => ({ rel, text: fs.readFileSync(path.join(root, rel), 'utf8') }));
 
-  // 區域枚舉:每個 src_dir 的第一層子目錄為 area;散檔只計入 loose_files。
+  // Area enumeration: each src_dir's first-level subdirectories are areas; loose files just count toward loose_files.
   const loose_files = {};
   const areaEntries = [];
   for (const srcDir of config.src_dirs) {
     const absSrc = path.join(root, srcDir);
-    const base = srcDir.replace(/\/+$/, ''); // 去尾斜線,POSIX area 前綴
+    const base = srcDir.replace(/\/+$/, ''); // strip trailing slash, POSIX area prefix
     let loose = 0;
     if (fs.existsSync(absSrc)) {
       for (const entry of fs.readdirSync(absSrc, { withFileTypes: true })) {
-        if (entry.name.startsWith('.')) continue; // 跳過隱藏目錄/檔
+        if (entry.name.startsWith('.')) continue; // skip hidden dirs/files
         if (entry.isDirectory()) {
           if (SKIP_DIRS.has(entry.name)) continue;
           areaEntries.push({ area: `${base}/${entry.name}`, absDir: path.join(absSrc, entry.name) });

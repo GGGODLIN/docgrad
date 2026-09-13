@@ -1,0 +1,56 @@
+[
+  {
+    "tag": "docgrad-cs1-armA-1",
+    "turns": 54,
+    "toolCalls": 30,
+    "newInput": 149544,
+    "cacheRead": 2937144,
+    "output": 30228,
+    "wallSeconds": 436
+  },
+  {
+    "tag": "docgrad-cs1-armA-2",
+    "turns": 51,
+    "toolCalls": 32,
+    "newInput": 171087,
+    "cacheRead": 2538261,
+    "output": 30845,
+    "wallSeconds": 443
+  },
+  {
+    "tag": "docgrad-cs1-armA-3",
+    "turns": 54,
+    "toolCalls": 35,
+    "newInput": 155476,
+    "cacheRead": 3127152,
+    "output": 32468,
+    "wallSeconds": 469
+  },
+  {
+    "tag": "docgrad-cs1-armB-1",
+    "turns": 45,
+    "toolCalls": 28,
+    "newInput": 223653,
+    "cacheRead": 2522571,
+    "output": 31256,
+    "wallSeconds": 432
+  },
+  {
+    "tag": "docgrad-cs1-armB-2",
+    "turns": 45,
+    "toolCalls": 28,
+    "newInput": 183496,
+    "cacheRead": 2427642,
+    "output": 30258,
+    "wallSeconds": 429
+  },
+  {
+    "tag": "docgrad-cs1-armB-3",
+    "turns": 46,
+    "toolCalls": 30,
+    "newInput": 164561,
+    "cacheRead": 2283352,
+    "output": 27528,
+    "wallSeconds": 400
+  }
+]

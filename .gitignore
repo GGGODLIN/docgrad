@@ -13,3 +13,6 @@ tmp/
 .idea/
 .vscode/
 *.swp
+
+# agent worktrees (transient)
+.claude/worktrees/

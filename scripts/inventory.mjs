@@ -1,14 +1,19 @@
 #!/usr/bin/env node
-// inventory.mjs — 文件清單＋CJK-aware token 量測＋固定成本/污染面＋段落級結構指標
-// 用法: node inventory.mjs [--root <repo>] [--config <file>] [--include <glob>]；JSON → stdout。
+// inventory.mjs — document inventory + CJK-aware token measurement + fixed cost/pollution surface + section-level structure metrics
+// Usage: node inventory.mjs [--root <repo>] [--config <file>] [--include <glob>]; JSON -> stdout.
 import fs from 'node:fs';
 import path from 'node:path';
 import {
   loadConfig, collectFiles, estimateTokens, parseArgs, fail,
   extractCodeRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
+  gitTrackedFiles, GIT_UNAVAILABLE_NOTE,
 } from './lib.mjs';
 
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+\.)\s+/;
+
+// How many untracked paths to print. The count and the token total are always exact; the list is
+// there to make the files identifiable, not to be exhaustive.
+const UNTRACKED_LIST_CAP = 20;
 
 function fileType(p, config) {
   if (config.entry_files.includes(p)) return 'entry';
@@ -30,7 +35,8 @@ function percentile90(nums) {
   return s[idx];
 }
 
-// H2 段落切片（非 fence 內的 "## " 開新段）；tokens_est 含該段整段內容（不含標題行本身）。
+// H2 section slicing (a "## " outside a fence opens a new section); tokens_est covers the whole
+// section's content (not the heading line itself).
 function extractH2Sections(text) {
   const lines = text.split(/\r?\n/);
   const sections = [];
@@ -56,8 +62,9 @@ function extractH2Sections(text) {
   return sections.map((s) => ({ title: s.title, tokens_est: estimateTokens(s.lines.join('\n')) }));
 }
 
-// 規則行＝清單項（允許前置 emoji，判定只看是否含 pattern 子字串）且含 rules.pattern。
-// anchored＝該行本身用 extractCodeRefs 抽得到座標。
+// A rule line = a list item (an optional leading emoji is fine; the test is just whether it
+// contains the pattern substring) that also contains rules.pattern.
+// anchored = extractCodeRefs can extract coordinates from the line itself.
 function extractRuleLines(text, pattern, srcDirs) {
   const lines = text.split(/\r?\n/);
   let inFence = false;
@@ -88,7 +95,7 @@ function buildStructure(text, config) {
         ? Number((ruleLines.filter((r) => r.anchored).length / ruleLines.length).toFixed(4))
         : 0,
     },
-    // 供 totals 彙總用，不落 JSON（避免與 rules.count/anchored_ratio 重複展開語意）。
+    // for aggregation into totals; not emitted in the JSON (would duplicate rules.count/anchored_ratio's meaning)
     _ruleLines: ruleLines,
   };
 }
@@ -104,9 +111,9 @@ function measure(rootDir, relPath, config) {
     bytes: Buffer.byteLength(text),
     tokens_est: estimateTokens(text),
     type: fileType(relPath, config),
-    claims: claimLines.length, // 帶得到 code 座標的行數＝claim-ledger 抽樣母體
+    claims: claimLines.length, // lines with extractable code coordinates = the claim-ledger sampling population
     structure,
-    _ruleLines: ruleLines, // 內部彙總用，輸出前會被移除
+    _ruleLines: ruleLines, // for internal aggregation; stripped before output
     _claimLines: claimLines,
   };
 }
@@ -114,25 +121,52 @@ function measure(rootDir, relPath, config) {
 try {
   const { root, configFile, include } = parseArgs();
   const config = loadConfig(root, configFile);
-  const { included, excluded } = collectFiles(root, config, { include });
+  // One git call, shared between collectFiles (exclude_untracked) and the untracked report below.
+  const tracked = gitTrackedFiles(root);
+  const { included, excluded } = collectFiles(root, config, { include, tracked });
   const filesRaw = included.map((p) => measure(root, p, config));
   const excludedFiles = excluded.map((p) => measure(root, p, config));
   const rulesTotal = filesRaw.reduce((s, f) => s + f._ruleLines.length, 0);
   const rulesAnchored = filesRaw.reduce((s, f) => s + f._ruleLines.filter((r) => r.anchored).length, 0);
   const claimsTotal = filesRaw.reduce((s2, f) => s2 + f._claimLines.length, 0);
-  // 穩定排序的候選清單：同一份語料每次跑出來順序相同，claim-ledger 的抽樣才可重現。
-  // 只輸出前 60 筆——母體大小看 totals.claims_total，這裡是給抽樣用的取用序。
+  // A stably-ordered candidate list: the order produced from the same corpus is always the same,
+  // so claim-ledger sampling is reproducible. Only the first 60 entries are emitted — the
+  // population size is totals.claims_total; this is the pick order for sampling.
   const claimCandidates = rankClaimCandidates(
     filesRaw.map((f) => ({ path: f.path, claims: f._claimLines }))
   ).slice(0, 60);
   const files = filesRaw.map(({ _ruleLines, _claimLines, ...f }) => f);
   const totalTokens = files.reduce((s, f) => s + f.tokens_est, 0);
   const excludedTokens = excludedFiles.reduce((s, f) => s + f.tokens_est, 0);
+
+  // Untracked files among everything this run collected (included + excluded — both sides feed
+  // pollution.ratio, which is a rated input). Reporting them is what makes the difference between
+  // a working checkout and a clean one visible instead of silent; it does not change the numbers.
+  const collected = [...filesRaw, ...excludedFiles];
+  const untrackedFiles = tracked === null ? null : collected.filter((f) => !tracked.has(f.path));
+  const untracked =
+    untrackedFiles === null
+      ? { count: null, tokens_est: null, files: null, note: GIT_UNAVAILABLE_NOTE }
+      : {
+          count: untrackedFiles.length,
+          tokens_est: untrackedFiles.reduce((s, f) => s + f.tokens_est, 0),
+          files: untrackedFiles.map((f) => f.path).sort().slice(0, UNTRACKED_LIST_CAP),
+          ...(untrackedFiles.length > UNTRACKED_LIST_CAP
+            ? { note: `list capped: only the first ${UNTRACKED_LIST_CAP} of ${untrackedFiles.length} paths are shown (count/tokens_est cover all of them)` }
+            : {}),
+        };
+  // The ratio itself is left exactly as it was — silently changing everyone's economy rating is
+  // the kind of break this tool exists to catch. The note only says the number is checkout-bound.
+  const pollutionNote =
+    untrackedFiles && untrackedFiles.length
+      ? `this ratio includes ${untrackedFiles.length} untracked local file(s) (see "untracked"), so it will differ on a clean checkout of the same commit and two people can arrive at different economy ratings; set exclude_untracked: true in .docgrad.yml to measure the clean-checkout corpus instead`
+      : null;
   process.stdout.write(
     `${JSON.stringify(
       {
         scope: include.length ? include : null,
-        docgrad: docgradMeta(), // history.jsonl 的 docgrad_version／rubric_hash 由此取
+        // history.jsonl's docgrad_version/rubric_hash/corpus_hash all come from here
+        docgrad: docgradMeta(undefined, config),
         files,
         totals: {
           files: files.length,
@@ -144,10 +178,13 @@ try {
         },
         claim_candidates: claimCandidates,
         entry_cost: (() => {
-          // scope 限定時只計範圍內的 entry 檔——固定成本是全量概念，scoped 報告不可直接引用。
-          // symlink 去重：多個 entry 名指向同一實體檔（kdan-bpm 的 `CLAUDE.md -> AGENTS.md`）時，
-          // agent 只會載入一份，逐名相加會讓固定成本翻倍（2026-09-05 量到 5,792 vs 真值 2,896）。
-          // 以 realpath 分組，同一實體只計一次；files 仍列出全部名稱，並標出被折疊的別名。
+          // When scope-limited, count only entry files within the scope — fixed cost is a
+          // full-corpus concept, so a scoped report cannot cite it directly.
+          // Symlink dedup: multiple entry names pointing at the same real file (kdan-bpm's
+          // `CLAUDE.md -> AGENTS.md`) get loaded by an agent as a single file, so summing them by
+          // name would double the fixed cost (measured on 2026-09-05: 5,792 vs the true 2,896).
+          // Group by realpath, count the same real file once; files still lists every name, and
+          // aliases that got folded together are called out.
           const entries = files.filter((f) => f.type === 'entry');
           const seen = new Map();
           const aliases = [];
@@ -156,7 +193,7 @@ try {
             try {
               key = fs.realpathSync(path.join(root, f.path));
             } catch {
-              /* 讀不到就退回路徑本身，寧可重複計也不要漏計 */
+              /* fall back to the path itself when it can't be read — better to double-count than to miss it */
             }
             if (seen.has(key)) {
               aliases.push({ path: f.path, same_file_as: seen.get(key) });
@@ -180,7 +217,9 @@ try {
             totalTokens + excludedTokens === 0
               ? 0
               : Number((excludedTokens / (totalTokens + excludedTokens)).toFixed(4)),
+          ...(pollutionNote ? { note: pollutionNote } : {}),
         },
+        untracked,
       },
       null,
       2

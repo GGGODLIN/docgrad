@@ -1,201 +1,188 @@
-# docgrad — 專案文件綜合評估與收斂 skill 設計
+# docgrad — design of a documentation audit and convergence skill
 
-> **狀態**：已實作（2026-07-12 定案並完成 v0.1.0）
+> **Status:** implemented (finalized 2026-07-12, v0.1.0 completed)
 > **Last updated:** 2026-09-13
 
 ## Contents
 
-- [緣起](#緣起)
-- [定位與邊界](#定位與邊界)
-- [Repo 結構（impeccable 同款骨架）](#repo-結構impeccable-同款骨架)
-- [指令面](#指令面)
-- [`init` 與 `.docgrad.yml`](#init-與-docgradyml)
-- [六維 rubric（錨點住 reference/rubric.md）](#六維-rubric錨點住-referencerubricmd)
-- [衝突仲裁慣例](#衝突仲裁慣例)
-- [`loop` 機制（核心需求：裝完就能一直跑到達標）](#loop-機制核心需求裝完就能一直跑到達標)
-- [畢業（報告固定尾節，產出交付物但不安裝）](#畢業報告固定尾節產出交付物但不安裝)
-- [scripts 契約](#scripts-契約)
-- [開放問題（實作時定案）](#開放問題實作時定案)
-- [出處致謝（NOTICE.md 詳列）](#出處致謝noticemd-詳列)
+- [Origin](#origin)
+- [Positioning and boundaries](#positioning-and-boundaries)
+- [Repo layout (same skeleton as impeccable)](#repo-layout-same-skeleton-as-impeccable)
+- [Command surface](#command-surface)
+- [`init` and `.docgrad.yml`](#init-and-docgradyml)
+- [The six-dimension rubric (anchored in reference/rubric.md)](#the-six-dimension-rubric-anchored-in-referencerubricmd)
+- [Conflict arbitration conventions](#conflict-arbitration-conventions)
+- [How `loop` works (core requirement: install it and it runs until targets are met)](#how-loop-works-core-requirement-install-it-and-it-runs-until-targets-are-met)
+- [Graduation (fixed closing section; artifacts produced, not installed)](#graduation-fixed-closing-section-artifacts-produced-not-installed)
+- [Scripts contract](#scripts-contract)
+- [Open questions (settled during implementation)](#open-questions-settled-during-implementation)
+- [Attribution (full list in NOTICE.md)](#attribution-full-list-in-noticemd)
 
-## 緣起
+## Origin
 
-2026-07-10～07-11 對兩個實際文件系統做了多輪「agentic development 視角」評比（完整性／正確性／新鮮度／連結度／一致性／token 經濟性），並在其中一個實際走完「評分 → 改進建議 → 重組 → 重跑評分反超」的完整迴圈。本 skill 把那套實戰方法論沉澱成**通用、可安裝、可迭代**的工具：裝完之後對任一 repo 跑 `init` 指定文件夾與基本規則，然後 `loop` 逐輪修改 docs，直到各項指標達到目標星等（預設 4，可個別降到 3）。
+Between 2026-07-10 and 07-11, two real documentation systems went through multiple rounds of scoring from an "agentic development" perspective (completeness / correctness / freshness / linkage / consistency / token economy), and one of them actually ran the full loop of "score -> improvement suggestions -> reorganize -> rescore and beat the previous score." This skill distills that hands-on methodology into a **generic, installable, iterative** tool: after installing it, run `init` on any repo to specify the doc folders and basic rules, then `loop` edits the docs round by round until every metric reaches its target star rating (default 4, can be lowered to 3 per dimension).
 
-生態系調研（2026-07-12）確認無現成 skill 覆蓋此事：最接近的 `ln-21-documentation-auditor`（levnikolaevich/claude-code-skills，515★）在正確性 claim-ledger 與 git-blame 新鮮度上紮實但不碰 token 經濟與檢索紀律；`agnix`（432 條規則）只 lint CLAUDE.md/AGENTS.md 等 config 檔不評 docs 全體系。空白區＝**全 docs 體系的 token 經濟性、索引/檢索紀律、prose 規則降級成機械 gate**——正是本 skill 的差異化價值。
+An ecosystem survey (2026-07-12) confirmed no existing skill covers this: the closest, `ln-21-documentation-auditor` (levnikolaevich/claude-code-skills, 515 stars), is solid on the correctness claim ledger and git-blame freshness but does not touch token economy or retrieval discipline; `agnix` (432 rules) only lints config files like CLAUDE.md/AGENTS.md and does not score the docs system as a whole. The gap = **token economy for the whole docs system, index/retrieval discipline, and downgrading prose rules to mechanical gates** — exactly this skill's differentiated value.
 
-## 定位與邊界
+## Positioning and boundaries
 
-- **評什麼**：一個 repo 的文件體系作為 **AI agent 開發時的 context 來源**的品質。語料邊界由三個設定欄位
-  界定：`docs_dirs`（目錄，遞迴掃）、`docs_files`（目錄之外的單檔，當一般文件收）、`entry_files`／`index_file`
-  （入口與索引，各有特殊角色）。root 指引檔因此有兩種收法——**always-loaded 的走 `entry_files`（計固定成本），
-  條件式載入的走 `docs_files`（不計）**，判準與選錯的代價見 [reference/init.md](../reference/init.md) 問卷第 3 項。
-- **不評什麼**：prose 風格（Vale 的事）、SKILL.md 本身品質（agnix/skill-audit 的事）、程式碼品質（code review 的事）。
-- **資訊落點 vs code 品質的界線**：docgrad 判「這則資訊該住哪個載體、有沒有第二份權威」（規則見 [reference/placement.md](../reference/placement.md)），為此**會讀** code 註解——但只判落點與重複，**不評**註解寫得好不好、該不該補註解。判準是「有沒有第二份權威／位置對不對」，不是「寫得好不好」；沒有這條界線，一致性維度會滑成 code review。
-- **通用性**：零 repo 假設。結構（文件夾、索引、入口檔、新鮮度慣例）全部由 `init` 偵測＋問卷確認後寫入設定檔，之後每輪讀設定檔。
-- **前提條件**：文件必須是**本地 markdown 檔案樹**，且目標 repo 根目錄可寫入 `.docgrad.yml`（Blocker #1）。git 非硬需求——無 git 時新鮮度降級為 claimed-only（`scripts/freshness.mjs › gitDate()` 取不到就只認文件自稱日期）、覆蓋漂移無法量測、`retrieval.mjs` 的 `churn_commits`／`index_hotness` 皆為 null 但不炸，其餘照跑。**不支援** wiki／Confluence 等遠端文件源：檔案不在樹上、五支腳本全依賴本地路徑、設定檔也無處可放。
-- **rubric 可獨立引用**：`reference/rubric.md` 的六維錨點本身不依賴腳本，可單獨拿去對非 repo 文件源做人工評分——但那是「借用錨點」而非 docgrad 流程：無機械訊號、不可重現，也不該落 scorecard/history。
-- **能力天花板要明說**：Blocker 禁區擋住的星等（目前：新鮮度 ★5 需 CI gate 而 loop 不碰 CI）由 `improve.md` 的設計性天花板規則明文判定，不靠當輪 model 臨場繞過——否則報告會把「設計上不可達」誤呈成「這兩輪沒修動」。
-- **使用者決策（2026-07-12 定案）**：獨立 git repo 發布（本 repo）；impeccable 式「init 一次、之後逐步收斂」；五維計星＋token 經濟只報告不計星（**v1.0.0 起改為六維，token 經濟的固定成本與污染面升格計星**，見下節）；loop 每輪 commit、達標才停；評分＝內建機械腳本＋LLM 判斷混合。
+- **What it scores**: the quality of a repo's documentation system as the **context source for AI agent development**. The corpus boundary is defined by three config fields: `docs_dirs` (directories, scanned recursively), `docs_files` (single files outside those directories, taken in as ordinary documents), and `entry_files` / `index_file` (entry and index, each with a special role); two more fields narrow it — `exclude` (out of the score, still in the pollution surface) and `exclude_untracked` (drop everything git doesn't track, so a working checkout measures what a clean one would). Root-level guidance files therefore fall into two buckets — **always-loaded ones go under `entry_files` (counted toward fixed cost), conditionally-loaded ones go under `docs_files` (not counted)** — see item 3 of the questionnaire in [reference/init.md](../reference/init.md) for the criterion and the cost of picking the wrong one.
+- **What it doesn't score**: prose style (Vale's job), the quality of SKILL.md itself (agnix's/skill-audit's job), code quality (code review's job).
+- **The line between information placement and code quality**: docgrad decides "which carrier should this piece of information live in, and is there a second authoritative copy" (rules in [reference/placement.md](../reference/placement.md)) — to do this it **does read** code comments, but it only judges placement and duplication, it **does not evaluate** whether a comment is well written or whether one should be added. The criterion is "is there a second authoritative copy / is the location right," not "is it well written"; without this boundary, the consistency dimension would slide into code review.
+- **Generality**: zero repo assumptions. Structure (doc folders, index, entry files, freshness convention) is entirely detected by `init` and confirmed via questionnaire, then written to the config file; every subsequent round reads that config file.
+- **Preconditions**: the documentation must be a **local markdown file tree**, and the target repo's root must be writable for `.docgrad.yml` (Blocker #1). git is not a hard requirement (the one exception is opt-in: `exclude_untracked: true` cannot tell tracked from untracked files without git, so the scripts abort instead of measuring a different corpus in silence) — without git, freshness degrades to claimed-only (when `scripts/freshness.mjs › gitDate()` can't get a value, it falls back to trusting only the document's self-declared date), coverage drift can't be measured, and `retrieval.mjs`'s `churn_commits` / `index_hotness` are both null but nothing crashes; everything else still runs. **Not supported**: remote doc sources like wiki/Confluence — the files aren't on a tree, all five scripts depend on local paths, and there is nowhere to put the config file either.
+- **The rubric can be cited standalone**: the six-dimension anchors in `reference/rubric.md` don't themselves depend on the scripts, and can be taken standalone to manually score non-repo doc sources — but that's "borrowing the anchors," not the docgrad process: no mechanical signal, not reproducible, and it shouldn't land in the scorecard/history either.
+- **The capability ceiling must be stated explicitly**: the star ratings blocked by the blocker no-go zone (currently: freshness ★5 requires a CI gate, and loop doesn't touch CI) are determined explicitly by the design ceiling rule in `improve.md`, not worked around ad hoc by whichever model is running that round — otherwise a report would misrepresent "unreachable by design" as "these two rounds didn't fix it."
+- **User decisions (finalized 2026-07-12)**: released as an independent git repo (this repo); impeccable-style "init once, then converge incrementally"; five dimensions given star ratings plus token economy reported but not rated (**changed to six dimensions starting v1.0.0, with token economy's fixed cost and pollution surface promoted to rated dimensions**, see next section); loop commits every round and only stops when targets are met; scoring = a mix of built-in mechanical scripts and LLM judgment.
 
-## Repo 結構（impeccable 同款骨架）
+## Repo layout (same skeleton as impeccable)
 
 ```
 docgrad/
 ├── .claude-plugin/
-│   ├── plugin.json       # plugin manifest：版本權威（semver，更新通知按此比對）
-│   └── marketplace.json  # 讓本 repo 可直接被 add 為 marketplace
-├── SKILL.md              # 路由：init · audit · improve · loop · report
+│   ├── plugin.json       # plugin manifest: version authority (semver, update notifications compare against this)
+│   └── marketplace.json  # lets this repo be added directly as a marketplace
+├── SKILL.md              # routing: init · audit · improve · loop · report
 ├── reference/
-│   ├── init.md           # 掃描＋問卷 → 寫入目標 repo 的 .docgrad.yml
-│   ├── rubric.md         # 六維星等錨點（評分穩定性的關鍵，見下）
-│   ├── audit.md          # 單次評分流程：腳本 → LLM 抽查 → scorecard（含 scoped audit）
-│   ├── improve.md        # 收斂輪流程（improve 與 loop 共用）
-│   └── placement.md      # 資訊安置政策：落點與重複的判定規則（一致性維度消費）
+│   ├── init.md           # scan + questionnaire -> writes the target repo's .docgrad.yml
+│   ├── rubric.md         # six-dimension star anchors (key to scoring stability, see below)
+│   ├── audit.md          # single scoring pass flow: scripts -> LLM spot-check -> scorecard (incl. scoped audit)
+│   ├── improve.md        # convergence round flow (shared by improve and loop)
+│   └── placement.md      # information placement policy: rules for placement and duplication (consumed by the consistency dimension)
 ├── scripts/
-│   ├── lib.mjs           # 共用模組：YAML 子集解析/config/walker/token/markdown 解析
-│   ├── inventory.mjs     # 文件清單＋CJK-aware token 量測＋成本試算輸入
-│   ├── links.mjs         # 死鏈/anchor/孤兒（從索引＋entry 檔 transitive 可達性）
-│   ├── freshness.mjs     # 日期訊號覆蓋率＋git log 真實日期對照（convention 可多值）
-│   ├── coverage.mjs      # 覆蓋漂移：code 區域 vs 提及它的 docs 的 git 時滯
-│   └── retrieval.mjs     # 可回溯性＋邊際成本：scenarios/areas/index_hotness（report-only）
-├── tests/                # node --test：腳本的單元行為；fixtures/ 為迷你目標 repo
-├── templates/            # 畢業交付物範本：docs-gate.mjs／docs-gate.yml（產出不安裝）
-├── evals/                # skill 級評測：星等的可重現性／抽樣覆蓋率／偽陽性
-│                         # （claude plugin eval；三個 case ＋ fixtures/ 三個 repo）
+│   ├── lib.mjs           # shared module: YAML subset parser / config / walker / token / markdown parsing
+│   ├── inventory.mjs     # document inventory + CJK-aware token measurement + cost estimation input
+│   ├── links.mjs         # dead links / anchors / orphans (transitive reachability from the index + entry files)
+│   ├── freshness.mjs     # date signal coverage + comparison against real git log dates (convention can take multiple values)
+│   ├── coverage.mjs      # coverage drift: git time lag between code areas and the docs that mention them
+│   └── retrieval.mjs     # traceability + marginal cost: scenarios/areas/index_hotness (report-only)
+├── tests/                # node --test: unit behavior of the scripts; fixtures/ are miniature target repos
+├── templates/            # graduation deliverable templates: docs-gate.mjs / docs-gate.yml (produced, not installed)
+├── evals/                # skill-level evals: reproducibility of star ratings / sampling coverage / false positives
+│                         # (claude plugin eval; three cases + fixtures/ with three repos)
 ├── docs/
-│   ├── design.md         # 本檔
-│   └── how-to.md         # 常見開發任務（加維度/改 rubric/擴充 lib）
-├── .docgrad.yml          # 本 repo 自己的 docgrad 設定（dogfood）
-├── .docgrad/             # dogfood 收斂狀態：history.jsonl（歷輪分數＋版本指紋）、
-│                         # ledger.jsonl（累積 claim 驗證紀錄）、scorecard-latest.md、
-│                         # out-of-scope.jsonl（職權外發現）、graduation/（收官產出）
-├── CHANGELOG.md          # 各版變更；版號語意見 docs/how-to.md §發版
-├── NOTICE.md             # 出處致謝（ln-21 claim-ledger、Diátaxis、HumanLayer、impeccable）
+│   ├── design.md         # this file
+│   └── how-to.md         # common development tasks (add a dimension / change the rubric / extend lib)
+├── .docgrad.yml          # this repo's own docgrad config (dogfooding)
+├── .docgrad/             # dogfooding convergence state: history.jsonl (per-round scores + version fingerprint),
+│                         # ledger.jsonl (accumulated claim verification records), scorecard-latest.md,
+│                         # out-of-scope.jsonl (findings outside docgrad's remit), graduation/ (closing deliverables)
+├── CHANGELOG.md          # per-version changes; version semantics in docs/how-to.md §Cut a release
+├── NOTICE.md             # attribution (ln-21 claim-ledger, Diátaxis, HumanLayer, impeccable)
 ├── LICENSE               # MIT
-└── README.md             # 安裝方式（clone 到 ~/.claude/skills/docgrad）
+└── README.md             # installation instructions (clone into ~/.claude/skills/docgrad)
 ```
 
-skill 名稱＝目錄名＝`docgrad`（安裝進 `~/.claude/skills/docgrad` 或 plugin marketplace 後以 `/docgrad` 呼叫）。SKILL.md frontmatter description 以英文為主＋中文關鍵字（觸發匹配雙語皆可），本文與 reference 用 zh-TW（主要受眾為中文團隊；日後要國際發布再譯）。
+Skill name = directory name = `docgrad` (invoked as `/docgrad` once installed into `~/.claude/skills/docgrad` or a plugin marketplace). The SKILL.md frontmatter description is mainly in English plus Chinese keywords (trigger matching works in both languages); the body text and reference docs are in English (they were written in zh-TW first and translated for the international release; `README.zh-TW.md` keeps the Chinese landing page, and the target repo's own report language is set per repo by `.docgrad.yml`'s `language:`).
 
-## 指令面
+## Command surface
 
-| 指令 | 說明 |
+| Command | Description |
 |---|---|
-| `/docgrad init` | 一次性設定：掃描候選結構 → 問卷確認 → 寫 `.docgrad.yml` 進目標 repo 版控 |
-| `/docgrad audit` | 單次全量評分，產出 scorecard 報告（不改任何檔案） |
-| `/docgrad improve` | 跑一輪收斂（挑最低維 → 修 → 重評 → commit），跑完停 |
-| `/docgrad loop` | 反覆 improve 直到停止條件（見下） |
-| `/docgrad report` | 只重印最近一次 scorecard＋歷輪分數走勢 |
+| `/docgrad init` | one-time setup: scan candidate structure -> questionnaire confirmation -> write `.docgrad.yml` into the target repo's version control |
+| `/docgrad audit` | one full scoring pass, produces a scorecard report (does not change any file) |
+| `/docgrad improve` | run one round of convergence (pick the lowest-scoring dimension -> fix -> rescore -> commit), stop when done |
+| `/docgrad loop` | repeat improve until a stop condition (see below) |
+| `/docgrad report` | just reprint the latest scorecard + the score trend across rounds |
 
-無參數時印指令表（同 impeccable 的 routing rule 1）。路由與 blockers 的權威定義在 [SKILL.md](../SKILL.md)，本表為設計摘要。
+With no arguments, print the command table (same as impeccable's routing rule 1). The authoritative definition of routing and blockers is in [SKILL.md](../SKILL.md); this table is a design summary.
 
-## `init` 與 `.docgrad.yml`
+## `init` and `.docgrad.yml`
 
-`init` 自動掃描：docs 目錄候選（`docs/`、`doc/`、`documentation/`）、always-loaded 入口檔（`CLAUDE.md`、`AGENTS.md`、`.cursorrules`…）、root 層的單檔文件候選（`PRODUCT.md`、`DESIGN.md`…）、索引檔候選（`docs/README.md`、`docs/index.md`）、應排除目錄（`archive/`、`node_modules/`、generated、gitignored WIP）。掃描結果以問卷逐項確認，含目標星等。寫入：
+`init` automatically scans: candidate docs directories (`docs/`, `doc/`, `documentation/`), always-loaded entry files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, …), root-level single-file document candidates (`PRODUCT.md`, `DESIGN.md`, …), index file candidates (`docs/README.md`, `docs/index.md`), and directories that should be excluded (`archive/`, `node_modules/`, generated files, gitignored WIP). The scan results are confirmed item by item via a questionnaire, including target star ratings. It writes:
 
 ```yaml
-# .docgrad.yml — docgrad 設定（進版控，團隊共用）
+# .docgrad.yml — docgrad config (checked into version control, shared by the team)
 docs_dirs: [docs/]
-docs_files: [PRODUCT.md]          # docs_dirs 之外的單檔，當一般文件收（條件式載入，不計固定成本）
-entry_files: [CLAUDE.md]          # always-loaded，計入固定成本
-index_file: docs/README.md        # 孤兒判定的可達性根
-exclude: [docs/archive/]          # 不計分但列入污染面報告
+docs_files: [PRODUCT.md]          # single files outside docs_dirs, taken in as ordinary documents (conditionally loaded, not counted toward fixed cost)
+entry_files: [CLAUDE.md]          # always-loaded, counted toward fixed cost
+index_file: docs/README.md        # reachability root for orphan detection
+exclude: [docs/archive/]          # not scored, but included in the pollution surface report
+exclude_untracked: false          # default; true = collect only what git tracks, so a working checkout and a clean one measure the same corpus (needs git)
 freshness:
-  convention: frontmatter          # frontmatter | heading-line | none；可逗號分隔多值（混用慣例的 repo）
-  field: last_updated              # 或 "Last updated:" 行的 pattern
-targets:                           # 各維目標星等（loop 停止條件）
+  convention: frontmatter          # frontmatter | heading-line | none; comma-separated multiple values allowed (for repos mixing conventions)
+  field: last_updated              # or the pattern of the "Last updated:" line
+targets:                           # target star rating per dimension (loop stop condition)
   completeness: 4
   correctness: 4
   freshness: 4
   linkage: 4
   consistency: 4
-correctness_sample: 8              # 每次 audit 抽查的宣稱條數
-scenario: "在 <某模組> 加一個典型新功能"  # 無 scenarios 時的 LLM 模擬 fallback
-scenarios: [src/foo/bar.ts]        # retrieval.mjs 機械模擬邊際成本＋可回溯性用（report-only）
-language: zh-TW                    # 報告與 commit 語言
+correctness_sample: 8              # number of claims drawn new each round (re-verification is a separate budget, see reference/audit.md step 3)
+scenario: "add a typical new feature to <some module>"  # LLM simulation fallback when there are no scenarios
+scenarios: [src/foo/bar.ts]        # used by retrieval.mjs to mechanically simulate marginal cost + traceability (report-only)
+language: zh-TW                    # language for reports and commits
 ```
 
-上例為**說明用**；各欄位預設值以 `scripts/lib.mjs › DEFAULTS` 為權威（本檔不複述，避免漂移）。
+The example above is **illustrative**; each field's default value is authoritative in `scripts/lib.mjs › DEFAULTS` (not repeated here, to avoid drift).
 
-repo 沒有 `.docgrad.yml` 時，`audit`/`improve`/`loop` 一律先導向 `init`（同 impeccable「PRODUCT.md 缺失就先 teach」的 blocker 模式）。
+When a repo has no `.docgrad.yml`, `audit`/`improve`/`loop` always redirect to `init` first (the same blocker pattern as impeccable's "teach first when PRODUCT.md is missing").
 
-## 六維 rubric（錨點住 reference/rubric.md）
+## The six-dimension rubric (anchored in reference/rubric.md)
 
-分數要能跨輪比較，錨點必須寫死。各維 ★1–★5 錨點自實戰評比沉澱；凍結正文在 [reference/rubric.md](../reference/rubric.md)，本表僅摘要：
+Scores need to be comparable across rounds, so the anchors must be fixed. The ★1–★5 anchors for each dimension were distilled from hands-on scoring; the frozen text is in [reference/rubric.md](../reference/rubric.md), this table is only a summary:
 
-| 維度 | ★3（及格）錨點 | ★5 錨點 | 量測方式 |
+| Dimension | ★3 (passing) anchor | ★5 anchor | Measurement |
 |---|---|---|---|
-| **完整性** | 核心領域皆有權威文件；部署/測試至少內嵌敘述 | 領域全覆蓋＋runbook＋onboarding 路徑＋退役機制明確標註「勿用於新功能」 | coverage.mjs 覆蓋漂移（undocumented/drifted 區域）＋LLM 對照 repo 實際模組清單補判 |
-| **正確性** | 抽查通過 ≥80%；錯的是細節非機制 | 抽查全過＋殭屍代碼/已退役機制有標註＋權威列表 refer-to-code 不複述 | claim ledger：抽 N 條具體宣稱（路徑/符號/狀態機/路由）逐條對 code 驗證 |
-| **新鮮度** | 有日期訊號慣例但靠自律；關鍵文件 staleness ≤60 天 | 日期訊號全覆蓋＋「同 MR 隨改隨更」有機械 gate 強制＋生命週期管理（superseded 即處理） | freshness.mjs：訊號覆蓋率＋git log 真實日期 vs 宣稱日期 |
-| **連結度** | 相對連結失效 ≤2%；有索引但非唯一入口 | 全量驗證零死鏈＋單一頂層索引 transitive 全可達（零孤兒）＋錨點用 `path › symbol()` 抗行號漂移 | links.mjs 全量機械驗證 |
-| **一致性** | 同主題重疊 ≤2 處且不矛盾 | 一主題一權威（其餘摘要＋連結）＋衝突有仲裁慣例（newer wins＋以 code 仲裁） | LLM：挑關鍵事實宣稱做跨文件＋對 code 三角驗證 |
-| **經濟性** | 固定成本 ≤10,000 tokens | 固定成本 ≤3,000＋污染面 <10%＋入口檔 token 預算有機械 gate 強制 | inventory.mjs 的 `entry_cost.tokens_est` 與 `pollution.ratio`，全量機械 |
+| **completeness** | every core area has an authoritative document; deployment/testing at least has inline narrative | full coverage of areas + runbook + onboarding path + retirement mechanism clearly marked "do not use for new features" | coverage.mjs coverage drift (undocumented/drifted areas) + LLM cross-checks against the repo's actual module list |
+| **correctness** | ≥80% of sampled claims pass; errors are in details, not mechanisms | all sampled claims pass + dead code/retired mechanisms are marked + authoritative lists refer-to-code instead of restating | claim ledger: sample N concrete claims (paths/symbols/state machines/routes) and verify each against code |
+| **freshness** | there's a date-signal convention but it relies on discipline; staleness of key documents ≤60 days | full date-signal coverage + "update in the same MR as the change" enforced by a mechanical gate + lifecycle management (superseded docs are handled promptly) | freshness.mjs: signal coverage ratio + real git log dates vs. claimed dates |
+| **linkage** | relative-link failure rate ≤2%; there's an index but it's not the sole entry point | full validation shows zero dead links + a single top-level index with full transitive reachability (zero orphans) + anchors use `path › symbol()` to resist line-number drift | links.mjs full mechanical validation |
+| **consistency** | ≤2 places of overlap on the same topic, and no contradictions | one authoritative copy per topic (the rest are summary + link) + conflicts have an arbitration convention (newer wins + arbitrated against code) | LLM: pick key factual claims and triangulate across documents + against code |
+| **economy** | fixed cost ≤10,000 tokens | fixed cost ≤3,000 + pollution surface <10% + entry-file token budget enforced by a mechanical gate | `entry_cost.tokens_est` and `pollution.ratio` from inventory.mjs, fully mechanical |
 
-**經濟性為什麼是一個維度而不是一則報告**（v1.0.0，issue #11）：完整性獎勵覆蓋、經濟性懲罰成本，
-兩者方向相反。只報不計星時，loop 每一輪的合法動作都是「補文件」，沒有任何力量把不值得它的 token 的
-內容搬出入口檔——外部實證（多個 coding agent 在 SWE-Bench Lite 與 AgentBench 上的對照）指出 context
-檔變長會提高成本而未必提高成功率。加維度＝rubric 結構變更＝major＋所有 repo 歷史分數重新起算，
-這個代價是知情下付的（對比 0.5.0 一致性擴範圍時**刻意不**加第六維的決定：那次改的是既有維度的判定
-範圍，這次改的是獎勵方向本身）。
+**Why economy is a dimension and not just a report** (v1.0.0, issue #11): completeness rewards coverage, economy penalizes cost — the two point in opposite directions. When it was report-only and not rated, every legal move for loop each round was "add more documentation," and nothing pushed content that wasn't worth its tokens out of the entry files — external evidence (comparisons across multiple coding agents on SWE-Bench Lite and AgentBench) shows that longer context files raise cost without necessarily raising success rate. Adding a dimension = a rubric structure change = major, and all repos' historical scores have to restart from baseline — that cost was paid knowingly (contrast with the 0.5.0 decision to expand the scope of consistency while **deliberately not** adding a sixth dimension: that change was to the judged scope of an existing dimension, this one changes the reward direction itself).
 
-**Token 經濟報告**：①固定成本＝entry_files token 量（**計星**）②邊際成本＝`scenarios` 機械算或按 `scenario` LLM 模擬必讀路徑的 token 合計（report-only）③污染面＝exclude 目錄與 WIP 佔語料比例（**計星**）。CJK-aware 估算（中文 token/byte 密度與英文不同，inventory.mjs 內建係數）。報告附「損益兩平」解讀（固定 vs 邊際的任務組成權衡）。
+**Token economy report**: (1) fixed cost = token count of entry_files (**rated**); (2) marginal cost = mechanically computed from `scenarios`, or the token total of the must-read path simulated by an LLM per `scenario` (report-only); (3) pollution surface = the share of the corpus taken up by excluded directories and WIP (**rated**). CJK-aware estimation (Chinese token/byte density differs from English; inventory.mjs has a built-in coefficient). The report includes a "break-even" interpretation (the trade-off in task mix between fixed and marginal cost).
 
-## 衝突仲裁慣例
+## Conflict arbitration conventions
 
-同一事實在多份文件出現時，以下規則決定誰為準（dogfood 一致性 ★5「一主題一權威＋仲裁明文」）：
+When the same fact appears in multiple documents, the following rules decide which one is authoritative (dogfooding consistency ★5, "one authority per topic + explicit arbitration"):
 
-1. **doc vs code**：一律以 code 為權威；docs 與程式碼不符時改 docs 對齊 code（見 [reference/audit.md](../reference/audit.md) claim-ledger）。
-2. **doc vs doc**：newer wins——以各檔 `> **Last updated:**` 較新者為準，舊處改「摘要＋連結」指向權威，不留兩份全文。
-3. **無法仲裁**（兩文件互斥且 code 無關）：不臆測，走 loop「需人裁決」停止條件（見 [reference/improve.md](../reference/improve.md)）。
+1. **doc vs code**: code is always authoritative; when docs disagree with code, fix the docs to align with code (see the claim ledger in [reference/audit.md](../reference/audit.md)).
+2. **doc vs doc**: newer wins — whichever file has the more recent `> **Last updated:**` is authoritative; the older location is rewritten as "summary + link" pointing to the authority, with no two full copies left standing.
+3. **Cannot be arbitrated** (two documents are mutually exclusive and code is irrelevant): don't guess — this goes to loop's "needs human decision" stop condition (see [reference/improve.md](../reference/improve.md)).
 
-一主題一權威：每個關鍵事實只在一處展開，其餘只留摘要＋連結——指令表權威在 [SKILL.md](../SKILL.md)、rubric 錨點權威在 [reference/rubric.md](../reference/rubric.md)、code 契約權威在 `scripts/`。
+One authority per topic: every key fact is spelled out in exactly one place, the rest keep only a summary + link — the command table is authoritative in [SKILL.md](../SKILL.md), the rubric anchors are authoritative in [reference/rubric.md](../reference/rubric.md), and the code contract is authoritative in `scripts/`.
 
-## `loop` 機制（核心需求：裝完就能一直跑到達標）
+## How `loop` works (core requirement: install it and it runs until targets are met)
 
-操作流程的權威在 [reference/improve.md](../reference/improve.md)，本節為設計說明。每輪（＝`improve` 一次）：
+The authoritative operating procedure is in [reference/improve.md](../reference/improve.md); this section is a design explanation. Each round (= one run of `improve`):
 
-1. 跑五支腳本＋LLM 判斷維度 → scorecard。
-2. 挑**最低分維度**（同分取 rubric 表順序靠前者），從該維的失分點生成一批 focused 修改（一輪只修一個維度，避免全量改一半留矛盾——收斂不是重寫）。
-3. 機械修正（死鏈、日期 backfill 用 `git log -1 --format=%as` 真實日期不捏造、孤兒補入索引）直接做；語意修改（合併冗餘文件、改寫敘述為 refer-to-code、刪檔）也做，但在 commit message 明示清單。
-4. 重跑量測確認該維分數上升、其他維不降。
-5. 在專用 branch（`docgrad/converge`）commit，message 附本輪 scorecard 摘要；狀態落 `.docgrad/`
-   （history 一行＋ledger 累積 append）。
+1. Run the five scripts + LLM-judged dimensions -> scorecard.
+2. Pick the **lowest-scoring dimension** (ties go to whichever comes first in the rubric table order), and generate a batch of focused fixes from that dimension's deduction points (each round fixes only one dimension, to avoid half-finished changes across everything that leave contradictions — convergence is not a rewrite).
+3. Mechanical fixes (dead links, date backfill using the real date from `git log -1 --format=%as` rather than making one up, adding orphans into the index) are done directly; semantic changes (merging redundant documents, rewriting narrative into refer-to-code, deleting files) are also done, but are explicitly listed in the commit message.
+4. Rerun the measurements to confirm that dimension's score went up and no other dimension went down.
+5. Commit on a dedicated branch (`docgrad/converge`), with the commit message including a summary of this round's scorecard; state is written to `.docgrad/` (one line appended to history, and ledger accumulates by appending).
 
-**分數為什麼要能重現（v1.1.0，issue #12）**：2026-07-13 的 oikos 實跑裡，收官後同日重驗一致性
-從 ★4 掉到 ★2——不是尺變了，是**抽樣沒被約束**：四輪抽樣都沒碰到那條與 code 相反的 balance 正負號。
-對策不是把錨點寫得更細（錨點再細也管不到「抽哪些」），而是把抽樣本身從 LLM 手上收回：
-母體與取用序由 `inventory.mjs` 機械產出（穩定排序），驗證結果累積落 `.docgrad/ledger.jsonl`，
-下一輪先重驗舊條目再抽新的。報告同時給通過率與累積覆蓋率——**單獨一個星等不揭露它建立在多大的樣本上**。
-這對應 Anthropic skill authoring 的原則：必須一致的操作要降低自由度，而不是加更多說明文字。
+**Why scores need to be reproducible (v1.1.0, issue #12)**: in the 2026-07-13 oikos production run, re-verifying consistency the same day after closing out dropped it from ★4 to ★2 — not because the ruler changed, but because **sampling wasn't constrained**: four rounds of sampling never hit the one balance sign that was the opposite of what the code said. The fix is not to write the anchors in more detail (finer anchors still can't control "which items get sampled"), but to take sampling itself back out of the LLM's hands: the population and draw order are mechanically produced by `inventory.mjs` (stable ordering), verification results accumulate in `.docgrad/ledger.jsonl`, and the next round re-verifies old entries before sampling new ones. The report gives both the pass rate and the cumulative coverage rate — **a star rating alone doesn't reveal how large a sample it's built on**. This matches Anthropic's skill-authoring principle: operations that must be consistent should have their degrees of freedom reduced, not get more explanatory text.
 
-**停止條件**（任一成立即停）：
-- ✅ 全維 ≥ `.docgrad.yml` targets → 收官報告＋畢業建議。
-- ⏸ 連續兩輪任何維度分數皆無進步 → plateau 報告（說明卡在哪、為何 skill 修不動）。
-- ⏸ 遇到需要人裁決的語意矛盾（兩份文件互斥且 code 無法仲裁、或修正涉及產品決策）→ 列出仲裁選項後暫停。
+**Stop conditions** (stops as soon as any one holds):
+- ✅ All dimensions ≥ the `.docgrad.yml` targets -> closing report + graduation recommendation.
+- ⏸ Two consecutive rounds with no improvement in any dimension's score -> plateau report (explains where it's stuck and why the skill can't fix it further).
+- ⏸ Hitting a semantic contradiction that needs human decision (two documents mutually exclusive and code can't arbitrate, or the fix involves a product decision) -> lists the arbitration options and pauses.
 
-branch 隔離讓用戶可整批 review 再合併；每輪 commit 保證中斷可續、可回退。
+Branch isolation lets the user review everything in a batch before merging; committing every round guarantees the work can be resumed after interruption and can be rolled back.
 
-## 畢業（報告固定尾節，產出交付物但不安裝）
+## Graduation (fixed closing section; artifacts produced, not installed)
 
-達標後建議把可機械化的規則沉澱成該 repo 自己的 CI gate（死鏈/孤兒/新鮮度/入口檔預算——`docs-gate.mjs` CI 模式），並說明 docgrad 的五支 scripts 可直接搬去改造。docgrad 只評分與修內容，**不碰目標 repo 的 CI 設定**。
+Once targets are met, it recommends distilling the mechanizable rules into the repo's own CI gate (dead links / orphans / freshness / entry-file budget — `docs-gate.mjs`'s CI mode), and explains that docgrad's five scripts can be adapted and moved over directly. docgrad only scores and edits content, it **never touches the target repo's CI configuration**.
 
-## scripts 契約
+## Scripts contract
 
-五支皆為零依賴 Node（≥18）腳本，讀 `.docgrad.yml`，輸出 JSON 到 stdout（LLM 消費），錯誤走 stderr＋非零 exit code。共用旗標由 `scripts/lib.mjs › parseArgs()` 一處解析：`--root`（目標 repo 根）、`--config`（設定檔外置——文件源本身不能落檔時用）、`--include`（scoped audit 的範圍 glob）。以下 JSON 形狀為**說明用摘要**；欄位全集以實跑腳本輸出為權威（本檔不複述完整 schema，避免與 `scripts/` 漂移）：
+All five are zero-dependency Node (>=18) scripts that read `.docgrad.yml`, output JSON to stdout (for the LLM to consume), and send errors to stderr with a non-zero exit code. Shared flags are parsed in one place, `scripts/lib.mjs › parseArgs()`: `--root` (target repo root), `--config` (config file located elsewhere — used when the doc source itself can't hold a file), `--include` (the scope glob for a scoped audit). The JSON shapes below are **illustrative summaries**; the full set of fields is authoritative in the actual script output (not repeated in full here, to avoid drifting from `scripts/`):
 
-- `inventory.mjs` → `{files: [{path, bytes, tokens_est, type, structure: {h2, rules}}], totals: {…, rules_total, rules_anchored_ratio}, entry_cost, pollution: {excluded_tokens, ratio}}`
-- `links.mjs` → `{dead_links: [], bad_anchors: [], orphans: [], reachable_ratio}`（可達性從 `index_file`＋`entry_files` 起算 transitive——entry 檔 always-loaded，定義上可達；`--include` 限定範圍時孤兒與可達率一律回 `null`／`[]`，可達性是全量概念）
-- `freshness.mjs` → `{convention, coverage_ratio, stale: [{path, claimed, actual_git, age_days}], mismatches}`（`convention` 是實際採用的慣例清單，多值時依序嘗試抽日期）
-- `coverage.mjs` → `{src_dirs, thresholds, loose_files, areas: [{area, code_files, last_code_commit, mentioned_by, last_doc_commit, commits_since_doc, drift_days, status}], undocumented, drifted}`（覆蓋漂移：code 區域 vs 提及它的 docs 的 git 時滯）
-- `retrieval.mjs` → `{scenarios: [{path, churn_commits, docs: [{doc, hits, tokens_est, depth_from_index}], fan_in, marginal_tokens, max_depth, code_pointer}], areas: [{area, code_pointer, fan_in}], code_pointer_ratio, index_hotness: {index_file, entry_files, median_commits_90d, ratio, top5} | null}`（report-only：可回溯性＋邊際成本，不吃 `--include`，理由同 `coverage.mjs`）
+- `inventory.mjs` → `{docgrad: {version, rubric_hash, corpus_hash}, files: [{path, bytes, tokens_est, type, structure: {h2, rules}}], totals: {…, rules_total, rules_anchored_ratio}, entry_cost, pollution: {excluded_tokens, ratio, note?}, untracked: {count, tokens_est, files, note?}}` (`corpus_hash` fingerprints the corpus scope — `docs_dirs`/`docs_files`/`entry_files`/`exclude`/`index_file`/`exclude_untracked`, normalized so reordering doesn't move it — and is `null` with no config; `untracked` is the collected files git doesn't track, all three fields `null` plus a `note` when git is unavailable, and `pollution.note` appears whenever any collected file is untracked, because the ratio is then checkout-bound)
+- `links.mjs` → `{dead_links: [], bad_anchors: [], orphans, reachable_ratio}` (reachability is computed transitively starting from `index_file` + `entry_files` — entry files are always-loaded, so by definition they're reachable). **`orphans` and `reachable_ratio` are both `null` whenever reachability was not computed** — when `--include` restricts the scope, or when no `index_file` is configured — because reachability is a whole-corpus concept. `null` means "not computed" and must never be read as "none found".
+- `freshness.mjs` → `{convention, coverage_ratio, stale: [{path, claimed, actual_git, age_days}], mismatches}` (`convention` is the list of conventions actually in use; with multiple values, date extraction is tried in order)
+- `coverage.mjs` → `{src_dirs, thresholds, loose_files, areas: [{area, code_files, last_code_commit, mentioned_by, last_doc_commit, commits_since_doc, drift_days, status}], undocumented, drifted}` (coverage drift: the git time lag between a code area and the docs that mention it)
+- `retrieval.mjs` → `{scenarios: [{path, churn_commits, docs: [{doc, hits, tokens_est, depth_from_index}], fan_in, marginal_tokens, max_depth, code_pointer}], areas: [{area, code_pointer, fan_in}], code_pointer_ratio, index_hotness: {index_file, entry_files, median_commits_90d, ratio, top5} | null}` (report-only: traceability + marginal cost, doesn't take `--include`, same reason as `coverage.mjs`)
 
-## 開放問題（實作時定案）
+## Open questions (settled during implementation)
 
-- ~~anchor slug 演算法對 CJK 標題的近似誤差~~ **0.6.1 已解**：與 github-slugger 對齊（逐空白換 dash、詞內底線是字面值、顯式 `<a id>`／`<a name>` 納入 slug 集）。
-- `correctness_sample` 的抽樣策略：純隨機 vs 加權（優先抽「宣稱具體符號/路徑」的段落）——傾向後者。
+- ~~approximation error of the anchor-slug algorithm on CJK headings~~ **resolved in 0.6.1**: aligned with github-slugger (spaces become dashes one by one, underscores within words are taken literally, explicit `<a id>`/`<a name>` are included in the slug set).
+- Sampling strategy for `correctness_sample`: pure random vs. weighted (prioritize sampling paragraphs that "claim specific symbols/paths") — leaning toward the latter.
 
-## 出處致謝（NOTICE.md 詳列）
+## Attribution (full list in NOTICE.md)
 
-claim-ledger 正確性抽查借鑑 ln-21-documentation-auditor；文件類型學參照 Diátaxis；entry-file token 經濟觀點參照 HumanLayer〈Writing a Good CLAUDE.md〉；星等評比六維與 loop 方法論來自 2026-07-10/11 兩個實際文件系統的實戰評比。
+The claim-ledger correctness sampling approach draws on ln-21-documentation-auditor; document typology references Diátaxis; the entry-file token economy perspective references HumanLayer's "Writing a Good CLAUDE.md"; the six-dimension star rating and loop methodology come from hands-on scoring of two real documentation systems on 2026-07-10/11.

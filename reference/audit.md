@@ -1,29 +1,29 @@
-# audit — 單次全量評分
+# audit — one full scoring pass
 
 > **Last updated:** 2026-09-13
 
-前置（blocker）：目標 repo 根目錄必須有 `.docgrad.yml`；沒有 → 停下，導向 `/docgrad init`。
-本流程**不修改任何檔案**、不寫任何狀態——純報告。評分前必先讀 [rubric.md](rubric.md)。
+Precondition (blocker): the target repo root must have `.docgrad.yml`; if not → stop, point to `/docgrad init`.
+This process **does not modify any file** and writes no state — pure report. Read [rubric.md](rubric.md) before scoring.
 
 ## Contents
 
-- [步驟 1. 跑機械腳本](#1-跑機械腳本)
-- [步驟 2. 完整性](#2-完整性)
-- [步驟 3. 正確性（claim-ledger）](#3-正確性claim-ledger)
-- [步驟 4/5. 新鮮度 / 連結度](#4-新鮮度--5-連結度)
-- [步驟 6. 一致性（跨文件＋跨載體）](#6-一致性跨文件跨載體)
-- [步驟 7. 經濟性](#7-經濟性)
-- [步驟 8. Token 經濟報告](#8-token-經濟報告)
-- [步驟 9. 輸出 scorecard](#9-輸出-scorecard)
-- [scoped audit（限定範圍／單一維度）](#scoped-audit限定範圍單一維度)
+- [Step 1. Run the mechanical scripts](#1-run-the-mechanical-scripts)
+- [Step 2. Completeness](#2-completeness)
+- [Step 3. Correctness (claim ledger)](#3-correctness-claim-ledger)
+- [Step 4/5. Freshness / Linkage](#4-freshness--5-linkage)
+- [Step 6. Consistency (across documents and carriers)](#6-consistency-across-documents-and-carriers)
+- [Step 7. Economy](#7-economy)
+- [Step 8. Token economy report](#8-token-economy-report)
+- [Step 9. Emit the scorecard](#9-emit-the-scorecard)
+- [Scoped audit (limited scope / single dimension)](#scoped-audit-limited-scope--single-dimension)
 
-使用者指定了範圍（目錄／glob／主題）或單一維度 → 先讀本檔最後的 [§scoped audit](#scoped-audit限定範圍單一維度)，再回來跑下面的步驟。
+If the user specifies a scope (directory / glob / topic) or a single dimension → first read [§Scoped audit](#scoped-audit-limited-scope--single-dimension) at the end of this file, then come back and run the steps below.
 
-## 步驟
+## Steps
 
-### 1. 跑機械腳本
+### 1. Run the mechanical scripts
 
-`SKILL_DIR` ＝本 skill 的安裝目錄（即本檔上一層）。在目標 repo 根目錄執行：
+`SKILL_DIR` = this skill's install directory (one level above this file). Run from the target repo root:
 
 ```bash
 node "$SKILL_DIR/scripts/inventory.mjs" --root .
@@ -33,180 +33,239 @@ node "$SKILL_DIR/scripts/coverage.mjs" --root .
 node "$SKILL_DIR/scripts/retrieval.mjs" --root .
 ```
 
-完整消費五份 JSON；不要用 head/grep/jq 截斷。任何一支 exit 非 0 → 停下回報 stderr。
+Consume all five JSON outputs in full; don't truncate with head/grep/jq. If any script exits non-zero → stop and report stderr.
 
-### 2. 完整性
+### 2. Completeness
 
-1. 先消費 coverage.mjs 輸出：`undocumented` 與 `drifted` 區域直接列為缺口
-   （undocumented＝沒有任何權威文件；drifted＝code 已動但 docs 沒跟上）；
-   各區域 `mentioned_by` 可人工複核是否誤判（近似路徑、順帶提及）。
-   src_dirs 未設定（輸出帶 note）時此步降級，完全交回下面的 LLM 對照。
-2. 再做 LLM 頂層補判：列出 repo 實際模組/領域清單（src 頂層結構、主要子系統、
-   部署與測試設施），對照 inventory 檔案清單補抓 coverage 看不到的缺口（子系統粒度、
-   部署/測試設施沒有對應 src 目錄者）。
-3. 依 rubric 完整性錨點定星，記下失分點清單。
+1. First consume the coverage.mjs output: list `undocumented` and `drifted` areas directly as gaps
+   (undocumented = no authoritative document at all; drifted = code has changed but docs haven't caught up);
+   each area's `mentioned_by` can be manually rechecked for false positives (near-matched paths, incidental mentions).
+   When `src_dirs` is not configured (the output carries a note), this step degrades and falls back entirely to the LLM cross-check below.
+2. Then do an LLM top-level supplementary check: list the repo's actual modules/domains (top-level src structure, main subsystems,
+   deployment and test infrastructure), and cross-check against the inventory file list to catch gaps coverage can't see (subsystem-level granularity, deployment/test infrastructure with no corresponding src directory).
+3. Assign a star rating against the rubric's completeness anchors, and note down the list of deductions.
 
-### 3. 正確性（claim-ledger）
+### 3. Correctness (claim ledger)
 
-**抽樣不可由你自由決定**——那是 2026-07-13 oikos 收官後重驗一致性 ★4→★2 的根因（`transactions-design.md`
-的 balance 正負號與 code 相反，「前四輪抽樣未覆蓋」）。抽哪些由腳本決定，你只負責驗證。
+**Sampling is not yours to decide freely** — that's exactly what caused oikos's consistency rating to drop ★4→★2 on re-verification after its 2026-07-13 graduation (`transactions-design.md`'s balance sign was the opposite of the code, and "the first four rounds of sampling never covered it"). What gets sampled is decided by the script; you're only responsible for verifying it.
 
-1. **先重驗既有 ledger**：目標 repo 有 `.docgrad/ledger.jsonl` → 讀進來，把 `result` 為 `fail`／`stale`
-   的條目**全部**重驗，`pass` 的抽一半重驗（取 `claim_id` 排序後的偶數位，可重現）。
-   已修好的記 `pass`，仍錯的維持原判並列進失分點。
-   > 沒有 ledger（第一次跑）→ 跳過本步，直接抽新樣本。
-2. **再抽新樣本**：消費 `inventory.mjs` 的 `claim_candidates`（已依「ref 數 → path → line」穩定排序，
-   同一份語料每次順序相同）。從**尚未進過 ledger** 的候選由前往後取，取到補滿
-   `correctness_sample` 條為止；同一文件最多 2 條（跳過超額者，繼續往下取）。
-   候選耗盡就取到多少算多少，並在報告寫明。
-   > `claim_candidates` 的母體＝`totals.claims_total`（fence 外、帶得到 code 座標的非標題行）。
-   > 純敘述性段落抽不到座標、本來就不該進 ledger，這與舊版「純敘述不抽」的規則一致，
-   > 差別只在現在由腳本判定而非逐輪重新解讀。
-3. **逐條對 code 驗證**（Read/Grep 實查，不憑印象）。
-   **驗證範圍是該候選的 `section_lines` 整段，不是只有那一行**——矛盾常寫在錨點行的**鄰句**：
-   oikos 那條 balance 正負號就在「結算由 `src/balance.ts › settle()` 負責」的下一句，
-   只看錨點行會整條漏掉。段內任何一句與 code 不符都記 `fail`，`claim_id` 指向**出錯那一行**。
-   記入 ledger 表：
+**`correctness_sample` is the number of claims drawn *new* this round, not the number of claims verified this round.**
+Re-verification is a separate budget and never eats into it. A round's verified set is exactly:
 
-   | # | 文件:行 | 宣稱 | 驗證方式 | 結果 |
+```
+every outstanding fail/stale          (no cap)
++ up to floor(correctness_sample / 2) least-recently-verified passes
++ correctness_sample new draws        (never reduced by the two lines above)
+```
+
+Steps 1–3 below build those three parts in order.
+
+1. **Re-verify every outstanding `fail` and `stale` entry — no cap.** If the target repo has `.docgrad/ledger.jsonl` → read it in and
+   **collapse it to the latest row per `claim_id` first** (the highest `round`; the ledger is append-only, so an old `fail` row that a later
+   round already recorded as `pass` is *not* outstanding). Every claim whose latest row is `fail` or `stale` gets re-verified, however many there are.
+   Fixed ones get recorded as `pass`; still-wrong ones keep their original verdict and go into the deductions list.
+   Why no cap: these entries decide whether the round's pass rate is honest. Letting them drop out of the denominator would make a repo's
+   correctness score *improve* as its documentation gets worse. In a converging repo this count trends to zero on its own, so it costs nothing in steady state.
+   > No ledger (first run) → skip steps 1 and 2 and go straight to drawing new claims.
+2. **Re-verify the `floor(correctness_sample / 2)` least-recently-verified `pass` entries** — not half of all passes.
+   Re-verifying a claim that already passed is worth less than sampling one that has never been checked, and it is the growing pass set
+   that used to crowd out new draws. Capping it at half a sample keeps a fixed, small cost no matter how large the ledger grows.
+   **"Least recently verified" is read off the collapsed ledger's `round` field**, ascending; ties break on `verified_at` ascending, then on
+   `claim_id` ascending. (`round` is the primary key because it is monotonic within a repo and stays unambiguous when two rounds run on the
+   same date; `verified_at` alone cannot separate them. The `claim_id` tiebreak is what makes two independent runs pick the same set.)
+   Take the first `min(floor(correctness_sample / 2), number of pass entries)` of that ordering.
+3. **Draw `correctness_sample` new claims** — and do not let steps 1 and 2 reduce that number.
+   Consume `inventory.mjs`'s `claim_candidates` (already stably sorted by "ref count → path → line",
+   same order every time for the same corpus). Take candidates that **haven't entered the ledger yet**, front to back, until
+   you have `correctness_sample` of them; at most 2 per document (skip any over that quota and keep taking from further down).
+   Cumulative coverage therefore grows by `correctness_sample` every round, with no ceiling, until the pool runs out.
+   **When fewer than `correctness_sample` unseen candidates remain, the round draws what exists — possibly zero — and the report states the shortfall**,
+   naming which of the two causes it was: the candidate pool is exhausted (every candidate has entered the ledger), or the remaining unseen
+   candidates all sit in documents that already hit this round's 2-per-document quota. Write it as
+   `drew 7 of 12 (pool exhausted: 335/335 candidates already in the ledger)`. A round with no new draws is not an error — it means the corpus is
+   fully covered; steps 1 and 2 still run and the pass rate is still computed over whatever was verified.
+   > `claim_candidates`'s population = `totals.claims_total` (non-heading lines outside fences that have a code coordinate).
+   > Purely descriptive paragraphs have no coordinate to sample and were never meant to enter the ledger — consistent with the old
+   > "don't sample pure narrative" rule, the only difference being the script decides it now instead of re-interpreting it every round.
+4. **Verify each one against the code** (actually Read/Grep it, don't go from memory).
+   **The scope of verification is the candidate's whole `section_lines` span, not just that one line** — contradictions are often written in the **sentence next to** the anchor line:
+   oikos's balance sign issue sat in the sentence right after "settlement is handled by `src/balance.ts › settle()`",
+   and looking only at the anchor line would have missed the whole thing. Any sentence in the span that disagrees with the code gets recorded `fail`, with `claim_id` pointing at **the line that's wrong**.
+   Record into the ledger table:
+
+   | # | file:line | claim | verification method | result |
    |---|---|---|---|---|
-   | 1 | docs/x.md:75 | 「路由定義在 `src/router.ts`」 | Read src/router.ts | pass / fail / stale |
+   | 1 | docs/x.md:75 | "Routing is defined in `src/router.ts`" | Read src/router.ts | pass / fail / stale |
 
-4. **算兩個數字，兩個都要寫進報告**：
-   - **通過率**＝pass ÷ 本輪驗證總數 → 依 rubric 正確性錨點定星。
-   - **累積覆蓋率**＝ledger 內相異 claim 數 ÷ `totals.claims_total` → 報告寫成
-     `正確性 ★4（通過率 8/8，累積覆蓋 23/68 ＝ 34%）`。
-     **單獨一個星等沒有意義**——它建立在多大的樣本上，讀者要看得見。
-5. 錯誤性質（細節 vs 機制）一併記入失分點。
+5. **Calculate two numbers, and put both in the report**:
+   - **Pass rate** = pass ÷ total verified this round (all three parts of the verified set: outstanding fail/stale, re-verified passes, new draws)
+     → assign a star rating against the rubric's correctness anchors.
+   - **Cumulative coverage** = distinct claims in the ledger ÷ `totals.claims_total` → write it in the report as
+     `Correctness ★4 (pass rate 8/8, cumulative coverage 23/68 = 34%)`.
+     **A star rating alone means nothing** — the reader needs to see the sample size it's built on.
+6. Record the nature of the error (detail vs. mechanism) into the deductions too.
 
-> **audit 不落檔**：本流程**讀** ledger 但不寫。ledger 的寫入只發生在 `improve`／`loop`
-> （見 [improve.md](improve.md) 步驟 5）——與「audit 純報告」的鐵則一致。
+**Worked example** (`correctness_sample: 12`, oikos's 335 candidates, a ledger holding 12 distinct claims — all `pass` — at the start of round 8).
+Assume round 9's new draws turn up 3 failures and the next round's fixes repair 2 of them:
 
-### 4. 新鮮度 / 5. 連結度
+| Round | Distinct at start | fail/stale re-verified | pass re-verified | New draws | Verified this round | Distinct at end |
+|---|---|---|---|---|---|---|
+| 8 | 12 | 0 | 6 | 12 | 18 | 24 |
+| 9 | 24 | 0 | 6 | 12 | 18 | 36 |
+| 10 | 36 | 3 | 6 | 12 | 21 | 48 |
+| 11 | 48 | 1 | 6 | 12 | 19 | 60 |
+| 12 | 60 | 0 | 6 | 12 | 18 | 72 |
 
-直接以 freshness.mjs / links.mjs 輸出對 rubric 錨點定星。
+Read off it: the "distinct at end" column grows by exactly `correctness_sample` every round and never converges — the pass re-verification is a
+fixed 6 whatever the ledger size, so the old fixed point (re-verification growing until it consumed the whole budget, freezing oikos at
+23/335 ≈ 7%) does not exist. Full coverage of 335 candidates now takes ⌈335/12⌉ = 28 rounds instead of never. Failures widen the verified set
+(rounds 10 and 11 verify 21 and 19 claims) instead of displacing new draws — under the old rule, 3 failures against a ledger of 18 passes left
+zero new draws, so the sampling stopped expanding exactly when the documentation most needed it.
 
-新鮮度另看 `date_concentration`（不影響星等，但**報告要寫**）：`max_same_day_ratio` 偏高代表
-日期訊號集中在同一天，通常是大批 backfill 的痕跡——這些檔會同步老化、同步變 stale，
-`coverage_ratio` 再高也分辨不出「哪份文件真的久未維護」。oikos 實測 0.68（28/41 檔卡在
-backfill 當天）。報告寫成「覆蓋率 95%，但 68% 的日期集中在 2026-07-13，訊號鑑別力有限」。
-注意它分不出「backfill」與「這批檔案本來就同時改」——只提示，不下判斷。
-links 的壞錨一律計入：slug 演算法自 0.6.1 起與 GitHub 逐字對齊（逐空白換 dash、詞內底線保留、顯式 `<a id>` 納入索引），CJK 標題不再有近似誤差。`cjk_uncertain` 只留作提示欄位，**不是**跳過確認的理由。
+> **Empty sample: correctness is reported as not measurable, not as a star.** The trigger is mechanical: the round's verified set is empty —
+> no outstanding `fail`/`stale`, no `pass` entries in the ledger, and no candidates to draw (`totals.claims_total: 0`). This is the normal state
+> for a library repo whose documentation describes an API rather than file paths. A pass rate over zero claims is undefined, so every ★1–★5
+> anchor here is inapplicable; picking one anyway is how four independent runs on the same fixture produced ★3, ★3, ★1 and ★2. In that case:
+> - Write `n/a` in the rating column, with `(not measurable — 0 verifiable claims in the corpus)` as the deduction text. **Do not** give a star:
+>   not ★1 (nothing was found wrong), not ★3, not the target value.
+> - Treat it like a design ceiling for the targets check: the dimension counts as met and is excluded from "pick the lowest dimension"
+>   (see [improve.md](improve.md) §Dimension cap: the design ceiling).
+> - **The report must state the finding**, because it is itself the thing worth acting on: the corpus contains no claim carrying a code
+>   coordinate, so nothing in it can be mechanically checked against the code and correctness can never be measured until that changes.
+>   Put the recommendation — anchor claims to real paths/symbols so they become verifiable — under "Suggested next steps" even though the
+>   dimension carries no star.
+>
+> A corpus with claims but an unlucky round is *not* this case: if `claims_total > 0`, the verified set cannot be empty (there is always
+> something to draw), so the rating proceeds normally.
 
-### 6. 一致性（跨文件＋跨載體）
+> **audit writes nothing to disk**: this process **reads** the ledger but never writes it. The ledger is only written by `improve`/`loop`
+> (see [improve.md](improve.md) step 5) — consistent with the ironclad rule that "audit is pure report".
 
-先讀 [placement.md](placement.md)——落點與重複的判定規則在那裡。
+### 4. Freshness / 5. Linkage
 
-1. **矛盾**：挑 3–5 個關鍵事實主題（架構分層、狀態機、部署方式、資料模型…），跨文件比對宣稱，
-   矛盾處以 code 仲裁。
-2. **重複**：每個主題再往 code 註解／spec 追一次——這主題的權威是誰？有沒有第二份各自展開的敘述？
-   實作：拿該主題的關鍵符號／路徑 grep 註解區塊（`//`、`#`、`/** */`、docstring），
-   找與 docs 各自展開的定義式敘述。摘要＋連結不算重複（placement.md 的例外）。
-3. **落點**：抽 2–3 條「當前結論」查它的根據在哪（placement.md 規則 4）——spec 有結論卻沒有根據、
-   根據只活在 issue → 記落點失分。同時對照三軸看有沒有放錯載體（例：只有改某模組才需要的細節寫進 entry file）。
-4. 失分點一律標類別 `[矛盾]`／`[重複]`／`[落點]`；後兩類要寫齊 placement.md 要求的四欄
-   （資訊／目前落點／建議落點／理由是哪一軸），缺欄的建議不要提。
-5. 依 rubric 一致性錨點定星。**只判落點與重複，不評註解品質**——界線見
-   [design.md](../docs/design.md) §定位與邊界。
+Assign star ratings directly against the rubric anchors using the freshness.mjs / links.mjs output.
 
-### 7. 經濟性
+For freshness, also check `date_concentration` (doesn't affect the star rating, but **must be written in the report**): a high `max_same_day_ratio` means the date signal is clustered on a single day, usually the trace of a bulk backfill — these files will age together and go stale together, and no matter how high `coverage_ratio` is, it can't tell you "which document has genuinely gone unmaintained for a long time." oikos measured 0.68 in practice (28/41 files stuck on the backfill day). Write it in the report as "coverage 95%, but 68% of the dates cluster on 2026-07-13, limiting the signal's discriminating power." Note it can't distinguish "backfill" from "this batch of files really did change at the same time" — it only flags, it doesn't rule.
 
-直接以 `inventory.mjs` 的 `entry_cost.tokens_est`（固定成本）與 `pollution.ratio`（污染面）
-對 rubric 經濟性錨點定星——**全量機械，不經 LLM 判斷**。兩點必查：
+Count every broken anchor from links: since 0.6.1 the slug algorithm matches GitHub character-for-character (spaces to dashes one by one, underscores inside words kept, explicit `<a id>` tags included in the index), so CJK headings no longer have approximation error. `cjk_uncertain` is kept only as a hint field, **not** a reason to skip verification.
 
-1. `entry_cost.files` 是不是真的每次任務都載入。把只有人看的落地頁（如 GitHub 用的 `README.md`）
-   列進 `entry_files` 會讓固定成本灌水；反過來，agent 每次都必讀卻沒列進去則會低報。
-   發現設定與現實不符 → 記為失分點並建議修 `.docgrad.yml`，**不要**自行改設定再評分。
-   - **條件式必讀檔**（入口檔寫著「動 UI 前先讀 `DESIGN.md`」這種）不算 always-loaded：
-     建議改列 `docs_files`，它照樣進語料與其他五維，但不計固定成本（見 [init.md](init.md) 問卷第 3 項）。
-2. 污染面 ≥ 10% 時本維上限 ★3（rubric 的降級規則），即使固定成本很低。
+### 6. Consistency (across documents and carriers)
 
-### 8. Token 經濟報告
+Read [placement.md](placement.md) first — the rules for judging placement and duplication live there.
 
-依 rubric.md「Token 經濟報告」節展開固定成本與污染面的細節，附損益兩平解讀。
+1. **Contradictions**: pick 3-5 key factual topics (architecture layering, state machines, deployment method, data model, …), compare claims across documents, and arbitrate contradictions with the code.
+2. **Duplication**: for each topic, trace once more into the code comments/spec — who is the authority on this topic? Is there a second, independently-elaborated account of it?
+   In practice: grep the comment blocks (`//`, `#`, `/** */`, docstrings) for the topic's key symbols/paths, and look for a definitional account that's elaborated separately from the docs. A summary + link doesn't count as duplication (the exception in placement.md).
+3. **Placement**: sample 2-3 "current conclusions" and check where their grounds live (placement.md rule 4) — a spec that states a conclusion with no grounds, or grounds that only live in an issue → record a placement deduction. Also check against the three trade-off axes for anything placed in the wrong carrier (e.g., detail only needed when touching a particular module written into the entry file).
+4. Every deduction is tagged with a category: `[contradiction]`/`[duplication]`/`[placement]`; the latter two must fill in all four columns placement.md requires
+   (information / current placement / suggested placement / which axis is the reason) — don't raise a suggestion with a missing column.
+5. Assign a star rating against the rubric's consistency anchors. **Only judge placement and duplication, never comment quality** — see the boundary in
+   [design.md](../docs/design.md) §Positioning and boundaries.
 
-邊際成本：`.docgrad.yml` 有設 `scenarios:`（代表性 code 路徑清單）時，直接消費 `retrieval.mjs` 的
-`scenarios[]` 輸出——每條列出 `marginal_tokens`／`max_depth`／`fan_in`／`code_pointer`，並用
-`churn_commits` 排序點名「稅最重」那條。沒設 `scenarios:` 時退回舊法：用 `.docgrad.yml` 的
-`scenario`（單數）沿索引/路由規則 LLM 模擬必讀路徑。
+### 7. Economy
 
-同時附「可回溯性」小節（report-only，不計星，見 rubric.md 同名節）：
-`retrieval.mjs` 的 `code_pointer_ratio`（低比例的 area 列出來，代表 code 改完找不到回 spec 的路）、
-`index_hotness`（`ratio` 明顯偏高時點名，附 `top5`）；`inventory.mjs` 各檔 `structure.rules` 裡
-`median_chars`/`p90_chars` 明顯偏長或 `anchored_ratio` 明顯偏低的檔案，建議契約層／細節層拆分。
+Assign a star rating directly against the rubric's economy anchors using `inventory.mjs`'s `entry_cost.tokens_est` (fixed cost) and `pollution.ratio` (pollution surface) — **fully mechanical, no LLM judgment involved**. Two things must always be checked:
 
-### 9. 輸出 scorecard
+1. Whether `entry_cost.files` is really loaded on every task. Listing a human-only landing page (like the `README.md` used on GitHub) in `entry_files` inflates the fixed cost; conversely, a file the agent must read every time but that isn't listed under-reports it.
+   Finding a mismatch between the config and reality → record it as a deduction and suggest fixing `.docgrad.yml`, **don't** change the config yourself and then score.
+   - **Conditionally-required files** (an entry file that says "read `DESIGN.md` before touching the UI") don't count as always-loaded:
+     suggest moving them to `docs_files` instead — they still enter the corpus and the other five dimensions, but don't count toward the fixed cost (see [init.md](init.md) questionnaire item 3).
+2. When pollution surface ≥ 10%, this dimension is capped at ★3 (the rubric's downgrade rule), even if the fixed cost is low.
+3. **Check `inventory.untracked.count` before you write the rating down** — the corpus is collected off the filesystem, not out of git, so this rating can depend on whose checkout it was run in:
+   - **Non-zero** → the run collected N local files git does not track (`untracked.files` lists them, `untracked.tokens_est` is what they weigh). The pollution ratio and the token totals are **checkout-bound: another machine on the same commit gets a different number, and possibly a different star**. The scorecard must say so, quoting the count and token weight, and recommend `exclude_untracked: true` in `.docgrad.yml` to measure the clean-checkout corpus instead (see [init.md](init.md) questionnaire item 6). `inventory.pollution.note` carries the same warning when any *collected* file is untracked — pass it through, don't paraphrase it away.
+   - **`null`** → git was unavailable or this is not a git working tree (`untracked.note` says which), so tracked and untracked files cannot be told apart and the check **could not run at all**. State that in the report; `null` is not zero, and an unrun check must not be reported as a clean one.
+   - **Zero** → the collected corpus is exactly what the commit contains; nothing to note.
+
+### 8. Token economy report
+
+Expand on the details of fixed cost and pollution surface per rubric.md's "Token economy report" section, with a break-even interpretation attached.
+Report `inventory.untracked` on the line right after the pollution surface (count, token weight, and the paths from `untracked.files` when there are few enough to name; `null` = the check could not run, see step 7) — it is the qualifier on the pollution number, so it belongs next to it rather than in a footnote.
+
+Marginal cost: when `.docgrad.yml` has `scenarios:` set (a list of representative code paths), consume `retrieval.mjs`'s
+`scenarios[]` output directly — list `marginal_tokens`/`max_depth`/`fan_in`/`code_pointer` for each entry, and use
+`churn_commits` to sort and call out the one that "taxes the most." When `scenarios:` isn't set, fall back to the old method: use `.docgrad.yml`'s
+`scenario` (singular) and have the LLM simulate the required-reading path along the index/routing rules.
+
+Also include a "Traceability" subsection (report-only, not rated, see rubric.md's section of the same name):
+`retrieval.mjs`'s `code_pointer_ratio` (list the low-ratio areas — meaning that once code changes there's no path back to the spec),
+`index_hotness` (call it out when `ratio` is noticeably high, with `top5` attached); files whose `inventory.mjs` per-file `structure.rules`
+have a noticeably long `median_chars`/`p90_chars` or a noticeably low `anchored_ratio` — suggest splitting into a contract layer and a detail layer.
+
+### 9. Emit the scorecard
 
 ```markdown
-# docgrad scorecard — <repo 名> @ <YYYY-MM-DD>
+# docgrad scorecard — <repo> @ <YYYY-MM-DD>
 
-| 維度 | 星等 | 目標 | 主要失分點 |
+| Dimension | Rating | Target | Main deductions |
 |---|---|---|---|
-| 完整性 | ★x | ★y | … |
-| 正確性 | ★x | ★y | …（通過率 n/N、累積覆蓋 m/總數 ＝ x%） |
-| 新鮮度 | ★x | ★y | …（日期集中度 x%，若偏高要點明） |
-| 連結度 | ★x | ★y | … |
-| 一致性 | ★x | ★y | …（失分點標 `[矛盾]`／`[重複]`／`[落點]`） |
-| 經濟性 | ★x | ★y | …（固定成本 N tokens、污染面 x%） |
+| Completeness | ★x | ★y | … |
+| Correctness | ★x | ★y | …(pass rate n/N, cumulative coverage m/total = x%; `n/a` when the corpus has 0 verifiable claims) |
+| Freshness | ★x | ★y | …(date concentration x%, call it out if high) |
+| Linkage | ★x | ★y | … |
+| Consistency | ★x | ★y | …(deductions tagged `[contradiction]`/`[duplication]`/`[placement]`) |
+| Economy | ★x | ★y | …(fixed cost N tokens, pollution surface x%; add "N untracked files — ratio is checkout-bound" when `untracked.count` is non-zero, "untracked not checked (no git)" when it is `null`) |
 
-## Token 經濟報告
-- 固定成本：~N tokens（entry_files: …）— 已計入經濟性
-- 邊際成本：有 scenarios 時逐條列（scenario「path」：~N tokens、max_depth N 跳、fan_in N、
-  code_pointer yes/no、churn_commits N——標出稅最重那條）；無 scenarios 則沿用 scenario「…」LLM
-  模擬：~N tokens，必讀路徑 a.md → b.md → …
-- 污染面：x%（exclude: …）— 已計入經濟性
-- 解讀：…
+## Token economy (not rated)
+- Fixed cost: ~N tokens (entry_files: …) — already counted in economy
+- Marginal cost: with scenarios, list each one (scenario "path": ~N tokens, max_depth N hops, fan_in N,
+  code_pointer yes/no, churn_commits N — call out the one that taxes the most); without scenarios, fall back to scenario "…" LLM
+  simulation: ~N tokens, required-reading path a.md → b.md → …
+- Pollution surface: x% (exclude: …) — already counted in economy
+- Untracked files in the corpus: N files / ~M tokens (…paths) — the ratio above is checkout-bound, another machine on this
+  commit may rate economy differently; `exclude_untracked: true` measures the clean-checkout corpus instead.
+  Write `0 — corpus matches the commit` when there are none, and `not checked (no git)` when `untracked.count` is `null`
+- Interpretation: …
 
-### 可回溯性（report-only）
-- code_pointer_ratio：x%（低於平均的 area：…）
-- index_hotness：ratio N（top5：…）
-- structure.rules 偏長／低 anchored 的檔案：…
+### Traceability (report-only)
+- code_pointer_ratio: x% (below-average areas: …)
+- index_hotness: ratio N (top5: …)
+- Files with long structure.rules / low anchored ratio: …
 
-## 職權外事項（docgrad 修不了的）
-目標 repo 有 `.docgrad/out-of-scope.jsonl` 時，列出所有 `status: open` 的項目與筆數
-（見 [improve.md](improve.md) §職權外發現的出口）；沒有該檔就整節省略。
+## Outside docgrad's remit
+When the target repo has `.docgrad/out-of-scope.jsonl`, list all `status: open` items and their count
+(see [improve.md](improve.md) §Exit for findings outside docgrad's remit); omit this section entirely if the file doesn't exist.
 
-## 建議下一步
-最低分維度＝<維度>（同分取 rubric 順序靠前者）。失分點：
+## Suggested next steps
+Lowest-scoring dimension = <dimension> (ties broken by rubric order). Deductions:
 1. …
 2. …
-（要開始收斂請跑 /docgrad improve 或 /docgrad loop）
+(to start converging, run /docgrad improve or /docgrad loop)
 ```
 
-## scoped audit（限定範圍／單一維度）
+## Scoped audit (limited scope / single dimension)
 
-**觸發**：使用者輸入帶了範圍（目錄、glob，或「infra 相關文件」這類主題描述）或維度
-（`--dim freshness`、「只評完整性」）。
+**Trigger**: the user's input carries a scope (directory, glob, or a topic description like "infra-related docs") or a dimension
+(`--dim freshness`, "just score completeness").
 
-**範圍轉譯**：主題描述先轉成具體 glob（用 inventory 的檔案清單挑出相關檔案），並在報告標頭
-**列出實際採用的 `--include` 值**——使用者要能看見你把「infra 相關」解讀成了什麼。轉不出來就問，不要臆測。
+**Scope translation**: translate a topic description into a concrete glob first (use the inventory's file list to pick out relevant files), and
+**list the actual `--include` value used** in the report header — the user needs to see what you interpreted "infra-related" as. If you can't translate it, ask; don't guess.
 
-**鐵則：純報告、不落任何檔。** scoped 結果不寫 `.docgrad/scorecard-latest.md`、不 append
-`.docgrad/history.jsonl`——history 的跨輪可比性只認全量 audit，scoped 分數混進去會讓走勢失真。
-使用者要求「順便記錄一下」也照樣拒絕，改建議跑全量 `audit` 或 `improve`。
+**Ironclad rule: pure report, writes nothing to disk.** A scoped result never writes `.docgrad/scorecard-latest.md`, never appends to
+`.docgrad/history.jsonl` — history's cross-round comparability only recognizes full audits; mixing in scoped scores would distort the trend.
+Refuse even if the user asks to "log it while you're at it" — suggest running a full `audit` or `improve` instead.
 
-**跑法**：吃 `--include <glob>` 的三支（inventory／links／freshness）加旗標（可重複或逗號分隔）；
-`coverage.mjs`／`retrieval.mjs` 刻意不吃，一律全量跑。`--dim` 時只跑該維要的腳本
-（對照 [rubric.md](rubric.md) §機械訊號 → 維度對照），其餘略過。
+**How to run it**: pass the `--include <glob>` flag (repeatable or comma-separated) to the three scripts that accept it (inventory/links/freshness);
+`coverage.mjs`/`retrieval.mjs` deliberately don't take it and always run in full. With `--dim`, run only the scripts that dimension needs
+(cross-reference [rubric.md](rubric.md) §Mechanical signal → dimension map), skip the rest.
 
-**各維度在 scope 下的效力**（不照做會給出誤導性星等）：
+**How each dimension behaves under scope** (skip this and you get a misleading star rating):
 
-| 維度 | scoped 行為 |
+| Dimension | Scoped behavior |
 |---|---|
-| 完整性 | `coverage.mjs` 一律全量比對（`--include` 對它刻意不生效）——docs 端一縮，範圍外的提及會被誤判成 undocumented。LLM 補判則限縮在 scope 內的領域。 |
-| 正確性 | claim-ledger 只從 scope 內文件抽樣（`claim_candidates` 已隨 `--include` 縮到範圍內）；`correctness_sample` 可按檔案數等比縮小，實際抽樣數寫進報告。累積覆蓋率**不可報**——分母 `claims_total` 被 scope 縮過，與全量報告的覆蓋率不同義。既有 ledger 照樣讀、照樣重驗，但**不寫回**。 |
-| 新鮮度 | 直接可用（per-file 判定，不受範圍影響）。 |
-| 連結度 | 只採計死鏈／壞錨；孤兒與可達率腳本會回 `null`——可達性是全量索引概念，範圍一縮就失真。報告寫「不適用」，**不可**因此打 ★1。 |
-| 一致性 | 跨文件比對限縮在 scope 內；矛盾的另一半落在範圍外時記為「需全量 audit 確認」。 |
-| 經濟性 | **不可在 scoped 下定星**。固定成本＝entry_files 的全量概念，污染面是佔全語料比例，範圍一縮兩者都失真。報告寫「不適用（需全量 audit）」，**不可**因此打 ★1——同連結度的孤兒/可達率。 |
-| Token 經濟報告 | 只報範圍內 tokens，並標明 scoped 值不可與全量報告對比；`retrieval.mjs` 不吃 `--include`（同 coverage.mjs 理由，見其 `note`），邊際成本／可回溯性報全量。 |
+| Completeness | `coverage.mjs` always cross-checks in full (`--include` deliberately has no effect on it) — shrink the docs side and mentions outside the scope get misjudged as undocumented. The LLM supplementary check is limited to domains inside the scope. |
+| Correctness | the claim ledger samples only from documents inside the scope (`claim_candidates` has already been narrowed to the scope by `--include`); `correctness_sample` — the number of *new* draws — may be scaled down proportionally to file count, and the actual number drawn gets written into the report. Cumulative coverage **must not be reported** — the denominator `claims_total` has been narrowed by scope and doesn't mean the same thing as a full report's coverage. The existing ledger is still read and still re-verified, but **not written back**. |
+| Freshness | usable as-is (per-file judgment, unaffected by scope). |
+| Linkage | only dead links/broken anchors count; the script returns `null` for orphans and reachable ratio — reachability is a full-index concept and gets distorted the moment the scope shrinks. Write "not applicable" in the report; **don't** give a ★1 because of it. |
+| Consistency | cross-document comparison is limited to inside the scope; when the other half of a contradiction falls outside the scope, record it as "needs a full audit to confirm." |
+| Economy | **must not be star-rated when scoped**. Fixed cost is a full-corpus concept over entry_files, and pollution surface is a proportion of the whole corpus — both get distorted the moment the scope shrinks. Write "not applicable (needs a full audit)" in the report; **don't** give a ★1 because of it — same as linkage's orphans/reachable ratio. |
+| Token economy report | report only tokens inside the scope, and note that the scoped value can't be compared to a full report's; `retrieval.mjs` doesn't accept `--include` (same reason as coverage.mjs, see its `note`) — marginal cost/traceability are reported in full. |
 
-**報告標頭**（取代全量 scorecard 的標題行）：
+**Report header** (replaces the full scorecard's title line):
 
 ```markdown
-# docgrad scoped report — <repo 名> @ <YYYY-MM-DD>
+# docgrad scoped report — <repo> @ <YYYY-MM-DD>
 
-> scope：`docs/infra/**`（來自「infra 相關文件」）｜維度：全部｜**純報告，未寫入 `.docgrad/`**
+> scope: `docs/infra/**` (from "infra-related docs") | dimension: all | **pure report, nothing written to `.docgrad/`**
 ```
 
-`--dim` 時 scorecard 只列該維一列，「建議下一步」照樣給該維失分點——沒評的維度不給星等、不留空列。
+With `--dim`, the scorecard lists only that one dimension's row; "Suggested next steps" still gives that dimension's deductions — dimensions that weren't scored get no star rating and no blank row.

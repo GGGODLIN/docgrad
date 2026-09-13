@@ -1,6 +1,6 @@
 {
   "name": "docgrad",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Grade and converge a repo's documentation system as an AI-agent context source — six-dimension star rating (completeness, correctness, freshness, linkage, consistency, economy) including entry-file token cost, with an improvement loop that fixes docs until target ratings are met.",
   "author": {
     "name": "Ray Lee"
@@ -8,6 +8,18 @@
   "homepage": "https://github.com/redtear1115/docgrad",
   "repository": "https://github.com/redtear1115/docgrad",
   "license": "MIT",
-  "keywords": ["documentation", "docs-audit", "doc-quality", "dead-links", "freshness", "orphans", "token-economy", "doc-convergence", "context-cost"],
-  "skills": ["./"]
+  "keywords": [
+    "documentation",
+    "docs-audit",
+    "doc-quality",
+    "dead-links",
+    "freshness",
+    "orphans",
+    "token-economy",
+    "doc-convergence",
+    "context-cost"
+  ],
+  "skills": [
+    "./"
+  ]
 }

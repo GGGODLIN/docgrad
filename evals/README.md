@@ -2,67 +2,90 @@
 
 > **Last updated:** 2026-09-13
 
-skill 級評測：量的是「agent 拿這個 skill 去評分，結果穩不穩、對不對」，
-不是腳本的單元行為（那是 `tests/`，`node --test tests/*.test.mjs`）。
+Skill-level evaluation: this measures "when an agent uses this skill to score a repo, is the
+result stable and correct" — not the scripts' unit behavior (that's `tests/`,
+`node --test tests/*.test.mjs`).
 
 ## Contents
 
-- [為什麼需要](#為什麼需要)
-- [三個 case](#三個-case)
-- [怎麼跑](#怎麼跑)
-- [目前狀態：已撰寫、尚未執行](#目前狀態已撰寫尚未執行)
-- [fixtures 的機械基準值](#fixtures-的機械基準值)
+- [Why they exist](#why-they-exist)
+- [The three cases](#the-three-cases)
+- [How to run them](#how-to-run-them)
+- [Current status: run by hand, not yet harnessed](#current-status-run-by-hand-not-yet-harnessed)
+- [Mechanical baselines for the fixtures](#mechanical-baselines-for-the-fixtures)
 
-## 為什麼需要
+## Why they exist
 
-`tests/` 有 60+ 個單元測試全過，但它們測的是五支腳本的輸出，**不是星等的穩定性**。
-2026-07-13 oikos 收官後同日重驗，一致性 ★4→★2——單元測試一個都沒紅，因為壞的不是腳本。
+`tests/` has 60+ unit tests all passing, but they test the output of the five scripts,
+**not the stability of the star rating**. After oikos's graduation on 2026-07-13, a same-day
+re-verification found consistency went ★4→★2 — not a single unit test went red, because the
+scripts weren't what was broken.
 
-沒有 eval 就回答不了「★4 的誤差是 ±0 還是 ±2」，也驗不出 v1.1.0 的抽樣機械化是否真的有效。
-這也是 Anthropic skill authoring checklist 的 Testing 三項（≥3 個 evaluation、跨模型測、
-真實場景測）要求的東西。
+Without evals there's no way to answer "is the error on a ★4 rating ±0 or ±2," and no way to
+verify whether v1.1.0's sampling mechanization actually worked. This is also what the Anthropic
+skill authoring checklist's three Testing requirements (≥3 evaluations, cross-model testing,
+real-scenario testing) call for.
 
-## 三個 case
+## The three cases
 
-| case | 測什麼 | 通過條件 |
+| case | what it tests | pass condition |
 |---|---|---|
-| `linkage-known` | **可重現性** | 死鏈 1/12 ＝ 8.33% 只能是連結度 ★2；多次執行星等必須完全一致 |
-| `planted-contradiction` | **抽樣覆蓋率** | 矛盾句在錨點行的**鄰句**（無 code ref）——只驗錨點行就會漏掉 |
-| `clean-baseline` | **偽陽性** | 全乾淨的 repo 不得被扣分；提高敏感度不能變成到處誤報 |
+| `linkage-known` | **reproducibility** | dead links 1/12 = 8.33% can only be linkage ★2; the rating must be identical across multiple runs |
+| `planted-contradiction` | **sampling coverage** | the contradiction sits in the sentence **next to** the anchor line (no code ref) — checking only the anchor line would miss it |
+| `clean-baseline` | **false positives** | a fully clean repo must not be docked; raising sensitivity must not turn into false positives everywhere |
 
-前兩個逼 docgrad 抓錯，第三個確認它不會為了抓錯而誤傷。三者缺一，另外兩個的結論都不可信。
+The first two push docgrad to catch real defects; the third confirms it doesn't harm a clean
+repo in the process. Drop any one of the three and the other two's conclusions become untrustworthy.
 
-## 怎麼跑
+## How to run them
 
 ```bash
 claude plugin eval . --runs 5
 ```
 
-- `--runs 5`：**星等分布本身就是指標**。三次跑出 ★2／★2／★3 代表該處還留著自由度，
-  要當缺陷追，不是取眾數了事。
-- `--model`：checklist 要求 Haiku／Sonnet／Opus 都測。rubric 是大量 zh-TW 判斷性散文，
-  弱模型能否穩定對號入座**完全未知**——這正是要量的。
-- `--threshold`：全綠才算過；`linkage-known` 的星等沒有解釋空間。
+- `--runs 5`: **the distribution of star ratings is itself the metric**. Getting ★2/★2/★3 across
+  three runs means room for discretion remains at that point — track it as a defect, don't just
+  take the mode and move on.
+- `--model`: the checklist requires testing Haiku/Sonnet/Opus. The rubric is a large amount of
+  judgment-based zh-TW prose, and whether a weaker model can map it consistently to the right
+  answer is **completely unknown** — that's exactly what this is meant to measure.
+- `--threshold`: everything must be green to pass; `linkage-known`'s star rating leaves no room
+  for interpretation.
 
-## 目前狀態：已撰寫、尚未執行
+## Current status: run by hand, not yet harnessed
 
-`claude plugin eval` 在本機回報 **early access**，無法執行：
+`claude plugin eval` still reports **early access** locally and can't be run:
 
 ```
-$ claude plugin eval init --bare probe
+$ claude plugin eval .
 `plugin eval` is currently in early access
 ```
 
-所以 **case 已按 CLI `--help` 明載的 `prompt.md` + `graders/*.md` 佈局寫好，但一次都還沒跑過，
-本檔不列任何分數**。取得權限後要做的第一件事是跑一輪 `--runs 5`，把星等分布記錄下來當基線。
+So all three cases were **executed by hand instead**, with their `prompt.md` text unchanged and each
+output scored against its `graders/criteria.md`: three fixtures x two language arms (the English
+rubric and the Traditional Chinese one it was translated from) x two runs = 12 independent audits.
+Results, including the star-rating spread and what it exposed, are in
+[case-studies/03-fixtures.md](../case-studies/03-fixtures.md).
 
-`case.yaml` 的欄位 schema 未公開，本 suite **刻意不寫** `case.yaml`——寧可少用進階功能，
-也不猜格式。`--runs`／`--model` 等一律走 CLI 旗標。
+Summary: all 12 runs passed their case's stated criteria, and 16 of 18 dimension slots were
+unanimous across runs. The two that were not produced one real finding — **the correctness anchors
+are all written in terms of a pass rate, and `linkage-known` has `claims_total: 0`, so an empty
+sample has no anchor at all**. Four runs rated it ★3, ★3, ★1 and ★2, each defensibly. That gap
+belongs in `reference/rubric.md`, not in the evals.
 
-## fixtures 的機械基準值
+The first thing to do once harness access is granted is a `--runs 5` pass to turn that hand-measured
+spread into a distribution, and to add the no-plugin baseline arm the harness provides and hand runs
+cannot.
 
-`evals/fixtures/` 下三個 repo 的腳本輸出是固定的，grader 的斷言直接建立在這些數字上。
-改動 fixture 前先重跑對照，數字變了就要同步改 grader：
+The `case.yaml` field schema is undocumented, so this suite **deliberately does not write**
+`case.yaml` — better to forgo the advanced features than guess the format. `--runs`/`--model`
+etc. are all passed as CLI flags.
+
+## Mechanical baselines for the fixtures
+
+The script output for the three repos under `evals/fixtures/` is fixed; the graders' assertions
+are built directly on these numbers. Before changing a fixture, rerun the comparison first —
+if the numbers change, update the graders accordingly:
 
 ```bash
 for f in clean linkage-known planted-contradiction; do

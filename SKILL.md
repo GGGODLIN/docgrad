@@ -7,47 +7,56 @@ license: MIT
 
 > **Last updated:** 2026-09-13
 
-評估並收斂一個 repo 的文件體系（docs 目錄＋root 指引檔）作為 **AI agent context 來源**的品質：
-六維計星（含經濟性——入口檔 token 稅）；`loop` 逐輪修到達標。不評 prose 風格、不評 code、不碰 CI。
+Grade and converge a repo's documentation system (the docs directory plus the root instruction
+files) as an **AI agent context source**: six dimensions rated in stars (including economy — the
+token tax on entry files); `loop` fixes docs round by round until targets are met. It does not
+lint prose style, does not review code, and does not touch CI.
 
-前提：文件是**本地 markdown 檔案樹**且目標 repo 根可寫入 `.docgrad.yml`；wiki／遠端文件源不支援
-（邊界與變通見 [docs/design.md](docs/design.md) §定位與邊界）。
+Prerequisite: the documentation is a **local markdown file tree** and `.docgrad.yml` can be written
+to the target repo root; wikis and remote doc sources are not supported (boundaries and workarounds
+in [docs/design.md](docs/design.md) §Positioning and boundaries).
 
-`SKILL_DIR`＝本檔所在目錄（scripts 與 reference 的相對根）。
+`SKILL_DIR` = the directory this file lives in (the relative root for `scripts` and `reference`).
 
 ## Routing
 
-| 使用者輸入 | 動作 |
+| User input | Action |
 |---|---|
-| `/docgrad`（無參數） | 印出本表說明各指令，不做任何事 |
-| `init` | 讀 [reference/init.md](reference/init.md) 照做 |
-| `audit` | 先讀 [reference/rubric.md](reference/rubric.md)，再照 [reference/audit.md](reference/audit.md) 跑（純報告，不改檔） |
-| `audit <scope>`／`audit --dim <維度>` | scoped audit：限定目錄／glob／主題，或只評單一維度。同樣純報告，且**絕不寫 `.docgrad/`**——見 audit.md §scoped audit |
-| `improve` | 先讀 rubric.md，再照 [reference/improve.md](reference/improve.md) 跑一輪 |
-| `loop` | 同 improve，反覆到停止條件 |
-| `report` | 讀目標 repo `.docgrad/scorecard-latest.md` 重印＋用 `.docgrad/history.jsonl` 畫歷輪分數走勢表；檔案不存在 → 提示先跑 improve/loop（audit 純報告不落檔）。**先查 branch 分岔**：`git rev-list --count HEAD..docgrad/converge`（該 branch 存在時）> 0 → 報告最上方警示「converge branch 領先本 branch N 個 commit，以下走勢可能不完整」；報告標頭固定標注資料來源 `<branch> @ <short-sha>`。**兩種可比性斷點一律畫出來**：① `rubric_hash` 與前一輪不同 → 畫斷點線註明「此處尺有變更，前後分數不可直接比較」；② 缺 `economy` 鍵的輪次屬 v1.0.0 前的五維時代 → 該維畫 `—`，斷點註明「以下為五維，達標判定與總體分數不可與新輪次相比」。缺版本欄位的舊紀錄視為 unknown，不阻擋。有 `.docgrad/ledger.jsonl` 時一併報累積覆蓋率與目前仍為 `fail`／`stale` 的宣稱 |
+| `/docgrad` (no argument) | Print this table to explain the commands. Do nothing else |
+| `init` | Read [reference/init.md](reference/init.md) and follow it |
+| `audit` | Read [reference/rubric.md](reference/rubric.md) first, then run [reference/audit.md](reference/audit.md) (report only, changes no files) |
+| `audit <scope>` / `audit --dim <dimension>` | Scoped audit: limit to a directory, glob, or topic, or rate a single dimension. Still report-only, and it **never writes to `.docgrad/`** — see audit.md §Scoped audit |
+| `improve` | Read rubric.md first, then run one round per [reference/improve.md](reference/improve.md) |
+| `loop` | Same as improve, repeated until a stop condition |
+| `report` | Read the target repo's `.docgrad/scorecard-latest.md` and reprint it, plus a per-round score trend drawn from `.docgrad/history.jsonl`. If the files do not exist, tell the user to run improve/loop first (a plain audit is report-only and writes nothing). **Check for branch divergence first**: `git rev-list --count HEAD..docgrad/converge` (when that branch exists) > 0 → put a warning at the top of the report: "the converge branch is N commits ahead of this branch, the trend below may be incomplete". The report header always states its data source as `<branch> @ <short-sha>`. **Always draw all three kinds of comparability break**: (1) `rubric_hash` differs from the previous round → draw a break line noting "the ruler changed here, scores before and after cannot be compared directly"; (2) `corpus_hash` differs from the previous round → draw a break line noting "the corpus scope changed here: `files_total`, `claims_total`, the freshness denominator and the pollution denominator all moved, so scores either side cannot be compared"; (3) rounds with no `economy` key are from the five-dimension era before v1.0.0 → draw `—` for that dimension and note "the rounds below are five-dimension; targets-met and overall scores cannot be compared with newer rounds". Old records missing the version fields (including `corpus_hash`, which older rounds never wrote) are treated as unknown and do not block. When `.docgrad/ledger.jsonl` exists, also report cumulative coverage and which claims are still `fail` or `stale` |
 
-## Blockers（不可跳過）
+## Blockers (non-skippable)
 
-1. 目標 repo 無 `.docgrad.yml` → 除 `init` 外一律先導向 `/docgrad init`。
-2. 評分（audit/improve/loop）前必讀 [reference/rubric.md](reference/rubric.md)；星等錨點不可自創、不可放寬。
-   評**一致性**前另必讀 [reference/placement.md](reference/placement.md)——落點與重複的判定規則在那裡。
-3. improve/loop 只在 `docgrad/converge` branch commit；絕不修改目標 repo 的 CI 設定
-   （故新鮮度 ★5 在 loop 內不可達 → 判設計性天花板，見 [reference/improve.md](reference/improve.md)）。
+1. The target repo has no `.docgrad.yml` → every command except `init` must first redirect to
+   `/docgrad init`.
+2. Before rating anything (audit/improve/loop) you must read
+   [reference/rubric.md](reference/rubric.md); the star anchors may not be invented or relaxed.
+   Before rating **consistency** you must also read [reference/placement.md](reference/placement.md) —
+   the rules for judging placement and duplication live there.
+3. improve/loop commit only on the `docgrad/converge` branch, and never modify the target repo's CI
+   configuration (which is why freshness ★5 is unreachable inside the loop → it is called a design
+   ceiling, see [reference/improve.md](reference/improve.md)).
 
 ## Scripts
 
-五支零依賴 Node（≥18）腳本，讀目標 repo 的 `.docgrad.yml`，JSON → stdout（完整消費，
-不要 head/grep 截斷），錯誤 → stderr＋非零 exit：
+Five dependency-free Node (≥18) scripts. They read the target repo's `.docgrad.yml`, write JSON to
+stdout (consume it in full — do not truncate it through `head` or `grep`), and report errors on
+stderr with a non-zero exit:
 
 ```bash
-node "$SKILL_DIR/scripts/inventory.mjs" --root .   # 清單/token/固定成本/污染面/段落結構(structure)
-node "$SKILL_DIR/scripts/links.mjs" --root .       # 死鏈/壞錨/孤兒/可達率
-node "$SKILL_DIR/scripts/freshness.mjs" --root .   # 日期訊號覆蓋/git 對照（convention 可多值）
-node "$SKILL_DIR/scripts/coverage.mjs" --root .    # 覆蓋漂移/未文件化區域
-node "$SKILL_DIR/scripts/retrieval.mjs" --root .   # 可回溯性/邊際成本(scenarios 有設時)
+node "$SKILL_DIR/scripts/inventory.mjs" --root .   # inventory/tokens/fixed cost/pollution surface/untracked files/section structure
+node "$SKILL_DIR/scripts/links.mjs" --root .       # dead links/broken anchors/orphans/reachable ratio
+node "$SKILL_DIR/scripts/freshness.mjs" --root .   # date-signal coverage/git comparison (convention may be multi-valued)
+node "$SKILL_DIR/scripts/coverage.mjs" --root .    # coverage drift/undocumented areas
+node "$SKILL_DIR/scripts/retrieval.mjs" --root .   # traceability/marginal cost (when scenarios is set)
 ```
 
-共用旗標：`--config <file>`（設定檔不在 root 時指定）、`--include <glob>`（scoped audit 限定範圍，
-可重複或逗號分隔；`coverage.mjs`／`retrieval.mjs` 刻意不吃此旗標，理由見各自輸出的 `note`）。
-各腳本輸出的 `scope` 欄位就是報告要標的範圍。
+Shared flags: `--config <file>` (when the config file is not at the root), `--include <glob>`
+(limits the scope for a scoped audit; repeatable or comma-separated. `coverage.mjs` and
+`retrieval.mjs` deliberately do not accept it — each explains why in the `note` it emits).
+The `scope` field in each script's output is the scope the report must state.
