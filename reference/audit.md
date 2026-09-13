@@ -80,12 +80,25 @@ Steps 1–3 below build those three parts in order.
    candidate whose hash is in the ledger has been verified before, wherever its line number has drifted to since.
    Take candidates that **haven't entered the ledger yet**, front to back, until
    you have `correctness_sample` of them; at most 2 per document (skip any over that quota and keep taking from further down).
-   Cumulative coverage therefore grows by `correctness_sample` every round, with no ceiling, until the pool runs out.
+   Cumulative coverage therefore grows by `correctness_sample` every round — re-verification never eats into it — **until the emitted
+   window is exhausted**. That window is the thing to check before reading any of this as unbounded: `claim_candidates` holds the first
+   `claim_candidates_cap` candidates of the ranked population (default 60), not all of them, and a draw can only come from what was
+   emitted. `claim_population` states both ends of it — `emitted`, `population`, `truncated`, `cap` — so you never have to count array
+   entries to find out which you are looking at.
+
    **When fewer than `correctness_sample` unseen candidates remain, the round draws what exists — possibly zero — and the report states the shortfall**,
-   naming which of the two causes it was: the candidate pool is exhausted (every candidate has entered the ledger), or the remaining unseen
-   candidates all sit in documents that already hit this round's 2-per-document quota. Write it as
-   `drew 7 of 12 (pool exhausted: 335/335 candidates already in the ledger)`. A round with no new draws is not an error — it means the corpus is
-   fully covered; steps 1 and 2 still run and the pass rate is still computed over whatever was verified.
+   naming which of the **three** causes it was. They look identical from inside the draw and they need different responses:
+
+   | Cause | How to recognise it | What it means | What to do |
+   |---|---|---|---|
+   | **Window exhausted** | `claim_population.truncated: true`, and every one of the `emitted` candidates is already in the ledger | Not a coverage result at all. `population − emitted` candidates were never offered to any round, and no further round can reach them. | **A config change fixes it**: raise `claim_candidates_cap` in `.docgrad.yml`. Report cumulative coverage as frozen against `claims_total`, and say so — the corpus is **not** fully covered. |
+   | **Population exhausted** | `claim_population.truncated: false`, and every candidate is in the ledger | Genuinely full coverage: every verifiable claim in the corpus has been checked. | Nothing. This is convergence. Report coverage at 100%. |
+   | **Quota blocking** | Unseen candidates remain in the emitted window, but their documents already hit this round's 2-per-document limit | A one-round throttle, by design — it stops a single document from filling a whole sample. | Nothing; next round draws them. Do not raise the cap for this. |
+
+   Write it as `drew 7 of 12 (pool exhausted: 335/335 candidates already in the ledger)`, or, for the first row,
+   `drew 0 of 12 (candidate window exhausted: all 60 emitted candidates are in the ledger, but the population is 358 — raise claim_candidates_cap)`.
+   A round with no new draws is an error condition **only in the first case**; in the other two it is normal, and steps 1 and 2 still run
+   and the pass rate is still computed over whatever was verified.
    > `claim_candidates`'s population = `totals.claims_total`: non-heading lines outside fences that carry a **code
    > coordinate**, in either of two shapes —
    > - **path-shaped** inline code (`lib/foo.js`, `src/a.ts › parse()`), counted per candidate as `refs_path`;
@@ -109,7 +122,8 @@ Steps 1–3 below build those three parts in order.
    > `tj/commander.js`). That is a config finding, not a documentation finding: the report must say so and recommend setting
    > `src_dirs`, rather than letting the corpus take the blame. `claim_population.notes` also carries the count of files
    > skipped when building the symbol index (too large, binary, unreadable) — an identifier that only appears in one of those
-   > will not pass the existence check, so the population is a floor, not an exact figure.
+   > will not pass the existence check, so the population is a floor, not an exact figure. And it carries `truncated` — when that is
+   > `true`, `claims_total` is the size of the population but **not** the number of claims this round could reach; `emitted` is.
    >
    > `totals.claims_api_only` is how much of the population the API matcher is carrying on its own (equal to `claims_total`
    > on a library repo, 0 when `src_dirs` is unset). Because `refs` now counts API refs alongside path refs, the candidate
@@ -138,6 +152,10 @@ Steps 1–3 below build those three parts in order.
    - **Cumulative coverage** = distinct `claim_hash` values in the ledger ÷ `totals.claims_total` → write it in the report as
      `Correctness ★4 (pass rate 8/8, cumulative coverage 23/68 = 34%)`.
      **A star rating alone means nothing** — the reader needs to see the sample size it's built on.
+     The denominator stays `claims_total` even when `claim_population.truncated` is true — the corpus has that many verifiable
+     claims whether or not this run emitted them. But then the figure carries a ceiling, so write it:
+     `cumulative coverage 60/358 = 17% (capped: only 60 candidates are emitted, claim_candidates_cap: 60)`. Reporting the
+     capped figure as though it could still grow is the specific thing this line exists to prevent.
    - **And on the same line, `totals.claims_docgrad_authored_ratio`**: the share of this round's claim population that comes
      from documents **docgrad itself wrote** during a convergence round (detected mechanically — the commit that added the
      file has a `docs(docgrad):` subject). Write it as
@@ -152,7 +170,7 @@ Steps 1–3 below build those three parts in order.
      round (`claim_population.authorship: "unavailable"`); report it as unknown, never as clean.
 6. Record the nature of the error (detail vs. mechanism) into the deductions too.
 
-**Worked example** (`correctness_sample: 12`, oikos's 335 candidates, a ledger holding 12 distinct claims — all `pass` — at the start of round 8).
+**Worked example** (`correctness_sample: 12`, oikos's 335 candidates, `claim_candidates_cap` raised to cover them, a ledger holding 12 distinct claims — all `pass` — at the start of round 8).
 Assume round 9's new draws turn up 3 failures and the next round's fixes repair 2 of them:
 
 | Round | Distinct at start | fail/stale re-verified | pass re-verified | New draws | Verified this round | Distinct at end |
@@ -165,7 +183,15 @@ Assume round 9's new draws turn up 3 failures and the next round's fixes repair 
 
 Read off it: the "distinct at end" column grows by exactly `correctness_sample` every round and never converges — the pass re-verification is a
 fixed 6 whatever the ledger size, so the old fixed point (re-verification growing until it consumed the whole budget, freezing oikos at
-23/335 ≈ 7%) does not exist. Full coverage of 335 candidates now takes ⌈335/12⌉ = 28 rounds instead of never. Failures widen the verified set
+23/335 ≈ 7%) does not exist. Full coverage of 335 candidates takes ⌈335/12⌉ = 28 rounds instead of never.
+
+**The parenthetical in that example's header is load-bearing.** At the default `claim_candidates_cap: 60`, the same table stops dead after
+round 11: the ledger reaches 60 distinct claims, the emitted window holds exactly 60, and rounds 12 onward draw nothing while
+`claims_total` still reads 335. That is the first row of the shortfall table above, not convergence — check `claim_population.truncated`
+before you read a flat coverage line as a finished corpus. A real repo hit this at 36 distinct claims with `correctness_sample: 12` and
+`claims_total: 358`, three rounds from the wall.
+
+Failures widen the verified set
 (rounds 10 and 11 verify 21 and 19 claims) instead of displacing new draws — under the old rule, 3 failures against a ledger of 18 passes left
 zero new draws, so the sampling stopped expanding exactly when the documentation most needed it.
 
@@ -182,8 +208,10 @@ zero new draws, so the sampling stopped expanding exactly when the documentation
 >   Put the recommendation — anchor claims to real paths/symbols so they become verifiable — under "Suggested next steps" even though the
 >   dimension carries no star.
 >
-> A corpus with claims but an unlucky round is *not* this case: if `claims_total > 0`, the verified set cannot be empty (there is always
-> something to draw), so the rating proceeds normally.
+> A corpus with claims but an unlucky round is *not* this case: if `claims_total > 0` the verified set cannot be empty, so the rating
+> proceeds normally. That holds even when the emitted window is exhausted and there is nothing left to *draw* — a window can only be
+> exhausted by a ledger that filled it, and those entries are re-verified by steps 1 and 2. "Nothing to draw" and "nothing verified"
+> are different conditions; only the second one reaches this blockquote.
 
 > **audit writes nothing to disk**: this process **reads** the ledger but never writes it. The ledger is only written by `improve`/`loop`
 > (see [improve.md](improve.md) step 5) — consistent with the ironclad rule that "audit is pure report".

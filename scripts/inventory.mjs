@@ -167,13 +167,20 @@ try {
       ? null
       : filesRaw.reduce((s2, f) => s2 + (f.docgrad_authored ? f._claimLines.length : 0), 0);
   // A stably-ordered candidate list: the order produced from the same corpus is always the same,
-  // so claim-ledger sampling is reproducible. Only the first 60 entries are emitted — the
-  // population size is totals.claims_total; this is the pick order for sampling.
-  const claimCandidates = rankClaimCandidates(
+  // so claim-ledger sampling is reproducible. Only the first `claim_candidates_cap` entries are
+  // emitted — the population size is totals.claims_total; this is the pick order for sampling.
+  //
+  // The window is a **prefix** of one total order, so raising the cap only appends: every claim a
+  // narrower window could draw, a wider one draws in the same position. What the cap does decide is
+  // how far a ledger can keep growing before new draws dry up, so both ends of it are reported
+  // below rather than left for the reader to infer by counting array entries.
+  const rankedCandidates = rankClaimCandidates(
     filesRaw.map((f) => ({ path: f.path, claims: f._claimLines }))
-  )
-    .slice(0, 60)
+  );
+  const claimCandidates = rankedCandidates
+    .slice(0, config.claim_candidates_cap)
     .map((c) => ({ ...c, docgrad_authored: authorshipOf(c.path) }));
+  const candidatesTruncated = claimCandidates.length < rankedCandidates.length;
   const files = filesRaw.map(({ _ruleLines, _claimLines, ...f }) => f);
   const totalTokens = files.reduce((s, f) => s + f.tokens_est, 0);
   const excludedTokens = excludedFiles.reduce((s, f) => s + f.tokens_est, 0);
@@ -262,10 +269,22 @@ try {
           src_symbols: symbolIndex ? symbolIndex.symbols.size : null,
           src_files_scanned: symbolIndex ? symbolIndex.files_scanned : null,
           authorship: addSubjects === null ? 'unavailable' : 'git',
+          // Is claim_candidates the whole ordered population, or a window onto it? A consumer must
+          // be able to answer that without counting entries, because the answer decides whether a
+          // round that drew nothing means "the corpus is fully covered" or "the window ran out".
+          // `population` is the same number as totals.claims_total, restated here so this block
+          // stands on its own.
+          cap: config.claim_candidates_cap,
+          emitted: claimCandidates.length,
+          population: rankedCandidates.length,
+          truncated: candidatesTruncated,
           notes: [
+            ...(candidatesTruncated
+              ? [`claim_candidates is a window onto the population, not all of it: ${claimCandidates.length} of ${rankedCandidates.length} candidates are emitted, in ranked order, because claim_candidates_cap is ${config.claim_candidates_cap}. A claim ledger can only draw from what is emitted, so once it covers all ${claimCandidates.length} of them every later round draws zero new claims and cumulative coverage freezes at ${claimCandidates.length}/${rankedCandidates.length} (${Math.round((claimCandidates.length / rankedCandidates.length) * 100)}%) — which is not the same thing as the corpus being fully covered. Raise claim_candidates_cap in .docgrad.yml to widen the window; the cost is inventory output size, and the ranked order of what is already emitted does not change.`]
+              : []),
             ...(symbolIndex
               ? []
-              : ['src_dirs is unset, so API-shaped inline code (`foo()`, `obj.method()`, `a.b`) cannot be existence-checked and contributes no claim candidates; on a library repo, whose documentation describes an API rather than a file tree, this can leave claims_total at 0 and the correctness dimension with no mechanical basis — set src_dirs in .docgrad.yml']),
+              : ['src_dirs is unset, so API-shaped inline code cannot be existence-checked and contributes no claim candidates. What that costs is call-shaped spans (`foo()`, `.option()`, `obj.method()`) and paren-less dotted spans with a long or underscore-bearing tail (`obj.my_method`, `program.optsWithGlobals`); short dotted spans like `a.b` and `program.opts` are collected by the path route regardless and are unaffected. On a library repo, whose documentation describes an API rather than a file tree, this can leave claims_total at 0 and the correctness dimension with no mechanical basis — set src_dirs in .docgrad.yml']),
             ...(symbolIndex && symbolIndex.files_skipped
               ? [`${symbolIndex.files_skipped} file(s) under src_dirs were skipped when building the symbol index (larger than ${Math.round(MAX_SRC_SYMBOL_FILE_BYTES / 1024)} KB, binary, or unreadable), so an identifier that only appears in one of them will not pass the existence check`]
               : []),

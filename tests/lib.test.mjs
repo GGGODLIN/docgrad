@@ -191,6 +191,55 @@ test('loadConfig: exclude_untracked must be a boolean, and defaults to false', (
   }
 });
 
+// --- count fields: positive whole numbers ------------------------------------------------------
+//
+// Both are used as a slice length or a draw budget, so a wrong value doesn't throw anywhere — it
+// quietly produces an empty sample, which is exactly the symptom (coverage that stops moving) that
+// the claim_candidates_cap work exists to make legible in the first place.
+
+const COUNT_CASES = [
+  ['claim_candidates_cap', '60'],
+  ['correctness_sample', '8'],
+];
+
+for (const [field, example] of COUNT_CASES) {
+  for (const [written, described] of [
+    ['0', 'the number 0'],
+    ['-5', 'the number -5'],
+    ['1.5', 'the number 1.5'],
+    ['"60"', 'the string "60"'],
+    ['plenty', 'the string "plenty"'],
+    ['', 'an empty value'],
+  ]) {
+    test(`loadConfig: ${field}: ${written || '(empty)'} throws instead of silently drawing nothing`, () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-counttype-'));
+      try {
+        fs.writeFileSync(path.join(tmp, '.docgrad.yml'), `docs_dirs: [docs/]\n${field}:${written ? ` ${written}` : ''}\n`);
+        assert.throws(() => loadConfig(tmp), (err) => {
+          assert.match(err.message, new RegExp(`${field} must be a positive whole number`), 'names the field');
+          assert.ok(err.message.includes(described), `describes what was given: ${err.message}`);
+          assert.ok(err.message.includes(`${field}: ${example}`), `shows the correct form: ${err.message}`);
+          return true;
+        });
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+test('loadConfig: claim_candidates_cap defaults to 60 and accepts a raised whole number', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-cap-'));
+  try {
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+    assert.equal(loadConfig(tmp).claim_candidates_cap, 60, 'the value inventory.mjs used to hardcode');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nclaim_candidates_cap: 400\n');
+    assert.equal(loadConfig(tmp).claim_candidates_cap, 400);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // --- #36: corpus_hash -------------------------------------------------------------------------
 
 test('corpusHash: cosmetic differences that mean the same corpus hash the same', () => {
@@ -219,6 +268,16 @@ test('corpusHash: fields outside the corpus definition do not move it', () => {
     corpusHash({ ...base, src_dirs: ['src/'], scenarios: ['src/a.ts'], correctness_sample: 20, targets: { economy: 5 } }),
     corpusHash(base),
     'a corpus fingerprint must not react to rubric/target/measurement settings'
+  );
+  // claim_candidates_cap changes what a round can *sample*, but not which files were measured:
+  // files_total, claims_total, the freshness denominator, the orphan population and the pollution
+  // denominator are all identical either side of it. Folding it in would stamp a six-dimension
+  // comparability break on every repo that applied the fix the tool itself recommends. The honest
+  // disclosure is per-round (claim_population.truncated), not a corpus break.
+  assert.equal(
+    corpusHash({ ...base, claim_candidates_cap: 400 }),
+    corpusHash(base),
+    'the candidate window is a sampling setting, not a corpus definition'
   );
 });
 

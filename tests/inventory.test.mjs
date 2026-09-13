@@ -517,3 +517,128 @@ test('inventory: without git, docgrad_authored is null rather than false, with a
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// --- the claim-candidate window (claim_candidates_cap) -----------------------------------------
+//
+// The cap has always existed — 60, hardcoded — and nothing in the output said so. A ledger that
+// reached the 60th candidate stopped growing while claims_total stayed in the hundreds, and the
+// documentation told the reader that could not happen. These tests pin the two halves of the fix:
+// the window is configurable, and the run says which side of it you are on.
+
+// `n` claim lines, each a basename-shaped ref, so no src_dirs and no symbol index are needed.
+// Every line carries exactly one ref, so the ranking's tiebreak (path, then line) makes the
+// emitted order equal to the file order — which is what lets a test assert the prefix property.
+function claimRepo(n) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-claimcap-'));
+  fs.mkdirSync(path.join(tmp, 'docs'), { recursive: true });
+  const lines = Array.from({ length: n }, (_, i) => `Rule ${i} is implemented in \`thing${i}.ts\`.`);
+  fs.writeFileSync(path.join(tmp, 'docs', 'rules.md'), `# Rules\n\n${lines.join('\n\n')}\n`);
+  fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+  return tmp;
+}
+
+test('inventory: the default emits at most 60 candidates and says so instead of looking complete', () => {
+  const tmp = claimRepo(80);
+  try {
+    const out = runInventory(tmp);
+    assert.equal(out.totals.claims_total, 80, 'the population itself is never capped');
+    assert.equal(out.claim_candidates.length, 60, 'default window, unchanged from before it was configurable');
+    assert.equal(out.claim_population.cap, 60);
+    assert.equal(out.claim_population.emitted, 60);
+    assert.equal(out.claim_population.population, 80);
+    assert.equal(out.claim_population.truncated, true);
+    assert.equal(out.claim_population.population, out.totals.claims_total, 'the block stands on its own');
+    // The note must name the remedy, not merely report the fact: a consumer that has just watched
+    // coverage stop moving needs to be told this is a config ceiling, not a covered corpus.
+    const note = out.claim_population.notes.find((n) => n.includes('window'));
+    assert.ok(note, `a truncated run must carry a note: ${JSON.stringify(out.claim_population.notes)}`);
+    assert.match(note, /60 of 80/);
+    assert.match(note, /claim_candidates_cap/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: raising claim_candidates_cap emits more, and only appends to the same order', () => {
+  const tmp = claimRepo(80);
+  try {
+    const before = runInventory(tmp);
+    fs.appendFileSync(path.join(tmp, '.docgrad.yml'), 'claim_candidates_cap: 75\n');
+    const after = runInventory(tmp);
+    assert.equal(after.claim_candidates.length, 75);
+    assert.equal(after.claim_population.cap, 75);
+    assert.equal(after.claim_population.emitted, 75);
+    assert.equal(after.claim_population.truncated, true, '75 of 80 is still a window');
+    // The window is a prefix of one stable total order, which is why raising the cap cannot
+    // invalidate a ledger: every claim the narrower window offered is still offered, in place.
+    assert.deepEqual(
+      after.claim_candidates.slice(0, 60).map((c) => c.claim_hash),
+      before.claim_candidates.map((c) => c.claim_hash)
+    );
+    // Widening the window changes what a round can sample, but not which files were measured.
+    assert.equal(after.docgrad.corpus_hash, before.docgrad.corpus_hash);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: a cap larger than the population reports the whole population, not truncated', () => {
+  const tmp = claimRepo(80);
+  try {
+    fs.appendFileSync(path.join(tmp, '.docgrad.yml'), 'claim_candidates_cap: 500\n');
+    const out = runInventory(tmp);
+    assert.equal(out.claim_candidates.length, 80);
+    assert.equal(out.claim_population.emitted, 80);
+    assert.equal(out.claim_population.population, 80);
+    assert.equal(out.claim_population.truncated, false);
+    assert.equal(out.claim_population.cap, 500, 'the cap is reported as configured, not as clamped');
+    assert.ok(
+      !out.claim_population.notes.some((n) => n.includes('window')),
+      'nothing was withheld, so there is nothing to warn about'
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: a corpus smaller than the default cap reports truncated: false', () => {
+  const tmp = claimRepo(5);
+  try {
+    const out = runInventory(tmp);
+    assert.equal(out.claim_population.emitted, 5);
+    assert.equal(out.claim_population.population, 5);
+    assert.equal(out.claim_population.truncated, false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: a bad claim_candidates_cap fails the run rather than emitting an empty window', () => {
+  const tmp = claimRepo(80);
+  try {
+    fs.appendFileSync(path.join(tmp, '.docgrad.yml'), 'claim_candidates_cap: 0\n');
+    const res = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /claim_candidates_cap must be a positive whole number/);
+    assert.equal(res.stdout.trim(), '', 'no half-valid JSON to mistake for a measurement');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// The note that told the reader an unset src_dirs costs them `a.b`-shaped claims was wrong: the
+// path route collects those with or without a symbol index. Pin the corrected wording.
+test('inventory: the src_dirs-unset note names shapes the API matcher actually admits', () => {
+  const tmp = libraryRepo({ withSrcDirs: false });
+  try {
+    const out = runInventory(tmp);
+    const note = out.claim_population.notes.find((n) => n.includes('src_dirs is unset'));
+    assert.ok(note);
+    assert.match(note, /foo\(\)/, 'call shapes are what is actually lost');
+    assert.match(note, /obj\.my_method/, 'so are long/underscored paren-less tails');
+    assert.match(note, /a\.b/, 'and the shape that is NOT lost has to be named as unaffected');
+    assert.match(note, /path route/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

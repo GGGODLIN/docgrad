@@ -112,6 +112,20 @@ const DEFAULTS = {
   // of a rubric anchor = major, see reference/rubric.md.
   economy: { entry_cost_tiers: [20000, 10000, 5000, 3000], pollution_max: 0.1 },
   correctness_sample: 8,
+  // How many of the ranked claim candidates inventory.mjs actually emits. The population itself is
+  // never capped — totals.claims_total counts all of it — but emitting every candidate *with its
+  // text* is what costs tokens, and this is a tool whose sixth dimension prices context: a repo
+  // with 358 candidates would add tens of thousands of tokens to every round's inventory output.
+  //
+  // The cost of the window is that the claim ledger can only ever draw from what was emitted. Once
+  // a ledger covers all `claim_candidates_cap` entries, new draws return nothing and cumulative
+  // coverage freezes short of claims_total — measured on a real repo at 36 distinct claims with
+  // correctness_sample: 12 and claims_total: 358, three rounds from the wall. So the window is
+  // disclosed on every run (claim_population.truncated / emitted / population) and raising this
+  // number is the documented remedy.
+  //
+  // Default 60 = the value that was hardcoded in inventory.mjs before it became configurable.
+  claim_candidates_cap: 60,
   scenario: null,
   scenarios: [], // used by retrieval.mjs: list of representative code paths (files or dirs), report-only
   rules: { pattern: '**MUST' }, // used by inventory.mjs structure.rules: the string that marks a rule line
@@ -144,6 +158,16 @@ const LIST_FIELD_EXAMPLES = {
 
 const BOOL_FIELD_EXAMPLES = {
   exclude_untracked: 'true',
+};
+
+// Counts. Both of these are used as a slice length or a draw budget, so a string, a float or a
+// zero doesn't fail — it quietly produces an empty or nonsensical sample. `claim_candidates_cap: 0`
+// would emit no candidates at all and every following round would draw nothing; a quoted "60"
+// would make slice() return an empty list. Same discipline as the fields above, and covering both
+// count fields rather than only the new one, so the two can't drift apart.
+const POSITIVE_INT_FIELD_EXAMPLES = {
+  correctness_sample: '8',
+  claim_candidates_cap: '60',
 };
 
 function describeValue(v) {
@@ -184,6 +208,16 @@ export function validateConfigTypes(config, configFile = CONFIG_FILENAME) {
       throw new Error(
         `${configFile}: ${field} must be true or false, but got ${describeValue(value)}. ` +
           `Correct form: ${field}: ${example}`
+      );
+    }
+  }
+  for (const [field, example] of Object.entries(POSITIVE_INT_FIELD_EXAMPLES)) {
+    const value = config[field];
+    if (!Number.isInteger(value) || value < 1) {
+      throw new Error(
+        `${configFile}: ${field} must be a positive whole number, but got ${describeValue(value)}. ` +
+          `Correct form: ${field}: ${example}. ` +
+          `A quoted number, a fraction or 0 would be used as a count anyway and would silently draw nothing.`
       );
     }
   }
@@ -723,9 +757,14 @@ export function buildSrcSymbolIndex(rootDir, srcDirs = []) {
 
 // API-shaped inline code. Three shapes are accepted, and each must be the *entire* content of one
 // backtick span:
-//   `foo()`                     bare call
-//   `.option()` / `obj.method()`  member call (a leading dot is how JS API docs name a method)
-//   `a.b` / `a.b.c`             dotted symbol with no call parens
+//   `foo()`                        bare call
+//   `.option()` / `obj.method()`   member call (a leading dot is how JS API docs name a method)
+//   `obj.my_method` /
+//   `program.optsWithGlobals`      dotted symbol with no call parens — but **only** when its final
+//                                  segment does not look like a file extension, i.e. longer than
+//                                  10 characters or carrying a `_`/`$`. `a.b`, `a.b.c` and
+//                                  `program.opts` all fail that test and are rejected here; see
+//                                  the second exclusion below for where they do get collected.
 //
 // Deliberately NOT accepted:
 //   - a bare identifier with neither a dot nor parens (`minWidthToWrap`). The existence check
@@ -733,9 +772,12 @@ export function buildSrcSymbolIndex(rootDir, srcDirs = []) {
 //     `data`, `name`, `true`, `value`, and inline code around those words is ordinary prose.
 //     A real API claim about such a symbol is almost always written next to a call somewhere in
 //     the same document, so the cost of excluding it is small and the false-positive saving large.
-//   - a paren-less dotted span whose last segment looks like a file extension (`program.opts`,
-//     `lib.mjs`). extractCodeRefs already emits those as basename path refs, and counting them
-//     twice would inflate `refs` and silently reorder the candidate list.
+//   - a paren-less dotted span whose last segment looks like a file extension — 1 to 10 plain
+//     alphanumerics (`a.b`, `program.opts`, `lib.mjs`). extractCodeRefs already emits those as
+//     basename path refs, and counting them twice would inflate `refs` and silently reorder the
+//     candidate list. Note what this means for `src_dirs`: those spans are collected by the **path**
+//     route, which needs no symbol index, so they keep producing claim candidates whether or not
+//     `src_dirs` is set. What an unset `src_dirs` actually costs is the two shapes above it.
 const API_SPAN_RE = /^\.?([A-Za-z_$][A-Za-z0-9_$]*)((?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)(\(\s*\))?$/;
 const BASENAME_TAIL_RE = /\.[A-Za-z0-9]{1,10}$/;
 
@@ -958,8 +1000,12 @@ export function claimHash(text) {
 // A "concrete claim" = a line outside a fence that has code coordinates to check against. Two
 // shapes count as coordinates:
 //   - path-shaped inline code (`lib/foo.js`, `src/a.ts › parse()`) — extractCodeRefs
-//   - API-shaped inline code (`foo()`, `obj.method()`, `a.b`) — extractApiRefs, and **only** when
-//     a symbol index built from src_dirs is supplied, so every identifier is existence-checked
+//   - API-shaped inline code — a call (`foo()`, `.option()`, `obj.method()`) or a paren-less
+//     dotted span whose tail is too long or too underscored to be a file extension
+//     (`obj.my_method`, `program.optsWithGlobals`) — extractApiRefs, and **only** when a symbol
+//     index built from src_dirs is supplied, so every identifier is existence-checked.
+//     `a.b`-shaped spans are *not* in this route: apiSpanSegments rejects them and extractCodeRefs
+//     picks them up as basename path refs instead, with or without src_dirs.
 // A plain descriptive sentence has no coordinates to extract and shouldn't enter the claim ledger
 // in the first place — the rubric's weighted sampling rule for correctness (prefer sampling lines
 // with a path/symbol) becomes mechanically reproducible this way, instead of being freely
