@@ -175,6 +175,7 @@ git clone https://github.com/redtear1115/docgrad ~/.claude/skills/docgrad
 | [1](case-studies/01-commander-js.md) | `tj/commander.js` | 收斂前後，同一個功能設計任務的**真實 agent token 用量** | 設計品質兩臂都是 12/12 打平；收斂後**輪數少 15%**，但進 context 的 **token 多 20%** |
 | [2](case-studies/02-docgrad-self.md) | docgrad 自己，9 輪真實收斂 | 產品長大時，文件的 token 成本落在哪裡 | 語料成長 3.4×，但每次任務付的稅只成長 1.8×，**佔語料比例反而腰斬** |
 | [3](case-studies/03-fixtures.md) | 三個 eval fixture | 這把尺到底可不可重現 | 12 次全數通過，18 個維度格中 16 格完全一致——並抓出 rubric 的一個真缺口 |
+| [4](case-studies/04-long-running.md) | 一個私有正式專案，13 輪 | 長期跑下來到底買到什麼、又有什麼會衰減 | 星等多半 ★4——但**已驗證覆蓋率只有 10.1%**；經濟性連九輪卡在 ★3；產出的 CI 閘門紅了四輪沒人發現 |
 
 打算查核數字的話，先讀[方法說明](case-studies/README.md)。
 
