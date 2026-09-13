@@ -67,6 +67,10 @@
 
      The two version fields are for `report` to draw comparability breakpoints: when `rubric_hash` changes it means the ruler changed,
      and the scores before and after can't be compared directly. Old records missing these fields are treated as unknown and don't block anything.
+
+     A dimension judged **not measurable** (see the design-ceiling section below — currently only correctness, when the corpus
+     holds no verifiable claims) is recorded as `null`, never as a number. `report` must render it as `n/a` and must not
+     include it in any average; a guessed star would be indistinguishable from a measured one a few rounds later.
    - Append the claims verified this round to `.docgrad/ledger.jsonl` (create it if it doesn't exist). **Cumulative, append-only, never rewritten** —
      when re-verifying an old entry, append a new line (with the new `round`) rather than editing the old line, so you can still see when a given claim broke and when it got fixed:
 
@@ -96,11 +100,24 @@
 
 When a dimension's next star anchor falls inside a Blocker no-go zone → that dimension is judged "converged within docgrad's scope (capped at ★x)": it's no longer eligible for dimension selection, it counts as targets-met when checking whether targets are met, and it gets called out with its reason in the final report and graduation recommendation. **This does not stop the loop** — it just removes that dimension from the working set.
 
-There are currently two cases, of the same nature (both ★5 anchors require a mechanical gate, and Blocker #3 explicitly says not to touch the target repo's CI),
-and both only get hit when that dimension's target is set to 5 — the default target ★4 is unaffected:
+There are currently three cases. The first two share a cause — both ★5 anchors require a mechanical
+gate, and Blocker #3 explicitly says not to touch the target repo's CI — and both only get hit when
+that dimension's target is set to 5, so the default target ★4 is unaffected:
 
 - **Freshness ★5**: requires "a mechanical gate enforcing update-alongside-change in the same MR" → capped at ★4 within the loop.
 - **Economy ★5**: requires "a mechanical gate enforcing the entry file's token budget" → capped at ★4 within the loop.
+
+The third has a different cause but the same handling — the dimension cannot be *measured*, so there
+is no star to raise:
+
+- **Correctness, not measurable**: the round's verified set is empty because the corpus contains no
+  verifiable claims at all (`claims_total: 0`, no ledger entries). Every correctness anchor is
+  phrased as a pass rate, and a pass rate over zero claims is undefined, so the dimension is reported
+  as `n/a (not measurable)` rather than rated — see [audit.md](audit.md) §3. Correctness (claim ledger).
+  It counts as met for the targets check and leaves the working set, exactly like the two above.
+  **Unlike them, this one is fixable — just not by the correctness dimension.** The report must say
+  so: the corpus needs claims anchored to real code coordinates before correctness can be measured,
+  which is work the completeness and placement dimensions own.
 
 **The difference from plateau**: plateau = fixable, but these two rounds produced no gains, and there's still a chance on the next run; design ceiling = unreachable by design,
 no number of further rounds will move it. Judging it as plateau would mislead the report into telling the user "try running a few more rounds," so check for the ceiling before checking for plateau.

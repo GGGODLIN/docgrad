@@ -141,6 +141,11 @@ Measurement: the full mechanical output of links.mjs (dead-link ratio = dead_lin
 Broken anchors always cost stars; `cjk_uncertain` is an advisory field and is **not** a reason to
 skip confirmation (see [§Version history](#version-history-and-comparability-notes)).
 
+> **`orphans: null` is not `orphans: []`.** When the repo has no `index_file`, or the run is scoped,
+> reachability cannot be computed and both `orphans` and `reachable_ratio` come back `null`. Do not
+> read that as "no orphans found". A repo with no index at all is rated ★1 by the anchor above — the
+> one case where every document can be unreachable while the mechanical output reports nothing.
+
 ## Consistency
 
 | Star | Anchor |

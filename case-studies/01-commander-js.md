@@ -183,6 +183,11 @@ from any root, and the JSON reported zero orphans. The rubric rescues the star r
 signal that is wrong — and not needing that compensation is the entire selling point of a mechanical
 signal. *Verified in source and in the baseline JSON (`orphans: []`, `reachable_ratio: null`).*
 
+> **Fixed** in the release this case study ships with (issue #39): `orphans` now returns `null` under
+> exactly the condition `reachable_ratio` does, on both the no-index and the scoped path, and
+> `templates/docs-gate.mjs` treats "not computed" as its own violation rather than a pass. The
+> measurement above was taken before the fix and is left as recorded.
+
 **4. One of the two linkage defects was a docgrad false positive, and clearing it meant editing a
 file that had nothing wrong with it.** `extractHeadings()` strips an underscore whose neighbour is
 not alphanumeric before slugging, so `### cmd._args` becomes `cmdargs`, while GitHub — and
