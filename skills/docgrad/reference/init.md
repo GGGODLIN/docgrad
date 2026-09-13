@@ -56,7 +56,7 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
    Getting it wrong in the second direction is what broke `tj/commander.js`: the owner scoped out `docs/zh-CN/` because the
    translations are graded as a separate corpus, the only field that existed was `exclude`, and docgrad charged **40.6%**
    pollution and capped economy at ★3 while the fixed cost was a perfect 0 (see
-   [case-studies/01-commander-js.md](../case-studies/01-commander-js.md) finding 1). Nothing in the docs was wrong; the field
+   [case-studies/01-commander-js.md](../../../case-studies/01-commander-js.md) finding 1). Nothing in the docs was wrong; the field
    was.
 
    Two properties to state when asking, so `out_of_scope` is not mistaken for a free pass:
@@ -169,7 +169,7 @@ As soon as it's written, verify: it's only done once `node "$SKILL_DIR/scripts/i
 When the doc tree itself can't take a written file (a read-only mount, an export directory) → write `.docgrad.yml` elsewhere,
 and the scripts can run `audit` by specifying `--config <file>` (`improve`/`loop` still need a writable workspace with git).
 This only solves the config file's placement — it doesn't change the premise that "the docs must be a local markdown file
-tree." See [design.md](../docs/design.md) §Positioning and boundaries for the boundary.
+tree." See [design.md](../../../docs/design.md) §Positioning and boundaries for the boundary.
 
 ## 4. Wrap-up
 

@@ -4,7 +4,7 @@
 
 The rule for deciding "which carrier each piece of information should live in." docgrad judges **placement** and
 **duplication** against this file; it doesn't grade the quality of comments or code itself (boundary: see
-[design.md](../docs/design.md) §Positioning and boundaries).
+[design.md](../../../docs/design.md) §Positioning and boundaries).
 
 When the same fact is scattered across code comments, docs, issues, and wiki, the cost is threefold: the agent has to
 re-decide which copy to trust every time, people don't know where new information should go, and the two copies drift apart
@@ -88,7 +88,7 @@ it is not a spec sentence.
 
 Rule 6 used in reverse is this policy's single most valuable piece of advice: **if an authoritative fact lives somewhere the
 agent can't reach, move it in before you even talk about scoring**
-(the boundary on unsupported wiki/remote sources: see [design.md](../docs/design.md) §Positioning and boundaries).
+(the boundary on unsupported wiki/remote sources: see [design.md](../../../docs/design.md) §Positioning and boundaries).
 
 ## Placement is fixed once decided
 

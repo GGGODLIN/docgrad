@@ -1,0 +1,16 @@
+{
+  "name": "docgrad",
+  "interface": {
+    "displayName": "docgrad"
+  },
+  "plugins": [
+    {
+      "name": "docgrad",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "category": "Documentation"
+    }
+  ]
+}

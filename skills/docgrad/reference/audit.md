@@ -235,7 +235,7 @@ Read [placement.md](placement.md) first — the rules for judging placement and 
 4. Every deduction is tagged with a category: `[contradiction]`/`[duplication]`/`[placement]`; the latter two must fill in all four columns placement.md requires
    (information / current placement / suggested placement / which axis is the reason) — don't raise a suggestion with a missing column.
 5. Assign a star rating against the rubric's consistency anchors. **Only judge placement and duplication, never comment quality** — see the boundary in
-   [design.md](../docs/design.md) §Positioning and boundaries.
+   [design.md](../../../docs/design.md) §Positioning and boundaries.
 
 ### 7. Economy
 

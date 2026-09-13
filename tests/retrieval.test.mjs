@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { estimateTokens } from '../scripts/lib.mjs';
+import { estimateTokens } from '../skills/docgrad/scripts/lib.mjs';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.meta.url));
 const ENTRY_CHAIN_FIXTURE = fileURLToPath(new URL('./fixtures/retrieval-entry-chain/', import.meta.url));
-const SCRIPT = fileURLToPath(new URL('../scripts/retrieval.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../skills/docgrad/scripts/retrieval.mjs', import.meta.url));
 
 function copyFixture(src = FIXTURE) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-retrieval-'));

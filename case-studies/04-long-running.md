@@ -46,7 +46,7 @@ After 13 rounds the claim ledger holds **36 distinct verified claims out of a po
 ≥90%". It does not mean 90% of the documentation has been checked; it means 90% of *what was
 sampled* passed, and what was sampled is a tenth of the corpus.
 
-This is exactly why [the rubric](../reference/rubric.md) requires the report to print cumulative
+This is exactly why [the rubric](../skills/docgrad/reference/rubric.md) requires the report to print cumulative
 coverage next to the pass rate. A ★4 at 10% coverage and a ★4 at 60% coverage are different claims
 about a repo, and the star alone cannot tell them apart.
 
@@ -99,7 +99,7 @@ neglect — it was the corpus growing, which is the thing docgrad encourages. A 
 at graduation expires when the denominator grows, so **normal use of the tool invalidates the tool's
 own deliverable.**
 
-The argument in [improve.md](../reference/improve.md) §Graduation is that a prose recommendation has
+The argument in [improve.md](../skills/docgrad/reference/improve.md) §Graduation is that a prose recommendation has
 no deliverable so nobody acts on it, and therefore docgrad should produce a real file. Repo P shows
 that producing the file solved the first problem and not the second, and that the failure mode got
 worse in the process: an un-run prose recommendation leaves you *knowing* you have no gate, while an

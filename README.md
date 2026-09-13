@@ -136,7 +136,7 @@ orphan/reachability analysis and an entry-file token budget.
 | `/docgrad loop` | Repeat improve until targets met / plateau / needs a human |
 | `/docgrad report` | Reprint the latest scorecard plus the score trend across rounds |
 
-Routing and blockers are defined authoritatively in [SKILL.md](SKILL.md); this table is a summary.
+Routing and blockers are defined authoritatively in [skills/docgrad/SKILL.md](skills/docgrad/SKILL.md); this table is a summary.
 
 ## Install, update, uninstall
 
@@ -182,12 +182,39 @@ To go from zero to a first score in one go:
 
 ### Without the plugin system
 
+Clone the repo and symlink the skill payload — **don't clone straight into `~/.claude/skills/`**,
+because since v1.7.0 the payload sits at `skills/docgrad/` while the plugin manifest stays at the
+repo root:
+
 ```bash
-git clone https://github.com/redtear1115/docgrad ~/.claude/skills/docgrad
+git clone https://github.com/redtear1115/docgrad ~/.docgrad-src
+ln -s ~/.docgrad-src/skills/docgrad ~/.claude/skills/docgrad
 ```
 
-Update with `git pull` in that directory; check [CHANGELOG.md](CHANGELOG.md) for what moved. You
+Update with `git pull` in `~/.docgrad-src`; check [CHANGELOG.md](CHANGELOG.md) for what moved. You
 lose the update notifications, nothing else.
+
+A plain `cp -r skills/docgrad ~/.claude/skills/docgrad` also works for loading the skill, but it
+leaves `.claude-plugin/` behind, and the scripts then report `version: null` in every JSON block and
+every `history.jsonl` row — a silent loss of the fingerprint that tells you which ruler produced a
+score. Symlink, or copy the whole repo.
+
+### Other platforms
+
+The layout follows the [Agent Skills specification](https://agentskills.io/specification)
+(`skills/<name>/SKILL.md`) with per-platform manifests at the repo root, so other agents can pick it
+up. **"Verified" below means exactly one thing: installed from this machine, and the skill and its
+scripts resolved afterwards.** It does not mean the behaviour was compared against these docs.
+
+| Platform | Packaging | Status |
+|---|---|---|
+| Claude Code | `.claude-plugin/{plugin,marketplace}.json`, skills auto-discovered under `skills/` | **Verified** — marketplace add → install → `skills/docgrad/SKILL.md` present, the five scripts run from the installed copy, `version` resolves |
+| Codex | `.codex-plugin/plugin.json` (`"skills": "./skills/"`), `.agents/plugins/marketplace.json` | **Unverified** — the manifests are written against the spec and modelled on a working example, but no Codex install was run from this machine |
+| Antigravity | root `plugin.json`, `.agents/` workspace discovery, `.agents/workflows/docgrad.md` | **Unverified** — same |
+| Skills CLI (`npx skills add`) | `skills/docgrad/SKILL.md` | **Unverified** — it installs from the published GitHub repo, so it cannot be tested against this layout until the release is merged |
+
+If you install on one of the unverified platforms, an issue saying whether it worked is welcome —
+that is the only way those rows change.
 
 ## Case studies
 
@@ -212,7 +239,7 @@ docgrad grades a **local markdown file tree**: all five scripts work on local pa
   about themselves, coverage drift cannot be measured, and everything else runs as usual.
 - **Wikis, Confluence, and other remote doc sources are not supported.** The files are not in the
   tree and the config has nowhere to live. You can still borrow the six anchors in
-  [reference/rubric.md](reference/rubric.md) to rate such a source by hand — with no mechanical
+  [skills/docgrad/reference/rubric.md](skills/docgrad/reference/rubric.md) to rate such a source by hand — with no mechanical
   signal, no reproducibility, and no scorecard.
 - **Freshness ★5 is post-graduation.** It requires a CI gate, and docgrad does not touch CI, so the
   loop caps that dimension at ★4. The default target is ★4, so this only bites if you raise it to 5.
@@ -220,17 +247,22 @@ docgrad grades a **local markdown file tree**: all five scripts work on local pa
 It does not lint prose style (that is Vale's job), does not audit SKILL.md files, and does not
 review code. The consistency dimension **does read code comments**, but only to judge whether a fact
 has a second authority and whether it sits in the right carrier
-([reference/placement.md](reference/placement.md)) — never to judge how well a comment is written.
+([skills/docgrad/reference/placement.md](skills/docgrad/reference/placement.md)) — never to judge how well a comment is written.
 Full positioning is in [docs/design.md](docs/design.md).
 
 ## Layout
 
 ```text
 docgrad/
-├── SKILL.md            # routing, blockers, the scripts contract
-├── reference/          # rubric (frozen anchors), audit, improve, init, placement
-├── scripts/            # five dependency-free Node measurement scripts
-├── templates/          # graduation artifacts: docs-gate.mjs / docs-gate.yml
+├── skills/docgrad/     # the skill payload — everything an agent loads at runtime
+│   ├── SKILL.md        # routing, blockers, the scripts contract
+│   ├── reference/      # rubric (frozen anchors), audit, improve, init, placement
+│   ├── scripts/        # five dependency-free Node measurement scripts
+│   └── templates/      # graduation artifacts: docs-gate.mjs / docs-gate.yml
+├── .claude-plugin/     # Claude Code manifests
+├── .codex-plugin/      # Codex manifest
+├── .agents/            # Codex / Antigravity workspace discovery
+├── plugin.json         # Antigravity manifest
 ├── case-studies/       # measured runs, with reproduction commands
 ├── evals/              # skill-level evals (is the star rating reproducible?)
 ├── tests/              # unit tests for the scripts

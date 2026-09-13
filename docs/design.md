@@ -26,12 +26,12 @@ An ecosystem survey (2026-07-12) confirmed no existing skill covers this: the cl
 
 ## Positioning and boundaries
 
-- **What it scores**: the quality of a repo's documentation system as the **context source for AI agent development**. The corpus boundary is defined by three config fields: `docs_dirs` (directories, scanned recursively), `docs_files` (single files outside those directories, taken in as ordinary documents), and `entry_files` / `index_file` (entry and index, each with a special role); three more fields narrow it — `exclude` (out of the score, **charged** to the pollution surface: "this repo contains this and I'm not proud of it"), `out_of_scope` (out of the score, **not charged**, size reported on every run: "real documentation, just not what this run grades" — a translated mirror, a vendored handbook, a subproject with its own config), and `exclude_untracked` (drop everything git doesn't track, so a working checkout measures what a clean one would). The first two are the same operation on the corpus and opposite answers about the repo; a path matching both is charged, `exclude` wins. Root-level guidance files therefore fall into two buckets — **always-loaded ones go under `entry_files` (counted toward fixed cost), conditionally-loaded ones go under `docs_files` (not counted)** — see item 3 of the questionnaire in [reference/init.md](../reference/init.md) for the criterion and the cost of picking the wrong one.
+- **What it scores**: the quality of a repo's documentation system as the **context source for AI agent development**. The corpus boundary is defined by three config fields: `docs_dirs` (directories, scanned recursively), `docs_files` (single files outside those directories, taken in as ordinary documents), and `entry_files` / `index_file` (entry and index, each with a special role); three more fields narrow it — `exclude` (out of the score, **charged** to the pollution surface: "this repo contains this and I'm not proud of it"), `out_of_scope` (out of the score, **not charged**, size reported on every run: "real documentation, just not what this run grades" — a translated mirror, a vendored handbook, a subproject with its own config), and `exclude_untracked` (drop everything git doesn't track, so a working checkout measures what a clean one would). The first two are the same operation on the corpus and opposite answers about the repo; a path matching both is charged, `exclude` wins. Root-level guidance files therefore fall into two buckets — **always-loaded ones go under `entry_files` (counted toward fixed cost), conditionally-loaded ones go under `docs_files` (not counted)** — see item 3 of the questionnaire in [skills/docgrad/reference/init.md](../skills/docgrad/reference/init.md) for the criterion and the cost of picking the wrong one.
 - **What it doesn't score**: prose style (Vale's job), the quality of SKILL.md itself (agnix's/skill-audit's job), code quality (code review's job).
-- **The line between information placement and code quality**: docgrad decides "which carrier should this piece of information live in, and is there a second authoritative copy" (rules in [reference/placement.md](../reference/placement.md)) — to do this it **does read** code comments, but it only judges placement and duplication, it **does not evaluate** whether a comment is well written or whether one should be added. The criterion is "is there a second authoritative copy / is the location right," not "is it well written"; without this boundary, the consistency dimension would slide into code review.
+- **The line between information placement and code quality**: docgrad decides "which carrier should this piece of information live in, and is there a second authoritative copy" (rules in [skills/docgrad/reference/placement.md](../skills/docgrad/reference/placement.md)) — to do this it **does read** code comments, but it only judges placement and duplication, it **does not evaluate** whether a comment is well written or whether one should be added. The criterion is "is there a second authoritative copy / is the location right," not "is it well written"; without this boundary, the consistency dimension would slide into code review.
 - **Generality**: zero repo assumptions. Structure (doc folders, index, entry files, freshness convention) is entirely detected by `init` and confirmed via questionnaire, then written to the config file; every subsequent round reads that config file.
-- **Preconditions**: the documentation must be a **local markdown file tree**, and the target repo's root must be writable for `.docgrad.yml` (Blocker #1). git is not a hard requirement (the one exception is opt-in: `exclude_untracked: true` cannot tell tracked from untracked files without git, so the scripts abort instead of measuring a different corpus in silence) — without git, freshness degrades to claimed-only (when `scripts/freshness.mjs › gitDate()` can't get a value, it falls back to trusting only the document's self-declared date), coverage drift can't be measured, and `retrieval.mjs`'s `churn_commits` / `index_hotness` are both null but nothing crashes; everything else still runs. **Not supported**: remote doc sources like wiki/Confluence — the files aren't on a tree, all five scripts depend on local paths, and there is nowhere to put the config file either.
-- **The rubric can be cited standalone**: the six-dimension anchors in `reference/rubric.md` don't themselves depend on the scripts, and can be taken standalone to manually score non-repo doc sources — but that's "borrowing the anchors," not the docgrad process: no mechanical signal, not reproducible, and it shouldn't land in the scorecard/history either.
+- **Preconditions**: the documentation must be a **local markdown file tree**, and the target repo's root must be writable for `.docgrad.yml` (Blocker #1). git is not a hard requirement (the one exception is opt-in: `exclude_untracked: true` cannot tell tracked from untracked files without git, so the scripts abort instead of measuring a different corpus in silence) — without git, freshness degrades to claimed-only (when `skills/docgrad/scripts/freshness.mjs › gitDate()` can't get a value, it falls back to trusting only the document's self-declared date), coverage drift can't be measured, and `retrieval.mjs`'s `churn_commits` / `index_hotness` are both null but nothing crashes; everything else still runs. **Not supported**: remote doc sources like wiki/Confluence — the files aren't on a tree, all five scripts depend on local paths, and there is nowhere to put the config file either.
+- **The rubric can be cited standalone**: the six-dimension anchors in `skills/docgrad/reference/rubric.md` don't themselves depend on the scripts, and can be taken standalone to manually score non-repo doc sources — but that's "borrowing the anchors," not the docgrad process: no mechanical signal, not reproducible, and it shouldn't land in the scorecard/history either.
 - **The capability ceiling must be stated explicitly**: the star ratings blocked by the blocker no-go zone (currently: freshness ★5 requires a CI gate, and loop doesn't touch CI) are determined explicitly by the design ceiling rule in `improve.md`, not worked around ad hoc by whichever model is running that round — otherwise a report would misrepresent "unreachable by design" as "these two rounds didn't fix it."
 - **User decisions (finalized 2026-07-12)**: released as an independent git repo (this repo); impeccable-style "init once, then converge incrementally"; five dimensions given star ratings plus token economy reported but not rated (**changed to six dimensions starting v1.0.0, with token economy's fixed cost and pollution surface promoted to rated dimensions**, see next section); loop commits every round and only stops when targets are met; scoring = a mix of built-in mechanical scripts and LLM judgment.
 
@@ -42,24 +42,33 @@ docgrad/
 ├── .claude-plugin/
 │   ├── plugin.json       # plugin manifest: version authority (semver, update notifications compare against this)
 │   └── marketplace.json  # lets this repo be added directly as a marketplace
-├── SKILL.md              # routing: init · audit · improve · loop · report
-├── reference/
-│   ├── init.md           # scan + questionnaire -> writes the target repo's .docgrad.yml
-│   ├── rubric.md         # six-dimension star anchors (key to scoring stability, see below)
-│   ├── audit.md          # single scoring pass flow: scripts -> LLM spot-check -> scorecard (incl. scoped audit)
-│   ├── improve.md        # convergence round flow (shared by improve and loop)
-│   └── placement.md      # information placement policy: rules for placement and duplication (consumed by the consistency dimension)
-├── scripts/
-│   ├── lib.mjs           # shared module: YAML subset parser / config / walker / token / markdown parsing
-│   ├── inventory.mjs     # document inventory + CJK-aware token measurement + cost estimation input
-│   ├── links.mjs         # dead links / anchors / orphans (transitive reachability from the index + entry files)
-│   ├── freshness.mjs     # date signal coverage + comparison against real git log dates (convention can take multiple values)
-│   ├── coverage.mjs      # coverage drift: git time lag between code areas and the docs that mention them
-│   └── retrieval.mjs     # traceability + marginal cost: scenarios/areas/index_hotness (report-only)
+├── .codex-plugin/
+│   └── plugin.json       # Codex packaging ("skills": "./skills/")
+├── .agents/              # Codex / Antigravity workspace discovery
+│   ├── plugins/marketplace.json
+│   ├── skills/docgrad    # symlink -> ../../skills/docgrad
+│   └── workflows/docgrad.md
+├── plugin.json           # Antigravity manifest
+├── skills/docgrad/       # the skill payload — everything an agent loads at runtime lives here
+│   ├── SKILL.md          # routing: init · audit · improve · loop · report
+│   ├── reference/
+│   │   ├── init.md       # scan + questionnaire -> writes the target repo's .docgrad.yml
+│   │   ├── rubric.md     # six-dimension star anchors (key to scoring stability, see below)
+│   │   ├── audit.md      # single scoring pass flow: scripts -> LLM spot-check -> scorecard (incl. scoped audit)
+│   │   ├── improve.md    # convergence round flow (shared by improve and loop)
+│   │   └── placement.md  # information placement policy: rules for placement and duplication (consumed by the consistency dimension)
+│   ├── scripts/
+│   │   ├── lib.mjs       # shared module: YAML subset parser / config / walker / token / markdown parsing
+│   │   ├── inventory.mjs # document inventory + CJK-aware token measurement + cost estimation input
+│   │   ├── links.mjs     # dead links / anchors / orphans (transitive reachability from the index + entry files)
+│   │   ├── freshness.mjs # date signal coverage + comparison against real git log dates (convention can take multiple values)
+│   │   ├── coverage.mjs  # coverage drift: git time lag between code areas and the docs that mention them
+│   │   └── retrieval.mjs # traceability + marginal cost: scenarios/areas/index_hotness (report-only)
+│   └── templates/        # graduation deliverable templates: docs-gate.mjs / docs-gate.yml (produced, not installed)
 ├── tests/                # node --test: unit behavior of the scripts; fixtures/ are miniature target repos
-├── templates/            # graduation deliverable templates: docs-gate.mjs / docs-gate.yml (produced, not installed)
 ├── evals/                # skill-level evals: reproducibility of star ratings / sampling coverage / false positives
 │                         # (claude plugin eval; three cases + fixtures/ with three repos)
+├── case-studies/         # records of real runs, each pinned to the docgrad version that produced it
 ├── docs/
 │   ├── design.md         # this file
 │   └── how-to.md         # common development tasks (add a dimension / change the rubric / extend lib)
@@ -70,10 +79,19 @@ docgrad/
 ├── CHANGELOG.md          # per-version changes; version semantics in docs/how-to.md §Cut a release
 ├── NOTICE.md             # attribution (ln-21 claim-ledger, Diátaxis, HumanLayer, impeccable)
 ├── LICENSE               # MIT
-└── README.md             # installation instructions (clone into ~/.claude/skills/docgrad)
+└── README.md             # installation instructions (per platform)
 ```
 
-Skill name = directory name = `docgrad` (invoked as `/docgrad` once installed into `~/.claude/skills/docgrad` or a plugin marketplace). The SKILL.md frontmatter description is mainly in English plus Chinese keywords (trigger matching works in both languages); the body text and reference docs are in English (they were written in zh-TW first and translated for the international release; `README.zh-TW.md` keeps the Chinese landing page, and the target repo's own report language is set per repo by `.docgrad.yml`'s `language:`).
+**Why the payload sits two levels down** (v1.7.0, #47): `skills/<name>/SKILL.md` is what the
+[Agent Skills specification](https://agentskills.io/specification) and the Skills CLI expect, and
+`"skills": ["./"]` — plugin root *is* skill root — was a Claude-Code-only spelling. The packaging
+files that stayed at the repo root are the per-platform manifests; the one thing that moves is the
+payload. Note the consequence for `docgradMeta()`: the manifest it reads is no longer in the skill
+root's own directory, so it searches upward, and the documented bare-clone install symlinks the
+payload rather than copying it — a copy would leave `.claude-plugin/` behind and make `version`
+silently `null`.
+
+Skill name = skill directory name = `docgrad` (invoked as `/docgrad` once installed from a plugin marketplace, or symlinked into `~/.claude/skills/docgrad`). The SKILL.md frontmatter description is mainly in English plus Chinese keywords (trigger matching works in both languages); the body text and reference docs are in English (they were written in zh-TW first and translated for the international release; `README.zh-TW.md` keeps the Chinese landing page, and the target repo's own report language is set per repo by `.docgrad.yml`'s `language:`).
 
 ## Command surface
 
@@ -85,7 +103,7 @@ Skill name = directory name = `docgrad` (invoked as `/docgrad` once installed in
 | `/docgrad loop` | repeat improve until a stop condition (see below) |
 | `/docgrad report` | just reprint the latest scorecard + the score trend across rounds |
 
-With no arguments, print the command table (same as impeccable's routing rule 1). The authoritative definition of routing and blockers is in [SKILL.md](../SKILL.md); this table is a design summary.
+With no arguments, print the command table (same as impeccable's routing rule 1). The authoritative definition of routing and blockers is in [skills/docgrad/SKILL.md](../skills/docgrad/SKILL.md); this table is a design summary.
 
 ## `init` and `.docgrad.yml`
 
@@ -117,13 +135,13 @@ scenarios: [src/foo/bar.ts]        # used by retrieval.mjs to mechanically simul
 language: zh-TW                    # language for reports and commits
 ```
 
-The example above is **illustrative**; each field's default value is authoritative in `scripts/lib.mjs › DEFAULTS` (not repeated here, to avoid drift).
+The example above is **illustrative**; each field's default value is authoritative in `skills/docgrad/scripts/lib.mjs › DEFAULTS` (not repeated here, to avoid drift).
 
 When a repo has no `.docgrad.yml`, `audit`/`improve`/`loop` always redirect to `init` first (the same blocker pattern as impeccable's "teach first when PRODUCT.md is missing").
 
 ## The six-dimension rubric (anchored in reference/rubric.md)
 
-Scores need to be comparable across rounds, so the anchors must be fixed. The ★1–★5 anchors for each dimension were distilled from hands-on scoring; the frozen text is in [reference/rubric.md](../reference/rubric.md), this table is only a summary:
+Scores need to be comparable across rounds, so the anchors must be fixed. The ★1–★5 anchors for each dimension were distilled from hands-on scoring; the frozen text is in [skills/docgrad/reference/rubric.md](../skills/docgrad/reference/rubric.md), this table is only a summary:
 
 | Dimension | ★3 (passing) anchor | ★5 anchor | Measurement |
 |---|---|---|---|
@@ -136,21 +154,21 @@ Scores need to be comparable across rounds, so the anchors must be fixed. The �
 
 **Why economy is a dimension and not just a report** (v1.0.0, issue #11): completeness rewards coverage, economy penalizes cost — the two point in opposite directions. When it was report-only and not rated, every legal move for loop each round was "add more documentation," and nothing pushed content that wasn't worth its tokens out of the entry files — external evidence (comparisons across multiple coding agents on SWE-Bench Lite and AgentBench) shows that longer context files raise cost without necessarily raising success rate. Adding a dimension = a rubric structure change = major, and all repos' historical scores have to restart from baseline — that cost was paid knowingly (contrast with the 0.5.0 decision to expand the scope of consistency while **deliberately not** adding a sixth dimension: that change was to the judged scope of an existing dimension, this one changes the reward direction itself).
 
-**Token economy report**: (1) fixed cost = token count of entry_files (**rated**); (2) marginal cost = mechanically computed from `scenarios`, or the token total of the must-read path simulated by an LLM per `scenario` (report-only); (3) pollution surface = the share of the corpus taken up by **`exclude`d** directories and WIP (**rated**) — `out_of_scope` content is removed from the corpus without being charged here, and its size is reported alongside on every run so the field cannot be used to launder the ratio (see [reference/rubric.md](../reference/rubric.md) §Economy). CJK-aware estimation (Chinese token/byte density differs from English; inventory.mjs has a built-in coefficient). The report includes a "break-even" interpretation (the trade-off in task mix between fixed and marginal cost).
+**Token economy report**: (1) fixed cost = token count of entry_files (**rated**); (2) marginal cost = mechanically computed from `scenarios`, or the token total of the must-read path simulated by an LLM per `scenario` (report-only); (3) pollution surface = the share of the corpus taken up by **`exclude`d** directories and WIP (**rated**) — `out_of_scope` content is removed from the corpus without being charged here, and its size is reported alongside on every run so the field cannot be used to launder the ratio (see [skills/docgrad/reference/rubric.md](../skills/docgrad/reference/rubric.md) §Economy). CJK-aware estimation (Chinese token/byte density differs from English; inventory.mjs has a built-in coefficient). The report includes a "break-even" interpretation (the trade-off in task mix between fixed and marginal cost).
 
 ## Conflict arbitration conventions
 
 When the same fact appears in multiple documents, the following rules decide which one is authoritative (dogfooding consistency ★5, "one authority per topic + explicit arbitration"):
 
-1. **doc vs code**: code is always authoritative; when docs disagree with code, fix the docs to align with code (see the claim ledger in [reference/audit.md](../reference/audit.md)).
+1. **doc vs code**: code is always authoritative; when docs disagree with code, fix the docs to align with code (see the claim ledger in [skills/docgrad/reference/audit.md](../skills/docgrad/reference/audit.md)).
 2. **doc vs doc**: newer wins — whichever file has the more recent `> **Last updated:**` is authoritative; the older location is rewritten as "summary + link" pointing to the authority, with no two full copies left standing.
-3. **Cannot be arbitrated** (two documents are mutually exclusive and code is irrelevant): don't guess — this goes to loop's "needs human decision" stop condition (see [reference/improve.md](../reference/improve.md)).
+3. **Cannot be arbitrated** (two documents are mutually exclusive and code is irrelevant): don't guess — this goes to loop's "needs human decision" stop condition (see [skills/docgrad/reference/improve.md](../skills/docgrad/reference/improve.md)).
 
-One authority per topic: every key fact is spelled out in exactly one place, the rest keep only a summary + link — the command table is authoritative in [SKILL.md](../SKILL.md), the rubric anchors are authoritative in [reference/rubric.md](../reference/rubric.md), and the code contract is authoritative in `scripts/`.
+One authority per topic: every key fact is spelled out in exactly one place, the rest keep only a summary + link — the command table is authoritative in [skills/docgrad/SKILL.md](../skills/docgrad/SKILL.md), the rubric anchors are authoritative in [skills/docgrad/reference/rubric.md](../skills/docgrad/reference/rubric.md), and the code contract is authoritative in `skills/docgrad/scripts/`.
 
 ## How `loop` works (core requirement: install it and it runs until targets are met)
 
-The authoritative operating procedure is in [reference/improve.md](../reference/improve.md); this section is a design explanation. Each round (= one run of `improve`):
+The authoritative operating procedure is in [skills/docgrad/reference/improve.md](../skills/docgrad/reference/improve.md); this section is a design explanation. Each round (= one run of `improve`):
 
 1. Run the five scripts + LLM-judged dimensions -> scorecard.
 2. Pick the **lowest-scoring dimension** (ties go to whichever comes first in the rubric table order), and generate a batch of focused fixes from that dimension's deduction points (each round fixes only one dimension, to avoid half-finished changes across everything that leave contradictions — convergence is not a rewrite).
@@ -163,7 +181,7 @@ round compares its `rubric_hash`/`corpus_hash` against, `ledger.jsonl` is the cu
 down, `scorecard-latest.md` is what `report` reprints, and `graduation/` holds the CI deliverables the team copies into
 `.github/` by hand. Gitignoring any of them disables the feature that reads it, silently — a fresh clone would restart
 coverage at zero and never draw a comparability break, with nothing to indicate why. The one discipline it requires is
-stated in [improve.md](../reference/improve.md) §Steps in each round: do not commit a scorecard measured against untracked
+stated in [improve.md](../skills/docgrad/reference/improve.md) §Steps in each round: do not commit a scorecard measured against untracked
 local files without saying so, because the pollution surface and the economy rating it feeds are checkout-bound.
 
 **Why scores need to be reproducible (v1.1.0, issue #12)**: in the 2026-07-13 oikos production run, re-verifying consistency the same day after closing out dropped it from ★4 to ★2 — not because the ruler changed, but because **sampling wasn't constrained**: four rounds of sampling never hit the one balance sign that was the opposite of what the code said. The fix is not to write the anchors in more detail (finer anchors still can't control "which items get sampled"), but to take sampling itself back out of the LLM's hands: the population and draw order are mechanically produced by `inventory.mjs` (stable ordering), verification results accumulate in `.docgrad/ledger.jsonl`, and the next round re-verifies old entries before sampling new ones. The report gives both the pass rate and the cumulative coverage rate — **a star rating alone doesn't reveal how large a sample it's built on**. This matches Anthropic's skill-authoring principle: operations that must be consistent should have their degrees of freedom reduced, not get more explanatory text.
@@ -181,12 +199,12 @@ Once targets are met, it recommends distilling the mechanizable rules into the r
 
 ## Scripts contract
 
-All five are zero-dependency Node (>=18) scripts that read `.docgrad.yml`, output JSON to stdout (for the LLM to consume), and send errors to stderr with a non-zero exit code. Shared flags are parsed in one place, `scripts/lib.mjs › parseArgs()`: `--root` (target repo root), `--config` (config file located elsewhere — used when the doc source itself can't hold a file), `--include` (the scope glob for a scoped audit). **All five outputs open the same way: `scope`, then a `docgrad: {version, rubric_hash, corpus_hash}` block** (`scripts/lib.mjs › docgradMeta()`) — one round's five JSON files therefore carry the same fingerprint, and a report can tell whether they were produced by the same ruler over the same corpus without trusting that they were run together. The JSON shapes below are **illustrative summaries**; the full set of fields is authoritative in the actual script output (not repeated in full here, to avoid drifting from `scripts/`):
+All five are zero-dependency Node (>=18) scripts that read `.docgrad.yml`, output JSON to stdout (for the LLM to consume), and send errors to stderr with a non-zero exit code. Shared flags are parsed in one place, `skills/docgrad/scripts/lib.mjs › parseArgs()`: `--root` (target repo root), `--config` (config file located elsewhere — used when the doc source itself can't hold a file), `--include` (the scope glob for a scoped audit). **All five outputs open the same way: `scope`, then a `docgrad: {version, rubric_hash, corpus_hash}` block** (`skills/docgrad/scripts/lib.mjs › docgradMeta()`) — one round's five JSON files therefore carry the same fingerprint, and a report can tell whether they were produced by the same ruler over the same corpus without trusting that they were run together. The JSON shapes below are **illustrative summaries**; the full set of fields is authoritative in the actual script output (not repeated in full here, to avoid drifting from `skills/docgrad/scripts/`):
 
 - `inventory.mjs` → `{scope, docgrad, files: [{path, bytes, tokens_est, type, claims, structure: {h2, rules}, docgrad_authored}], totals: {…, claims_total, claims_api_only, claims_docgrad_authored, claims_docgrad_authored_ratio, rules_total, rules_anchored_ratio}, claim_population: {api_matching, src_symbols, src_files_scanned, authorship, cap, emitted, population, truncated, notes}, claim_candidates: [{path, line, text, claim_hash, refs, refs_path, refs_api, section, section_lines, docgrad_authored}], entry_cost, pollution: {excluded_files, excluded_tokens, ratio, note?}, out_of_scope: {count, tokens_est, files, note?}, untracked: {count, tokens_est, files, note?}}`
   - `corpus_hash` fingerprints the corpus scope — `docs_dirs`/`docs_files`/`entry_files`/`exclude`/`index_file`/`exclude_untracked`, plus `out_of_scope` **only when it is non-empty** so an unused field draws no false break — normalized so reordering doesn't move it, and `null` with no config.
   - `claim_population` says how the correctness sampling population was obtained and what degraded: `api_matching: "disabled"` means `src_dirs` is unset, so API-shaped inline code contributed nothing (on a library repo that alone can leave `claims_total` at 0); `authorship: "unavailable"` means git could not say who added each document, so `docgrad_authored` is `null` rather than `false`.
-  - `claim_candidates` is the first `claim_candidates_cap` entries of the ranked population (default 60), not all of it — emitting hundreds of claim texts would charge the reader exactly what the economy dimension measures. Because the claim ledger can only draw from what is emitted, the window is stated rather than implied: `cap`, `emitted`, `population` (the same number as `totals.claims_total`) and `truncated` say whether this is the whole ordered population or a view onto it, and a `truncated: true` run carries a note naming the remedy (raise `claim_candidates_cap`). The window is a prefix of one stable order, so raising the cap appends and never reorders. It is deliberately **not** in `corpus_hash` — it selects no files and moves no denominator, so a change to it is not a corpus break; see [rubric.md](../reference/rubric.md) §Version history.
+  - `claim_candidates` is the first `claim_candidates_cap` entries of the ranked population (default 60), not all of it — emitting hundreds of claim texts would charge the reader exactly what the economy dimension measures. Because the claim ledger can only draw from what is emitted, the window is stated rather than implied: `cap`, `emitted`, `population` (the same number as `totals.claims_total`) and `truncated` say whether this is the whole ordered population or a view onto it, and a `truncated: true` run carries a note naming the remedy (raise `claim_candidates_cap`). The window is a prefix of one stable order, so raising the cap appends and never reorders. It is deliberately **not** in `corpus_hash` — it selects no files and moves no denominator, so a change to it is not a corpus break; see [rubric.md](../skills/docgrad/reference/rubric.md) §Version history.
   - `claim_hash` is the claim ledger's key (12 hex chars over the claim text with whitespace collapsed); `path`/`line` remain locating aids. `out_of_scope` is emitted on **every** run, empty included — that is the anti-abuse property, not decoration.
   - `untracked` is the collected files git doesn't track, all three fields `null` plus a `note` when git is unavailable, and `pollution.note` appears whenever any collected file is untracked, because the ratio is then checkout-bound.
 - `links.mjs` → `{scope, docgrad, dead_links: [], bad_anchors: [], orphans, reachable_ratio}` (reachability is computed transitively starting from `index_file` + `entry_files` — entry files are always-loaded, so by definition they're reachable). **`orphans` and `reachable_ratio` are both `null` whenever reachability was not computed** — when `--include` restricts the scope, or when no `index_file` is configured — because reachability is a whole-corpus concept. `null` means "not computed" and must never be read as "none found".

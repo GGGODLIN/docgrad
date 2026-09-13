@@ -8,20 +8,20 @@
 
 ```jsonc
 // ~/.claude/settings.json or the target repo's .claude/settings.local.json
-{ "permissions": { "allow": ["Bash(node /absolute/path/to/docgrad/scripts/*)"] } }
+{ "permissions": { "allow": ["Bash(node /absolute/path/to/docgrad/skills/docgrad/scripts/*)"] } }
 ```
 
-Use the absolute path from the line that actually runs after `/docgrad` is triggered (the plugin install path differs machine to machine).
+Use the absolute path from the line that actually runs after `/docgrad` is triggered (the plugin install path differs machine to machine). **Since v1.7.0 the scripts sit at `skills/docgrad/scripts/`, not at the install root** — a rule written for the old layout matches nothing, and because a Bash rule that fails to match just falls through to a prompt, the only symptom is that the prompts come back. Copy the path from the run, don't retype it from memory.
 
 **Why SKILL.md doesn't just ship `allowed-tools`**: a Bash rule must match verbatim up to its first `*`, and a skill doesn't know its own install absolute path at write time; the only portable pattern that could be written is `Bash(node *)`, which is equivalent to pre-authorizing "run any node command" — not worth the cost for a tool that only scores docs read-only. Only the user knows the path, so this rule is added by the user themselves.
 
 ## Add a scoring dimension
 
-1. **Anchors first**: add a dimension subsection in [reference/rubric.md](../reference/rubric.md) (full ★1–★5 anchors + measurement method). Anchor changes = a breaking change, see the next section.
+1. **Anchors first**: add a dimension subsection in [skills/docgrad/reference/rubric.md](../skills/docgrad/reference/rubric.md) (full ★1–★5 anchors + measurement method). Anchor changes = a breaking change, see the next section.
 2. Update the rubric's "mechanical signal -> dimension map" table; dimension order (the tie-break basis) follows the rubric table's order.
-3. Add the new dimension key to `targets` in `.docgrad.yml`; sync `scripts/lib.mjs › DEFAULTS.targets` (the field list is authoritative in code, not repeated here).
-4. Add the scoring steps for that dimension to [reference/audit.md](../reference/audit.md); add a row to the scorecard template.
-5. If a new mechanical signal is needed: add `scripts/<name>.mjs` (contract in [design.md](design.md) §Scripts contract — zero dependencies, JSON->stdout, errors->stderr with a non-zero exit code, shared flags always go through `scripts/lib.mjs › parseArgs()`), and add a corresponding `*.test.mjs` in `tests/`.
+3. Add the new dimension key to `targets` in `.docgrad.yml`; sync `skills/docgrad/scripts/lib.mjs › DEFAULTS.targets` (the field list is authoritative in code, not repeated here).
+4. Add the scoring steps for that dimension to [skills/docgrad/reference/audit.md](../skills/docgrad/reference/audit.md); add a row to the scorecard template.
+5. If a new mechanical signal is needed: add `skills/docgrad/scripts/<name>.mjs` (contract in [design.md](design.md) §Scripts contract — zero dependencies, JSON->stdout, errors->stderr with a non-zero exit code, shared flags always go through `skills/docgrad/scripts/lib.mjs › parseArgs()`), and add a corresponding `*.test.mjs` in `tests/`.
 
 ## Change a rubric anchor the right way
 
@@ -31,7 +31,7 @@ Use the absolute path from the line that actually runs after `/docgrad` is trigg
 
 ## Extend the measurement scripts (lib.mjs)
 
-- `scripts/lib.mjs` is the shared module for the five CLIs; function contracts are authoritative in code (refer-to-code, docs don't restate signatures).
+- `skills/docgrad/scripts/lib.mjs` is the shared module for the five CLIs; function contracts are authoritative in code (refer-to-code, docs don't restate signatures).
 - Shared flags (`--root`/`--config`/`--include`) are parsed in one place, `parseArgs()`: add a new flag there and all five scripts pick it up; unknown flags always throw an error, never get silently ignored. Scope-filtering semantics are in `matchesScope()`; if a new script doesn't apply scope (like `coverage.mjs`, `retrieval.mjs`), its output `note` must explicitly say why.
 - YAML parsing is a **two-level subset** (top-level scalar / inline list / block list, plus one level of nested map); new config fields shouldn't go beyond this structure.
 - Development verification: `node --test tests/*.test.mjs` (Node >=18; directory arguments aren't available starting from v25).
@@ -81,10 +81,10 @@ Release steps:
 
 When docs point to code, use `` `path › symbol()` ``, not line numbers — line numbers drift the moment they're edited:
 
-- ✅ `` `scripts/lib.mjs › DEFAULTS.targets` ``, `` `scripts/lib.mjs › parseYamlSubset()` ``
-- ❌ `scripts/lib.mjs:84` (inaccurate the next time it's edited)
+- ✅ `` `skills/docgrad/scripts/lib.mjs › DEFAULTS.targets` ``, `` `skills/docgrad/scripts/lib.mjs › parseYamlSubset()` ``
+- ❌ `skills/docgrad/scripts/lib.mjs:84` (inaccurate the next time it's edited)
 
-It's enough for the symbol to locate the spot, no need for the full signature. This shares its origin with the linkage ★5 anchor, see the Linkage section in [reference/rubric.md](../reference/rubric.md).
+It's enough for the symbol to locate the spot, no need for the full signature. This shares its origin with the linkage ★5 anchor, see the Linkage section in [skills/docgrad/reference/rubric.md](../skills/docgrad/reference/rubric.md).
 
 ## Marking retired or superseded documents
 
@@ -94,4 +94,4 @@ docgrad scores other repos on "whether retirement mechanisms are marked," and it
 - **A whole mechanism removed**: delete the file outright (example: the historical plan in `docs/superpowers/` has been removed), and in **the same commit** clean up any remaining references to it in other documents — removal isn't clean unless it leaves no dead links.
 - **Paragraph-level stale narrative**: rewrite it in place to reflect the current state, or mark it "(removed in vX)" — don't leave an unmarked zombie description.
 
-Criterion: keep it with a banner if it still has guidance value (many old links, an important migration path); if it's pure historical baggage, delete it cleanly. This shares its origin with freshness's lifecycle management (superseded docs handled promptly); the anchor is in [reference/rubric.md](../reference/rubric.md).
+Criterion: keep it with a banner if it still has guidance value (many old links, an important migration path); if it's pure historical baggage, delete it cleanly. This shares its origin with freshness's lifecycle management (superseded docs handled promptly); the anchor is in [skills/docgrad/reference/rubric.md](../skills/docgrad/reference/rubric.md).

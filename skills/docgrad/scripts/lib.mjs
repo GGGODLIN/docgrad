@@ -937,12 +937,50 @@ export function corpusHash(config) {
     .slice(0, 8);
 }
 
-const SKILL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Resolved through realpath first, because the documented bare-clone install symlinks
+// `skills/docgrad` into `~/.claude/skills/` and the manifest search below walks *up* from here.
+// Node normally resolves the entry point's realpath itself, so this is inert on a default run —
+// it earns its place under `--preserve-symlinks-main`, where `import.meta.url` is the symlink path
+// and the walk would otherwise climb `~/.claude/skills/` and find nothing. Measured: with that
+// flag and without this call, `version` is null; with it, 1.7.0.
+function resolveSkillRoot() {
+  const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  try {
+    return fs.realpathSync(dir);
+  } catch {
+    return dir;
+  }
+}
+
+const SKILL_ROOT = resolveSkillRoot();
+
+// The manifest is at the *plugin* root, which since v1.7.0 is not the skill root: the skill payload
+// lives at `skills/docgrad/` while `.claude-plugin/` stays at the repo root. Walking up is what
+// keeps `version` populated in both layouts.
+//
+// This is deliberately the one lookup that searches. A missing manifest makes `version` null, and
+// the catch below swallows it silently — so the failure shows up as a `history.jsonl` full of null
+// versions, months later, with nothing pointing at the cause. That is exactly the "state file
+// quietly stops matching reality" class #36 exists to catch, which is why it also has a test.
+const MANIFEST_SEARCH_LEVELS = 4;
+
+function findManifest(startDir) {
+  let dir = startDir;
+  for (let i = 0; i <= MANIFEST_SEARCH_LEVELS; i += 1) {
+    const candidate = path.join(dir, '.claude-plugin/plugin.json');
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // hit the filesystem root
+    dir = parent;
+  }
+  return null;
+}
 
 export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   let version = null;
   try {
-    version = JSON.parse(fs.readFileSync(path.join(skillRoot, '.claude-plugin/plugin.json'), 'utf8')).version ?? null;
+    const manifest = findManifest(skillRoot);
+    version = manifest ? JSON.parse(fs.readFileSync(manifest, 'utf8')).version ?? null : null;
   } catch {
     version = null; // allowed to be missing when run from outside the source tree; don't let it crash the script
   }

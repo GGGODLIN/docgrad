@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
 const RETRIEVAL_FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.meta.url));
 const DOCS_FILES_FIXTURE = fileURLToPath(new URL('./fixtures/docs-files/', import.meta.url));
-const SCRIPT = fileURLToPath(new URL('../scripts/inventory.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../skills/docgrad/scripts/inventory.mjs', import.meta.url));
 
 function gitInit(tmp) {
   const env = {

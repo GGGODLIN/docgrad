@@ -71,7 +71,7 @@ Summary: all 12 runs passed their case's stated criteria, and 16 of 18 dimension
 unanimous across runs. The two that were not produced one real finding — **the correctness anchors
 are all written in terms of a pass rate, and `linkage-known` has `claims_total: 0`, so an empty
 sample has no anchor at all**. Four runs rated it ★3, ★3, ★1 and ★2, each defensibly. That gap
-belongs in `reference/rubric.md`, not in the evals.
+belongs in `skills/docgrad/reference/rubric.md`, not in the evals.
 
 The first thing to do once harness access is granted is a `--runs 5` pass to turn that hand-measured
 spread into a distribution, and to add the no-plugin baseline arm the harness provides and hand runs
@@ -89,8 +89,8 @@ if the numbers change, update the graders accordingly:
 
 ```bash
 for f in clean linkage-known planted-contradiction; do
-  node scripts/links.mjs     --root evals/fixtures/$f
-  node scripts/freshness.mjs --root evals/fixtures/$f
+  node skills/docgrad/scripts/links.mjs     --root evals/fixtures/$f
+  node skills/docgrad/scripts/freshness.mjs --root evals/fixtures/$f
 done
 ```
 

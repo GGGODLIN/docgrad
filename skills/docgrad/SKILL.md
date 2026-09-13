@@ -14,7 +14,7 @@ lint prose style, does not review code, and does not touch CI.
 
 Prerequisite: the documentation is a **local markdown file tree** and `.docgrad.yml` can be written
 to the target repo root; wikis and remote doc sources are not supported (boundaries and workarounds
-in [docs/design.md](docs/design.md) §Positioning and boundaries).
+in [docs/design.md](../../docs/design.md) §Positioning and boundaries).
 
 `SKILL_DIR` = the directory this file lives in (the relative root for `scripts` and `reference`).
 

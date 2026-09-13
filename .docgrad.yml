@@ -1,14 +1,18 @@
 # .docgrad.yml — docgrad configuration (version-controlled, shared by the team)
-# This repo is a Claude Code skill:
-#   entry = SKILL.md (the only file auto-loaded when the skill triggers; README.md is the
-#           human-facing GitHub landing page, not loaded into agent context, so it is not
+# This repo is an Agent Skill:
+#   entry = skills/docgrad/SKILL.md (the only file auto-loaded when the skill triggers; README.md is
+#           the human-facing GitHub landing page, not loaded into agent context, so it is not
 #           listed as an entry_file — listing it would inflate the fixed cost by 1,807 tokens)
 #   index = README.md (the human navigation entry point, the starting point for linkage reachability)
-docs_dirs: [docs/, reference/]
-entry_files: [SKILL.md]
+#
+# v1.7.0 moved the skill payload to skills/docgrad/ (#47). corpus_hash therefore breaks once here,
+# on purpose: this repo's round-over-round trend has a real discontinuity at that release, and a
+# hash that did *not* move would be the bug. See CHANGELOG.md 1.7.0.
+docs_dirs: [docs/, skills/docgrad/reference/]
+entry_files: [skills/docgrad/SKILL.md]
 index_file: README.md
-src_dirs: [scripts/]
-scenarios: [scripts/links.mjs, scripts/lib.mjs]
+src_dirs: [skills/docgrad/scripts/]
+scenarios: [skills/docgrad/scripts/links.mjs, skills/docgrad/scripts/lib.mjs]
 exclude: []
 freshness:
   convention: heading-line

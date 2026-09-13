@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored } from '../scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored } from '../skills/docgrad/scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -739,6 +739,43 @@ test('docgradMeta: corpus_hash is null without a config, and present with one (b
   const cfg = loadConfig(FIXTURE);
   assert.equal(docgradMeta(undefined, cfg).corpus_hash, corpusHash(cfg));
   assert.match(docgradMeta(undefined, cfg).corpus_hash, /^[0-9a-f]{8}$/);
+});
+
+// #47: the skill payload moved to skills/docgrad/ while .claude-plugin/ stayed at the repo root,
+// so the manifest is no longer a sibling of the skill root. docgradMeta() swallows a missing
+// manifest and returns version: null — nothing throws, nothing warns, and the only trace is a
+// history.jsonl slowly filling with null versions. These two tests exist because that failure is
+// silent; without them the layout can regress and every other test stays green.
+test('docgradMeta: version is non-null from the real tree (the manifest is a level above the skill root)', () => {
+  const meta = docgradMeta();
+  assert.notEqual(meta.version, null, 'version went null — the manifest search no longer reaches .claude-plugin/plugin.json');
+  assert.match(meta.version, /^\d+\.\d+\.\d+$/);
+});
+
+test('docgradMeta: the manifest search walks up, and stops rather than escaping upward forever', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-layout-'));
+  try {
+    const skillRoot = path.join(tmp, 'skills/docgrad');
+    fs.mkdirSync(path.join(skillRoot, 'reference'), { recursive: true });
+    fs.mkdirSync(path.join(tmp, '.claude-plugin'));
+    fs.writeFileSync(path.join(tmp, '.claude-plugin/plugin.json'), '{"version":"9.9.9"}');
+    fs.writeFileSync(path.join(skillRoot, 'reference/rubric.md'), '★4 anchor A');
+    // Found two levels up, which is the shipped layout.
+    assert.equal(docgradMeta(skillRoot).version, '9.9.9');
+    // rubric_hash still resolves from the skill root itself, not from the manifest's directory.
+    assert.match(docgradMeta(skillRoot).rubric_hash, /^[0-9a-f]{8}$/);
+
+    // A skill root with no manifest anywhere above it inside the search window reports null rather
+    // than picking up an unrelated manifest from further up the filesystem.
+    const orphan = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-orphan-'));
+    try {
+      assert.equal(docgradMeta(orphan).version, null);
+    } finally {
+      fs.rmSync(orphan, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('docgradMeta: returns version and rubric fingerprint; the hash changes when rubric changes', () => {
