@@ -6,6 +6,12 @@
 code is identical across both arms and whose documentation is not.
 **What it does not measure:** whether the docs are *better* in any sense other than the one graded.
 
+> **Reading the versions in this study.** It was run against docgrad **v1.6.0**.
+> Prose references to code — file paths, function names, output fields, config keys — describe the
+> tool **as it was then**, and are deliberately left alone: rewriting them to today's layout would
+> make this record assert something that was never true of the run it describes. Markdown links are
+> the exception and **are** maintained against the current layout, so they still resolve. Notes below that say "fixed in the release this case study ships with" mean v1.6.0.
+
 ## The subject
 
 [`tj/commander.js`](https://github.com/tj/commander.js) at commit `ba6d13d` — a widely used

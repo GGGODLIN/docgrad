@@ -6,13 +6,20 @@
 maintained by people who did not build the tool's rules for themselves — and what decays anyway.
 **What it does not measure:** anything you can generalise to your repo from a sample of one.
 
+> **Reading the versions in this study.** It covers thirteen rounds spanning **v0.5.0 to v1.6.0**, so there is no single version to name;
+> each finding says which release it belongs to, and the re-measured numbers use the **v1.6.0** scripts.
+> Prose references to code — file paths, function names, output fields, config keys — describe the
+> tool **as it was then**, and are deliberately left alone: rewriting them to today's layout would
+> make this record assert something that was never true of the run it describes. Markdown links are
+> the exception and **are** maintained against the current layout, so they still resolve.
+
 The subject is a private application repository, referred to here as **Repo P**. It has been under
 docgrad since the tool's first weeks and has completed **13 convergence rounds**. It is the only
 long-running subject available, and it is the one worth reading if you are deciding whether to adopt
 this: [case study 1](01-commander-js.md) shows first contact with a stranger's repo, this one shows
 what the hundredth day looks like.
 
-Numbers below were re-measured from Repo P's committed state with the current scripts. Repo P's
+Numbers below were re-measured from Repo P's committed state with the v1.6.0 scripts (the current release when this study was written). Repo P's
 contents, domain and file names are withheld; only counts, ratings and mechanics are reported.
 
 ## What 13 rounds looks like

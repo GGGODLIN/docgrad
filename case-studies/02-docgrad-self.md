@@ -6,6 +6,13 @@
 **What it does not measure:** end-to-end agent token usage on a task. That is
 [case study 1](01-commander-js.md).
 
+> **Reading the versions in this study.** It re-measures nine rounds that were originally produced between **v0.5.0 and v1.4.0**, using one
+> constant ruler: the **v1.4.0** scripts and config.
+> Prose references to code — file paths, function names, output fields, config keys — describe the
+> tool **as it was then**, and are deliberately left alone: rewriting them to today's layout would
+> make this record assert something that was never true of the run it describes. Markdown links are
+> the exception and **are** maintained against the current layout, so they still resolve.
+
 docgrad has been run on its own repository since its first week. The convergence rounds are real
 commits, the scores are in `.docgrad/history.jsonl`, and every number below was re-measured for this
 write-up rather than copied out of an old scorecard.
@@ -13,7 +20,7 @@ write-up rather than copied out of an old scorecard.
 ## Method
 
 Four snapshots of the repository, extracted from git and measured with **one** version of the
-scripts (HEAD, v1.4.0) and **one** config, so the ruler is constant across all four:
+scripts (v1.4.0, the HEAD at the time of this study) and **one** config, so the ruler is constant across all four:
 
 ```bash
 # from a clone of docgrad
@@ -34,11 +41,11 @@ comparison but also its main confound. See [Threats to validity](#threats-to-val
 | `71e7be8` | `chore: docgrad init` — the baseline audit scored it ★3 / ★3 / ★1 / ★4 / ★3 |
 | `cf97522` | round 4, the first time every dimension met its target |
 | `0fb7e01` | round 9, the close-out round |
-| `48f3d1a` | v1.4.0, today's HEAD (four feature releases after the close-out) |
+| `48f3d1a` | v1.4.0 — the HEAD when this study was run, four feature releases after the close-out |
 
 ## What came out
 
-| | round 0 | round 4 | round 9 | HEAD v1.4.0 |
+| | round 0 | round 4 | round 9 | v1.4.0 |
 |---|---:|---:|---:|---:|
 | Documents | 7 | 8 | 9 | 9 |
 | Corpus tokens | 7,809 | 8,497 | 16,691 | **26,739** |

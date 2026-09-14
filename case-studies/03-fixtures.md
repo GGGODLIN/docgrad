@@ -9,10 +9,22 @@ translated from.
 that makes [case study 1](01-commander-js.md) and [case study 2](02-docgrad-self.md) worth reading,
 because a rating that moves between runs cannot support a before/after comparison.
 
+> **Reading the versions in this study.** It was run against docgrad **v1.4.0**.
+> Prose references to code — file paths, function names, output fields, config keys — describe the
+> tool **as it was then**, and are deliberately left alone: rewriting them to today's layout would
+> make this record assert something that was never true of the run it describes. Markdown links are
+> the exception and **are** maintained against the current layout, so they still resolve.
+
 `evals/README.md` had said these cases were "written, not yet executed". They have now been
-executed. The official harness (`claude plugin eval`) is in early access and was not available on
-this account, so the three cases were run by hand with their `prompt.md` text unchanged, and scored
-against their `graders/criteria.md`.
+executed. The official harness (`claude plugin eval`) refused to run, reporting
+`` `plugin eval` is currently in early access ``, so the three cases were run by hand with their
+`prompt.md` text unchanged, and scored against their `graders/criteria.md`.
+
+> **Correction (v1.8.0).** This section originally said the harness "was not available on this
+> account". That was wrong, and it was wrong in a way that cost time: the message means **the CLI
+> build predates the command's general availability**, not that an entitlement is pending. v1.7.0
+> established this and corrected `docs/how-to.md` and `evals/README.md`; this file was missed. The
+> hand-run results below are unaffected — only the recorded reason for running them by hand was.
 
 ## Method
 
