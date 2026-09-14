@@ -3,6 +3,110 @@
 Version authority is `version` in [.claude-plugin/plugin.json](.claude-plugin/plugin.json); this file records changes per version.
 For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](docs/how-to.md) §Cut a release.
 
+## 1.8.0 — 2026-09-14
+
+Four defects fixed (#54 #56 #57 #55). **No ★1–★5 threshold moved** and every shipped default is
+unchanged. `rubric_hash` moves to `21fcfd36` (rubric prose changed); a new `judgement_hash` joins the
+fingerprint block.
+
+**Read this before upgrading — #57 can stop docgrad working on your repo, and no hash will warn you.**
+Three configuration shapes now **fail the run** instead of quietly measuring content from outside the
+repository. `corpus_hash` cannot tell you whether you are affected: it digests the config's path
+*strings*, not the files actually collected. So check, don't compare hashes:
+
+```bash
+grep -n '\.\.' .docgrad.yml                    # shape 1: a configured path containing ..
+find <each configured path> -type l -exec sh -c 'realpath "$1" | grep -qv "^$PWD/" && echo "$1"' _ {} \;
+                                                # shapes 2 and 3: a configured path that IS a symlink
+                                                # out of the root, or a *.md symlink in the corpus
+node <docgrad>/skills/docgrad/scripts/links.mjs --root .   # shape 4: keep the dead_links count
+```
+
+Shape 3 is the one that surprises people: its owner greps for `../`, finds none, and concludes they
+are safe — while `docs/` is a symlink to a shared docs tree outside the repo.
+
+**Shape 4 is the opposite problem and it is silent.** An out-of-root *document link* that pointed at
+a missing file used to count in `dead_links`; it now lands in the new `out_of_root_links` bucket. So
+`dead_links` can shrink, **the linkage rating can improve, and a generated CI gate that was failing
+can turn green** — with no config change, no error, and no fingerprint moving. Keep the pre-upgrade
+count above and compare.
+
+- **Fixed (#57) docgrad read whatever the audited repository pointed it at.** It is documented and
+  demonstrated as a tool you run against repos you did not write, and that repo controls both
+  `.docgrad.yml` and the symlinks in its tree. Content read this way reaches the scorecard, and
+  `audit.md` then instructs the agent to Read each claim's file — so it reaches the agent's context
+  too. Exposure is **disclosure, not execution**: the five scripts still run only their own code and
+  `git` with fixed argv.
+  - **Containment is built on `fs.realpathSync`, never on `path.resolve`.** A lexical check is
+    defeated by one committed symlink: `docs-x -> /` with `docs_dirs: ['docs-x/Users/v/notes/']`
+    resolves lexically inside the root, passes, and then `readdirSync` follows it out. There is a
+    test whose only job is to fail against a lexical implementation.
+  - Eight enforcement points, not the two the issue named: `collectFiles`, `pushSingleFile`,
+    `walkMarkdown`, `buildSrcSymbolIndex`, `coverage.mjs`, `retrieval.mjs`'s `resolveFiles` **and
+    `walkFiles`**, and `links.mjs`. `walkFiles` was the one nobody listed: `Dirent.isDirectory()` is
+    false for a symlink, so a symlinked **file** inside a perfectly contained `src_dirs` was read by
+    `hasCodePointer()` — and `src_dirs` is the only route that reads arbitrary **non-markdown** bodies.
+  - **Missing paths stay non-fatal.** `realpathSync` throws ENOENT, and a missing `docs_dir` is
+    deliberately skipped because `.docgrad.yml` is shared across branches. Turning "not on this
+    branch" into exit 1 would have been a worse bug than the one being fixed.
+  - **`links.mjs` was an existence oracle.** A hostile document could ask whether any absolute path
+    exists on the auditor's machine: absent targets were reported dead, present ones silently
+    dropped. The fix is about that *difference* — an out-of-root target is bucketed and
+    **`existsSync` is never called on it**; relabelling the present case while still stat-ing would
+    have left the oracle open. Non-fatal, unlike a configured path: an accidental `../../` link is
+    common and exit 1 there would be a corpus-wide regression.
+  - **Deliberately not done:** no extension filter was added to `pushSingleFile`. Its absence is a
+    separate defect, and "fixing" it here would silently drop legitimate in-root non-markdown entries
+    (`docs_files: ['NOTES.txt']`), moving `files_total` and two denominators for repos doing nothing
+    wrong. `exclude`/`out_of_scope` are left unchecked too — they are pure string matchers that never
+    touch the filesystem, and the code says so, so the omission cannot be read as an oversight.
+  - Accepted residual: TOCTOU between check and read. Five separate processes, a seconds-wide window,
+    and it needs a concurrent attacker; closing it means carrying validated handles across four files.
+- **Fixed (#54) the claim-candidate window counted what was emitted, not what could be drawn.**
+  Sampling can only draw from what `inventory.mjs` emits, and the emitted list did not exclude claims
+  already in the ledger — so every ledger row cost the window a usable slot. Measured on one repo:
+  nominally 60, **actually 33 drawable**, and worsening, because sampling draws from the top so
+  verified claims concentrate at the window's front. The more successful the sampling, the less
+  useful the window. New shared flag **`--exclude-ledger <path>`**, default off; the filter runs
+  **before** the cap slice, which is the whole fix. A missing or malformed ledger fails loudly —
+  a silent fallback would leave the defect in place while looking fixed.
+  - **Consequence for comparability:** with the flag, `claim_candidates` is a prefix of the
+    *filtered* order, so **"raising the cap only appends" stops holding** — the filter moves as the
+    ledger grows. Every document asserting that property was found by search rather than by hand;
+    hand-enumeration had already missed it twice, including `audit.md`'s draw procedure, the one an
+    auditor follows step by step.
+  - Without the flag, output is unchanged byte for byte (verified across four corpora and all five
+    scripts).
+  - Not fixed here, filed as #60: the ranking degrades to path order after roughly 98 candidates
+    (77% of one real population has `refs: 1`), and excluding drawn claims reaches that flat region
+    sooner. The remedy is a better ranking signal, which is a design question.
+- **Added (#56) `judgement_hash` — a fingerprint for the rules that apply the anchors.** `rubric_hash`
+  covers `rubric.md`, so v1.7.0's #48 could add two correctness boundary rules to `audit.md` — one of
+  which can only lower a pass rate — with **no fingerprint moving at all**. That break could only be
+  disclosed in prose and trusted to be read. The new field covers `audit.md` and `placement.md`,
+  chosen against `SKILL.md`'s own blockers: those are the files the skill says you must read before
+  rating. `rubric.md` is excluded (hashing it twice moves two fingerprints for one edit) and so is
+  `improve.md` (it delegates the rating to `audit.md` and a plain `audit` never reads it).
+  **It does not mark the break that motivated it** — a pre-1.8.0 round has no such field, so its
+  first appearance reads "unknown → first value".
+- **Fixed (#55) five statements in the surfaces that had never been scanned.** `SKILL.md` said
+  `coverage.mjs`/`retrieval.mjs` "deliberately do not accept" `--include`; they accept it and
+  deliberately ignore it, which matters because "do not accept" sends a reader looking for an error
+  that never comes. Three case studies anchored on relative time ("today's HEAD", "the current
+  scripts") — true when written, false now.
+  - **The fifth is the one worth naming.** `case-studies/03-fixtures.md` still said the eval harness
+    "was not available on this account". v1.7.0 established that this is false — the message means a
+    CLI build predating the command's release — and corrected `docs/how-to.md` and `evals/README.md`.
+    This file was missed, and so was it by the scan run for this very issue. A tool that grades
+    whether documentation matches reality was carrying, in its own records, a cause its own
+    documentation had already declared wrong. Corrected in place with a dated note rather than
+    rewritten, because what was recorded at the time is itself part of the record.
+  - All four case studies gain a **version convention**, drawn where the carrier changes rather than
+    where the file sits: prose code references are **frozen** (rewriting `scripts/links.mjs` to
+    `skills/docgrad/scripts/links.mjs` would claim v1.5.0 had the v1.7.0 layout), while **markdown
+    links are maintained** against the current layout so they still resolve. Case study 4 spans
+    v0.5.0–v1.6.0 and says so instead of naming one version.
+
 ## 1.7.0 — 2026-09-14
 
 Six defects fixed (#47 #48 #49 #50 #51 #52). **No ★1–★5 threshold moved**, no dimension gained or
