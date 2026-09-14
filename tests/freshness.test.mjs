@@ -24,6 +24,18 @@ function makeGitFixture() {
   return tmp;
 }
 
+test('freshness: --exclude-ledger is a no-op, note explains why (#54)', () => {
+  const out = JSON.parse(
+    execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE, '--exclude-ledger', '/nonexistent/ledger.jsonl'], { encoding: 'utf8' })
+  );
+  assert.match(out.note, /--exclude-ledger is a no-op for this script/);
+});
+
+test('freshness: without --exclude-ledger there is no note field at all (unchanged from before this flag existed)', () => {
+  const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
+  assert.ok(!('note' in out));
+});
+
 test('freshness: coverage/stale/mismatch (DOCGRAD_TODAY pins today)', () => {
   const tmp = makeGitFixture();
   const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], {

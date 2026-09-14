@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash } from '../skills/docgrad/scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash, loadLedgerClaimHashes } from '../skills/docgrad/scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -375,11 +375,20 @@ test('parseArgs: --config external; defaults to <root>/.docgrad.yml with no flag
   const bare = parseArgs([]);
   assert.equal(bare.configFile, path.join(process.cwd(), '.docgrad.yml'));
   assert.deepEqual(bare.include, []);
+  assert.equal(bare.excludeLedger, null, 'default off (#54)');
+});
+
+test('parseArgs: --exclude-ledger resolves like --config, relative to cwd', () => {
+  const a = parseArgs(['--exclude-ledger', '.docgrad/ledger.jsonl']);
+  assert.equal(a.excludeLedger, path.resolve('.docgrad/ledger.jsonl'));
+  const b = parseArgs(['--root', '/tmp/x', '--exclude-ledger', '/abs/ledger.jsonl']);
+  assert.equal(b.excludeLedger, path.resolve('/abs/ledger.jsonl'));
 });
 
 test('parseArgs: missing value and unknown argument throw (not swallowed silently)', () => {
   assert.throws(() => parseArgs(['--include']), /--include requires a value/);
   assert.throws(() => parseArgs(['--root', '--include', 'x']), /--root requires a value/);
+  assert.throws(() => parseArgs(['--exclude-ledger']), /--exclude-ledger requires a value/);
   assert.throws(() => parseArgs(['--dim', 'freshness']), /Unknown argument/);
 });
 
@@ -1060,4 +1069,55 @@ test('rankClaimCandidates: more refs comes first, ties broken by path then line 
     ranked.map((c) => `${c.path}:${c.line}`),
     ['a.md:1', 'a.md:9', 'b.md:2']
   );
+});
+
+// --- loadLedgerClaimHashes (#54) ---------------------------------------------------
+
+test('loadLedgerClaimHashes: collects distinct claim_hash values, ignores blank lines', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-ledger-'));
+  try {
+    const ledgerPath = path.join(tmp, 'ledger.jsonl');
+    fs.writeFileSync(
+      ledgerPath,
+      [
+        JSON.stringify({ claim_hash: 'aaa111', round: 1, verify: 'pass' }),
+        '',
+        JSON.stringify({ claim_hash: 'bbb222', round: 1, verify: 'fail' }),
+        JSON.stringify({ claim_hash: 'aaa111', round: 2, verify: 'pass' }), // re-verified: same hash again
+      ].join('\n')
+    );
+    const hashes = loadLedgerClaimHashes(ledgerPath);
+    assert.deepEqual([...hashes].sort(), ['aaa111', 'bbb222']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('loadLedgerClaimHashes: a missing file fails loudly rather than returning an empty set', () => {
+  assert.throws(
+    () => loadLedgerClaimHashes(path.join(os.tmpdir(), 'docgrad-no-such-ledger-', 'ledger.jsonl')),
+    /--exclude-ledger .*could not read this file/
+  );
+});
+
+test('loadLedgerClaimHashes: a malformed line (not JSON) fails loudly, naming the line', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-ledger-bad-'));
+  try {
+    const ledgerPath = path.join(tmp, 'ledger.jsonl');
+    fs.writeFileSync(ledgerPath, '{"claim_hash": "aaa111"}\nnot json at all\n');
+    assert.throws(() => loadLedgerClaimHashes(ledgerPath), /:2: not a valid JSON object/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('loadLedgerClaimHashes: a row without claim_hash fails loudly rather than being silently skipped', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-ledger-nohash-'));
+  try {
+    const ledgerPath = path.join(tmp, 'ledger.jsonl');
+    fs.writeFileSync(ledgerPath, '{"round": 1, "verify": "pass"}\n');
+    assert.throws(() => loadLedgerClaimHashes(ledgerPath), /has no non-empty claim_hash field/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

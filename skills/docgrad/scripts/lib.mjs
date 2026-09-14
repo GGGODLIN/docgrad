@@ -129,6 +129,16 @@ const DEFAULTS = {
   // disclosed on every run (claim_population.truncated / emitted / population) and raising this
   // number is the documented remedy.
   //
+  // #54: without `--exclude-ledger`, every already-verified ledger row still occupies one of the
+  // `claim_candidates_cap` slots forever — the window narrows to `cap - (ledger size)` drawable
+  // candidates as the ledger grows, which is the same defect this cap exists to prevent, just one
+  // level down. `--exclude-ledger <path>` (inventory.mjs only, default off) filters candidates
+  // already in the ledger out of the ranked list **before** this cap is applied, so `cap` counts
+  // drawable candidates instead of emitted-including-already-verified ones. With the flag, the
+  // emitted window is a prefix of the *filtered* order, not of the total order, and that filtered
+  // order itself shifts as the ledger grows — so "raising the cap only appends" and "the window is
+  // the ceiling coverage can reach" hold only when the flag is off.
+  //
   // Default 60 = the value that was hardcoded in inventory.mjs before it became configurable.
   claim_candidates_cap: 60,
   scenario: null,
@@ -325,27 +335,35 @@ function takeValue(argv, i, flag) {
   return v;
 }
 
-// Flags shared by all four scripts:
-//   --root <dir>      target repo root (default: cwd)
-//   --config <file>   config file path (default: <root>/.docgrad.yml)
-//   --include <glob>  limit scope (scoped audit), repeatable or comma-separated; omit = full scope
+// Flags shared by all five scripts (#54):
+//   --root <dir>            target repo root (default: cwd)
+//   --config <file>         config file path (default: <root>/.docgrad.yml)
+//   --include <glob>        limit scope (scoped audit), repeatable or comma-separated; omit = full scope
+//   --exclude-ledger <path> path to a `.docgrad/ledger.jsonl`; default off. Only inventory.mjs draws
+//                           on it (it filters the ranked claim-candidate list before the cap is
+//                           applied) — coverage.mjs, freshness.mjs, links.mjs and retrieval.mjs all
+//                           accept it, like --include on coverage/retrieval, and report it as a
+//                           no-op in their own output note rather than silently ignoring it.
 export function parseArgs(argv = process.argv.slice(2)) {
   let rootArg = null;
   let configArg = null;
+  let excludeLedgerArg = null;
   const include = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--root') rootArg = takeValue(argv, i++, '--root');
     else if (a === '--config') configArg = takeValue(argv, i++, '--config');
+    else if (a === '--exclude-ledger') excludeLedgerArg = takeValue(argv, i++, '--exclude-ledger');
     else if (a === '--include') {
       include.push(...takeValue(argv, i++, '--include').split(',').map((s) => s.trim()).filter(Boolean));
-    } else throw new Error(`Unknown argument ${a} (supported: --root / --config / --include)`);
+    } else throw new Error(`Unknown argument ${a} (supported: --root / --config / --include / --exclude-ledger)`);
   }
   const root = path.resolve(rootArg ?? process.cwd());
   return {
     root,
     configFile: configArg ? path.resolve(configArg) : path.join(root, CONFIG_FILENAME),
     include,
+    excludeLedger: excludeLedgerArg ? path.resolve(excludeLedgerArg) : null,
   };
 }
 
@@ -1397,4 +1415,49 @@ export function rankClaimCandidates(perFile) {
   return perFile
     .flatMap(({ path: p, claims }) => claims.map((c) => ({ path: p, ...c })))
     .sort((a, b) => b.refs - a.refs || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) || a.line - b.line);
+}
+
+// --- #54: --exclude-ledger --------------------------------------------------------
+//
+// Reads a `.docgrad/ledger.jsonl` and returns the set of `claim_hash` values it contains, so
+// inventory.mjs can filter them out of the ranked candidate list before `claim_candidates_cap` is
+// applied — every ledger row currently costs the emitted window one slot forever, and this is the
+// fix (#54).
+//
+// **Fails loudly on anything short of a well-formed ledger.** A missing file, an unreadable one, or
+// a line that isn't a JSON object with a `claim_hash` string all throw. The alternative — falling
+// back to "nothing excluded" — would silently re-emit the unfiltered window while the caller
+// believes it asked for a filtered one, which is the exact defect this flag exists to close, just
+// hidden one layer deeper. A malformed ledger must stop the run, not degrade it quietly.
+export function loadLedgerClaimHashes(ledgerPath) {
+  let text;
+  try {
+    text = fs.readFileSync(ledgerPath, 'utf8');
+  } catch (err) {
+    throw new Error(
+      `--exclude-ledger ${ledgerPath}: could not read this file (${err.code === 'ENOENT' ? 'not found' : err.message}). ` +
+        'A missing or unreadable ledger must fail the run, not silently emit an unfiltered candidate window.'
+    );
+  }
+  const hashes = new Set();
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    let row;
+    try {
+      row = JSON.parse(raw);
+    } catch {
+      throw new Error(
+        `--exclude-ledger ${ledgerPath}:${i + 1}: not a valid JSON object. Each non-empty line of a ledger must be exactly one JSON object with a claim_hash field.`
+      );
+    }
+    if (row === null || typeof row !== 'object' || Array.isArray(row) || typeof row.claim_hash !== 'string' || !row.claim_hash) {
+      throw new Error(
+        `--exclude-ledger ${ledgerPath}:${i + 1}: this row has no non-empty claim_hash field. Every ledger row must carry the claim_hash it was verified against.`
+      );
+    }
+    hashes.add(row.claim_hash);
+  }
+  return hashes;
 }

@@ -27,7 +27,7 @@ If the user specifies a scope (directory / glob / topic) or a single dimension �
 `SKILL_DIR` = this skill's install directory (one level above this file). Run from the target repo root:
 
 ```bash
-node "$SKILL_DIR/scripts/inventory.mjs" --root .
+node "$SKILL_DIR/scripts/inventory.mjs" --root . --exclude-ledger .docgrad/ledger.jsonl
 node "$SKILL_DIR/scripts/links.mjs" --root .
 node "$SKILL_DIR/scripts/freshness.mjs" --root .
 node "$SKILL_DIR/scripts/coverage.mjs" --root .
@@ -35,6 +35,13 @@ node "$SKILL_DIR/scripts/retrieval.mjs" --root .
 ```
 
 Consume all five JSON outputs in full; don't truncate with head/grep/jq. If any script exits non-zero → stop and report stderr.
+
+`--exclude-ledger <path>` (#54, optional, pass only when `.docgrad/ledger.jsonl` exists): tells
+`inventory.mjs` to filter candidates already in that ledger out of `claim_candidates` **before**
+`claim_candidates_cap` is applied, so the cap counts drawable candidates instead of every ledger row
+costing the window a slot permanently. It is a shared flag across all five scripts — the other four
+accept it and say in their own output that it is a no-op for them, the same way they already handle
+an ignored `--include`.
 
 ### 2. Completeness
 
@@ -77,15 +84,21 @@ Steps 1–3 below build those three parts in order.
    Take the first `min(floor(correctness_sample / 2), number of pass entries)` of that ordering.
 3. **Draw `correctness_sample` new claims** — and do not let steps 1 and 2 reduce that number.
    Consume `inventory.mjs`'s `claim_candidates` (already stably sorted by "ref count → path → line",
-   same order every time for the same corpus). **"Already in the ledger" is decided by `claim_hash`, not by `path:line`** — a
+   same order every time for the same corpus) — **unless `inventory.mjs` was run with `--exclude-ledger`
+   (#54)**, in which case the order consumed is a function of the corpus **and** the ledger: rows
+   already in the ledger were filtered out before `claim_candidates_cap` was applied, so it is still
+   stable for that one run but it shifts across rounds as the ledger grows. "Front to back" still
+   means front to back of *that* run's list either way. **"Already in the ledger" is decided by `claim_hash`, not by `path:line`** — a
    candidate whose hash is in the ledger has been verified before, wherever its line number has drifted to since.
    Take candidates that **haven't entered the ledger yet**, front to back, until
    you have `correctness_sample` of them; at most 2 per document (skip any over that quota and keep taking from further down).
    Cumulative coverage therefore grows by `correctness_sample` every round — re-verification never eats into it — **until the emitted
-   window is exhausted**. That window is the thing to check before reading any of this as unbounded: `claim_candidates` holds the first
+   window is exhausted (without `--exclude-ledger`)**. That window is the thing to check before reading any of this as unbounded: `claim_candidates` holds the first
    `claim_candidates_cap` candidates of the ranked population (default 60), not all of them, and a draw can only come from what was
    emitted. `claim_population` states both ends of it — `emitted`, `population`, `truncated`, `cap` — so you never have to count array
-   entries to find out which you are looking at.
+   entries to find out which you are looking at. With `--exclude-ledger` passed, `claim_population.exclude_ledger` additionally
+   states how many ranked candidates were excluded because the ledger already covers them, so the window can hold nearly
+   `claims_total` distinct candidates over successive rounds instead of freezing at `claim_candidates_cap`.
 
    **When fewer than `correctness_sample` unseen candidates remain, the round draws what exists — possibly zero — and the report states the shortfall**,
    naming which of the **three** causes it was. They look identical from inside the draw and they need different responses:

@@ -9,6 +9,14 @@ import { fileURLToPath } from 'node:url';
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
 const SCRIPT = fileURLToPath(new URL('../skills/docgrad/scripts/links.mjs', import.meta.url));
 
+test('links: --exclude-ledger is a no-op, note explains why, and it need not even exist (#54)', () => {
+  const out = JSON.parse(
+    execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE, '--exclude-ledger', '/nonexistent/ledger.jsonl'], { encoding: 'utf8' })
+  );
+  assert.match(out.note, /--exclude-ledger is a no-op for this script/);
+  assert.deepEqual(out.orphans, ['docs/orphan.md']); // behaves exactly like the unflagged run otherwise
+});
+
 test('links: dead links/bad anchors/orphans/reachable ratio', () => {
   const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE], { encoding: 'utf8' }));
   assert.deepEqual(out.dead_links, [{ file: 'docs/guide.md', line: 5, target: './nope.md' }]);

@@ -32,7 +32,7 @@ Use the absolute path from the line that actually runs after `/docgrad` is trigg
 ## Extend the measurement scripts (lib.mjs)
 
 - `skills/docgrad/scripts/lib.mjs` is the shared module for the five CLIs; function contracts are authoritative in code (refer-to-code, docs don't restate signatures).
-- Shared flags (`--root`/`--config`/`--include`) are parsed in one place, `parseArgs()`: add a new flag there and all five scripts pick it up; unknown flags always throw an error, never get silently ignored. Scope-filtering semantics are in `matchesScope()`; if a new script doesn't apply scope (like `coverage.mjs`, `retrieval.mjs`), its output `note` must explicitly say why.
+- Shared flags (`--root`/`--config`/`--include`/`--exclude-ledger`) are parsed in one place, `parseArgs()`: add a new flag there and all five scripts pick it up; unknown flags always throw an error, never get silently ignored. Scope-filtering semantics are in `matchesScope()`; if a new script doesn't apply scope (like `coverage.mjs`, `retrieval.mjs`) or doesn't act on `--exclude-ledger` (everything but `inventory.mjs`, #54), its output `note` must explicitly say why.
 - YAML parsing is a **two-level subset** (top-level scalar / inline list / block list, plus one level of nested map); new config fields shouldn't go beyond this structure.
 - Development verification: `node --test tests/*.test.mjs` (Node >=18; directory arguments aren't available starting from v25).
 

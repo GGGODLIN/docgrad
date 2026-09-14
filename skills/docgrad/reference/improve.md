@@ -25,7 +25,10 @@
 
 ## Steps in each round
 
-1. **Score**: run a full evaluation per [audit.md](audit.md) (scripts + LLM), producing this round's scorecard.
+1. **Score**: run a full evaluation per [audit.md](audit.md) (scripts + LLM), producing this round's scorecard. When
+   `.docgrad/ledger.jsonl` already exists, pass it to `inventory.mjs` as `--exclude-ledger .docgrad/ledger.jsonl` (#54, see
+   [audit.md](audit.md) step 1) — otherwise every claim this loop has already verified keeps occupying a slot in the emitted
+   candidate window, and the round after round it draws from shrinks toward nothing even though `claims_total` hasn't moved.
 2. **Pick a dimension**: take the lowest-scoring dimension; on a tie → take whichever comes first in rubric order
    (completeness → correctness → freshness → linkage → consistency → economy).
    A dimension already judged to have hit its **design ceiling** (see stop conditions) is excluded from selection; take the next-lowest instead.

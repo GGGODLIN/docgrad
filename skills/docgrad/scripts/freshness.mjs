@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // freshness.mjs — date-signal coverage + comparison against real git log dates
-// Usage: node freshness.mjs [--root <repo>] [--config <file>] [--include <glob>]; JSON -> stdout.
+// Usage: node freshness.mjs [--root <repo>] [--config <file>] [--include <glob>] [--exclude-ledger <path>]; JSON -> stdout.
 // env DOCGRAD_TODAY=YYYY-MM-DD can override "today" (for reproducible tests).
+// --exclude-ledger (#54) is a no-op here: only inventory.mjs draws claim candidates from a claim
+// ledger; freshness measures date signals, which the claim ledger has nothing to do with. Accepted
+// and ignored, like --include on coverage.mjs, so it stays usable as a truly shared flag.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -59,10 +62,13 @@ function dateConcentration(claimedDates) {
 const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000);
 
 try {
-  const { root, configFile, include } = parseArgs();
+  const { root, configFile, include, excludeLedger } = parseArgs();
   const config = loadConfig(root, configFile);
   const { included } = collectFiles(root, config, { include });
   const today = process.env.DOCGRAD_TODAY ?? new Date().toISOString().slice(0, 10);
+  const excludeLedgerNoteText = excludeLedger
+    ? '--exclude-ledger is a no-op for this script: only inventory.mjs draws claim candidates from a claim ledger, and freshness measures date signals, which the claim ledger has nothing to do with'
+    : null;
 
   const results = included.map((rel) => {
     const claimed = extractClaimedDate(fs.readFileSync(path.join(root, rel), 'utf8'), config.freshness);
@@ -79,6 +85,7 @@ try {
         // Same position as in inventory.mjs (right after scope) so two scripts' JSON can be
         // compared field by field: which tool version, which rubric, which corpus definition.
         docgrad: docgradMeta(undefined, config),
+        ...(excludeLedgerNoteText ? { note: excludeLedgerNoteText } : {}),
         // the actual convention list applied (a single value is still returned as an array;
         // with multiple values they're tried in order, see lib.mjs's extractClaimedDate).
         convention: parseFreshnessConventions(config.freshness.convention),

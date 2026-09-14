@@ -80,8 +80,15 @@ the reader the very thing the economy dimension measures. Draws come only from t
 ledger that fills it stops growing while `claims_total` stays higher —
 `inventory.claim_population` reports `emitted` / `population` / `truncated` / `cap` on every run so
 that state is never inferred from a coverage number that simply stopped moving. Raising
-`claim_candidates_cap` is the fix, and it only appends: the window is a prefix of one stable order,
-so a wider one draws everything a narrower one drew, in the same positions.
+`claim_candidates_cap` is the fix, and — **without `--exclude-ledger`** — it only appends: the
+window is a prefix of one stable order, so a wider one draws everything a narrower one drew, in the
+same positions. `--exclude-ledger <path>` (#54) is a different fix for a related cost: every ledger
+row otherwise occupies one of the `claim_candidates_cap` slots forever, so the window narrows to
+`cap` minus the ledger's size as it grows. Passed, `inventory.mjs` filters candidates already in
+that ledger out of the ranked list **before** the cap is applied, so `cap` counts drawable
+candidates instead — but the window it emits is then a prefix of the *filtered* order, not of the
+total order, and that filtered order shifts as the ledger grows, so "only appends" no longer holds
+in that mode (see [audit.md](audit.md) step 1).
 A "code coordinate" is either **path-shaped** inline code (`lib/foo.js`, `src/a.ts › parse()`) or **API-shaped** inline code
 (`foo()`, `.option()`, `program.opts()`) whose every segment exists as an identifier under `src_dirs`; the per-candidate split is
 `refs_path` / `refs_api`. With `src_dirs` unset the API shape is inert and contributes nothing —
@@ -113,6 +120,10 @@ round to re-derive them.
 > a flat coverage line and a round that drew nothing. `claim_population.truncated` is what tells
 > them apart, and [audit.md](audit.md) step 3 sets out the three causes of a short draw and the
 > different response each one needs. A capped coverage figure must be reported as capped.
+> This is the picture **without `--exclude-ledger`**. Run with it, the window instead holds a
+> prefix of the *drawable* (not-yet-ledgered) candidates, so the ceiling sits closer to
+> `claims_total` — but it is still a ceiling, and a config setting, just a moving one instead of a
+> fixed `claim_candidates_cap`th candidate (see [audit.md](audit.md) step 1).
 
 > **Report pass rate and coverage separately**: the star rating for this dimension follows the
 > **pass rate** (passes ÷ claims verified this round). **Cumulative coverage** (distinct claims in
@@ -385,7 +396,10 @@ individual dimension did not).
     ranking by reference count, so the first 60 candidates are the most densely referenced claims in the corpus. Widening it
     admits less specific ones, which need not pass at the same rate. The star may move for that reason alone; it is not a
     documentation change. Widening it does **not** reorder or re-draw anything already in the ledger — the window is a prefix
-    of one stable order — so the ledger itself stays comparable.
+    of one stable order — so the ledger itself stays comparable. **That comparability holds without `--exclude-ledger`
+    (#54, v1.8.0).** Run with it, the window is a prefix of the ledger-filtered order instead, which shifts as the ledger
+    itself grows — so a `claim_candidates_cap` change compared across two `--exclude-ledger` runs is not the same kind of
+    comparison as the one described above.
   - **`claim_candidates_cap` is deliberately *not* part of `corpus_hash`.** It selects no files and moves no denominator:
     `claims_total`, the freshness denominator, the orphan population and the pollution denominator are all identical either
     side of a change to it. Folding it in would draw a whole-round comparability break across all six dimensions — five of

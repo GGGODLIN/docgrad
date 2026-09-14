@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // links.mjs — dead links/bad anchors/orphans (reachability computed transitively from index_file + entry_files)
-// Usage: node links.mjs [--root <repo>] [--config <file>] [--include <glob>]; JSON -> stdout.
+// Usage: node links.mjs [--root <repo>] [--config <file>] [--include <glob>] [--exclude-ledger <path>]; JSON -> stdout.
 // When scope-limited, only dead links/bad anchors are emitted: orphans and reachable ratio are
 // full-index concepts that go wrong once scope narrows, so they're never computed under scope.
+// --exclude-ledger (#54) is a no-op here: only inventory.mjs draws claim candidates from a claim
+// ledger; link checking has nothing to do with it. Accepted and ignored, like --include above.
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -79,9 +81,12 @@ function safeDecode(s) {
 }
 
 try {
-  const { root, configFile, include } = parseArgs();
+  const { root, configFile, include, excludeLedger } = parseArgs();
   const scoped = include.length > 0;
   const config = loadConfig(root, configFile);
+  const excludeLedgerNoteText = excludeLedger
+    ? '--exclude-ledger is a no-op for this script: only inventory.mjs draws claim candidates from a claim ledger, and link checking has nothing to do with it'
+    : null;
   const { included } = collectFiles(root, config, { include });
   const includedSet = new Set(included);
   const readText = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -130,6 +135,11 @@ try {
     }
   }
 
+  const scopeNoteText = scoped
+    ? 'scope-limited: orphans/reachable ratio not computed (reachability is a full-index concept), only dead links and bad anchors are counted'
+    : null;
+  const combinedNoteText = [scopeNoteText, excludeLedgerNoteText].filter(Boolean).join('; ') || null;
+
   const roots = [config.index_file, ...config.entry_files].filter((p) => p && includedSet.has(p));
   const reachable = new Set(roots);
   const queue = [...roots];
@@ -151,9 +161,7 @@ try {
         // ([] -> null when not computed, #39), and without this the output cannot say which
         // version of the tool wrote it.
         docgrad: docgradMeta(undefined, config),
-        ...(scoped
-          ? { note: 'scope-limited: orphans/reachable ratio not computed (reachability is a full-index concept), only dead links and bad anchors are counted' }
-          : {}),
+        ...(combinedNoteText ? { note: combinedNoteText } : {}),
         total_links,
         dead_links,
         // #57: link targets that resolve outside the repository root. Reported and never fatal —

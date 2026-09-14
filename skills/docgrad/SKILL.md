@@ -58,5 +58,8 @@ node "$SKILL_DIR/scripts/retrieval.mjs" --root .   # traceability/marginal cost 
 
 Shared flags: `--config <file>` (when the config file is not at the root), `--include <glob>`
 (limits the scope for a scoped audit; repeatable or comma-separated. `coverage.mjs` and
-`retrieval.mjs` deliberately do not accept it — each explains why in the `note` it emits).
+`retrieval.mjs` deliberately do not accept it — each explains why in the `note` it emits),
+`--exclude-ledger <path>` (path to `.docgrad/ledger.jsonl`, #54 — only `inventory.mjs` acts on it,
+filtering already-ledgered candidates out of `claim_candidates` before `claim_candidates_cap` is
+applied; the other four scripts accept it and report it as a no-op in their own `note`).
 The `scope` field in each script's output is the scope the report must state.
