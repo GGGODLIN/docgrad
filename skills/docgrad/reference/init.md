@@ -99,11 +99,14 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
 10. `correctness_sample`: **the number of claims drawn *new* each round** (re-verification of the existing ledger is a separate
     budget on top, see [audit.md](audit.md) step 3) — so it is also the rate at which cumulative coverage grows. Default 8; for a
     large docs system (>50 files), 12 is recommended.
-    Paired with it, `claim_candidates_cap`: **how many ranked candidates `inventory.mjs` emits per run**, default 60. Coverage can
-    only grow as far as this window, so it is the ceiling `correctness_sample` climbs toward. **Take the default** — it is the right
-    answer until a repo's ledger approaches it, and emitting every candidate with its text is a real cost in a tool that rates
-    context economy. Raise it when `claim_population.truncated` is `true` *and* the ledger is near `emitted`; `audit` reports both
-    numbers every round, so there is no need to guess at init time
+    Paired with it, `claim_candidates_cap`: **how many ranked candidates `inventory.mjs` emits per run**, default 60. Without
+    `--exclude-ledger` (#54), coverage can only grow as far as this window, so it is the ceiling `correctness_sample` climbs
+    toward. **Take the default** — it is the right answer until a repo's ledger approaches it, and emitting every candidate
+    with its text is a real cost in a tool that rates context economy. Raise it when `claim_population.truncated` is `true`
+    *and* the ledger is near `emitted`; `audit` reports both numbers every round, so there is no need to guess at init time.
+    Passing `--exclude-ledger .docgrad/ledger.jsonl` to `inventory.mjs` is the other way to widen what a round can draw: it
+    filters already-ledgered candidates out before the cap is applied, so the cap counts drawable candidates instead of
+    raising the cap being the only lever
 11. `src_dirs` (multi-select, pre-filled with scan candidates; used by coverage drift detection, retrieval.mjs, **and the
     correctness dimension's claim population**). **Do not leave this empty if you can avoid it** — it now gates three things,
     and the third is the one that silently costs a whole dimension:
@@ -156,7 +159,7 @@ economy:
   entry_cost_tiers: [20000, 10000, 5000, 3000]   # fixed-cost thresholds for economy ★1/★2/★3/★4→★5
   pollution_max: 0.1                              # pollution surface cap; economy is capped at ★3 above this
 correctness_sample: 8
-claim_candidates_cap: 60   # how many ranked claim candidates inventory.mjs emits; the ceiling cumulative coverage can reach. Leave at 60 until claim_population.truncated is true and the ledger has nearly filled the window
+claim_candidates_cap: 60   # how many ranked claim candidates inventory.mjs emits; without --exclude-ledger (#54) this is the ceiling cumulative coverage can reach. Leave at 60 until claim_population.truncated is true and the ledger has nearly filled the window
 scenario: "add a typical new feature to <some module>"   # LLM-simulation fallback when scenarios is absent
 scenarios: [src/foo/bar.ts, src/foo]      # used by retrieval.mjs to mechanically simulate marginal cost + traceability; optional
 rules:

@@ -582,6 +582,50 @@ test('inventory: raising claim_candidates_cap emits more, and only appends to th
   }
 });
 
+// The flag-on counterpart to the test above (#54): with --exclude-ledger, raising the cap does
+// NOT merely append to the same prefix, because the order being capped is the *filtered* one and
+// that filter is a function of the ledger, not just the corpus.
+test('inventory: --exclude-ledger — raising claim_candidates_cap does not merely append to the same prefix, because the filtered order is not the total order', () => {
+  const tmp = claimRepo(80);
+  try {
+    const fullOrder = (() => {
+      const dup = claimRepo(80);
+      try {
+        fs.appendFileSync(path.join(dup, '.docgrad.yml'), 'claim_candidates_cap: 200\n');
+        return runInventory(dup);
+      } finally {
+        fs.rmSync(dup, { recursive: true, force: true });
+      }
+    })();
+    // Ledger covers the first 10 of the total order.
+    const ledgered = fullOrder.claim_candidates.slice(0, 10).map((c) => c.claim_hash);
+    const ledgerPath = writeLedger(tmp, ledgered);
+
+    const before = runInventory(tmp, '--exclude-ledger', ledgerPath); // cap 60
+    fs.appendFileSync(path.join(tmp, '.docgrad.yml'), 'claim_candidates_cap: 75\n');
+    const after = runInventory(tmp, '--exclude-ledger', ledgerPath); // cap 75
+
+    assert.equal(before.claim_candidates.length, 60);
+    assert.equal(after.claim_candidates.length, 70, '80 total - 10 ledgered = 70 drawable, below the new cap of 75');
+    // The property the unflagged test above pins ("after's first 60 == before's 60") does NOT
+    // hold here: both runs already filter the same 10 ledgered hashes out before the cap, so
+    // before's 60 and after's first 60 are actually identical in *this* case — but the reason is
+    // different: not because the window is a prefix of the total order, but because both windows
+    // are prefixes of the *same already-filtered* order at a smaller cap than the drawable count.
+    // The real counterexample: once a ledger changes between two runs (as it does every round in
+    // practice), the same claim_candidates_cap draws a different window. Demonstrate that here.
+    const ledgerPath2 = writeLedger(tmp, fullOrder.claim_candidates.slice(0, 20).map((c) => c.claim_hash), '.docgrad2');
+    const afterMoreLedger = runInventory(tmp, '--exclude-ledger', ledgerPath2); // cap still 75 (from the appended config)
+    assert.notDeepEqual(
+      afterMoreLedger.claim_candidates.map((c) => c.claim_hash),
+      after.claim_candidates.map((c) => c.claim_hash),
+      'the same claim_candidates_cap draws a different window once the ledger has grown — the filtered order is not fixed the way the total order is'
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('inventory: a cap larger than the population reports the whole population, not truncated', () => {
   const tmp = claimRepo(80);
   try {
@@ -621,6 +665,131 @@ test('inventory: a bad claim_candidates_cap fails the run rather than emitting a
     assert.equal(res.status, 1);
     assert.match(res.stderr, /claim_candidates_cap must be a positive whole number/);
     assert.equal(res.stdout.trim(), '', 'no half-valid JSON to mistake for a measurement');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// --- --exclude-ledger (#54): the emitted window counts what is drawable -----------------------
+
+function writeLedger(tmp, claimHashes, subdir = '.docgrad') {
+  const dir = path.join(tmp, subdir);
+  fs.mkdirSync(dir, { recursive: true });
+  const ledgerPath = path.join(dir, 'ledger.jsonl');
+  fs.writeFileSync(
+    ledgerPath,
+    claimHashes.map((h) => JSON.stringify({ claim_hash: h, round: 1, verify: 'pass' })).join('\n') + '\n'
+  );
+  return ledgerPath;
+}
+
+test('inventory: --exclude-ledger filters ledgered candidates out before the cap is applied, so cap counts drawable candidates (#54)', () => {
+  // Two identical repos (claimRepo's content is a pure function of n, so both produce the same
+  // ranked order — same paths, same line contents, same claim_hash values): one to read off the
+  // full 150-candidate order (cap raised well past the population), one to run the actual test
+  // against, at the real default cap of 60.
+  const tmpFull = claimRepo(150);
+  const tmpTest = claimRepo(150);
+  try {
+    fs.appendFileSync(path.join(tmpFull, '.docgrad.yml'), 'claim_candidates_cap: 200\n');
+    const fullOrder = runInventory(tmpFull);
+    assert.equal(fullOrder.claim_candidates.length, 150, 'the whole ranked population, unfiltered');
+
+    const baseline = runInventory(tmpTest); // no flag: cap 60, unfiltered
+    assert.equal(baseline.claim_population.emitted, 60);
+    assert.deepEqual(
+      baseline.claim_candidates.map((c) => c.claim_hash),
+      fullOrder.claim_candidates.slice(0, 60).map((c) => c.claim_hash),
+      'sanity: the two repos rank identically'
+    );
+
+    // Ledger already covers the first 30 of the ranked order.
+    const ledgered = fullOrder.claim_candidates.slice(0, 30).map((c) => c.claim_hash);
+    const ledgerPath = writeLedger(tmpTest, ledgered);
+
+    const out = runInventory(tmpTest, '--exclude-ledger', ledgerPath);
+
+    // The population and totals are untouched by the flag.
+    assert.equal(out.totals.claims_total, 150);
+    assert.equal(out.claim_population.population, 150);
+    // 150 ranked candidates minus the 30 already in the ledger leaves 120 drawable; the cap (60)
+    // is applied to *that*, so the emitted window is 60, not 30 (cap - ledgered).
+    assert.equal(out.claim_population.emitted, 60);
+    assert.equal(out.claim_population.cap, 60);
+    assert.equal(out.claim_population.truncated, true);
+    assert.deepEqual(out.claim_population.exclude_ledger, {
+      path: ledgerPath,
+      ledger_claim_hashes: 30,
+      excluded: 30,
+      drawable: 120,
+    });
+    // What's emitted is exactly the next 60 of the total order, proving the filter runs before
+    // .slice(0, cap) rather than after (a filter applied after would instead emit the first 60
+    // minus the ledgered 30 = only 30 candidates).
+    assert.deepEqual(
+      out.claim_candidates.map((c) => c.claim_hash),
+      fullOrder.claim_candidates.slice(30, 90).map((c) => c.claim_hash)
+    );
+    // None of the emitted candidates are ones the ledger already covers.
+    assert.ok(out.claim_candidates.every((c) => !ledgered.includes(c.claim_hash)));
+    assert.ok(out.claim_population.notes.some((n) => n.includes('--exclude-ledger excluded 30 of 150')));
+  } finally {
+    fs.rmSync(tmpFull, { recursive: true, force: true });
+    fs.rmSync(tmpTest, { recursive: true, force: true });
+  }
+});
+
+test('inventory: --exclude-ledger — a ledger covering everything drawable reports truncated:false against the reduced population, not against claims_total', () => {
+  const tmp = claimRepo(50); // smaller than the default cap
+  try {
+    const baseline = runInventory(tmp);
+    const allHashes = baseline.claim_candidates.map((c) => c.claim_hash);
+    const ledgerPath = writeLedger(tmp, allHashes);
+    const out = runInventory(tmp, '--exclude-ledger', ledgerPath);
+    assert.equal(out.claim_population.exclude_ledger.excluded, 50);
+    assert.equal(out.claim_population.exclude_ledger.drawable, 0);
+    assert.equal(out.claim_candidates.length, 0);
+    assert.equal(out.claim_population.truncated, false, '0 emitted of 0 drawable is not a truncated window');
+    assert.equal(out.totals.claims_total, 50, 'the population itself is unaffected');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: without --exclude-ledger, output has no exclude_ledger field and claim_population keys are unchanged from before this flag existed (#54)', () => {
+  const tmp = claimRepo(80);
+  try {
+    const out = runInventory(tmp);
+    assert.ok(!('exclude_ledger' in out.claim_population));
+    assert.deepEqual(Object.keys(out.claim_population), [
+      'api_matching', 'src_symbols', 'src_files_scanned', 'authorship', 'cap', 'emitted', 'population', 'truncated', 'notes',
+    ]);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: --exclude-ledger pointing at a missing file fails loudly rather than emitting an unfiltered window', () => {
+  const tmp = claimRepo(20);
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, '--root', tmp, '--exclude-ledger', path.join(tmp, 'nope', 'ledger.jsonl')], { encoding: 'utf8' });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /--exclude-ledger .*could not read this file/);
+    assert.equal(res.stdout.trim(), '', 'no half-valid JSON, and never the unfiltered window');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: --exclude-ledger pointing at a malformed ledger fails loudly rather than emitting an unfiltered window', () => {
+  const tmp = claimRepo(20);
+  try {
+    const ledgerPath = path.join(tmp, 'ledger.jsonl');
+    fs.writeFileSync(ledgerPath, 'not json\n');
+    const res = spawnSync(process.execPath, [SCRIPT, '--root', tmp, '--exclude-ledger', ledgerPath], { encoding: 'utf8' });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /not a valid JSON object/);
+    assert.equal(res.stdout.trim(), '');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -153,6 +153,17 @@ test('coverage: src_dirs unset -> areas empty, note present, exit 0', () => {
   }
 });
 
+test('coverage: --exclude-ledger is a no-op, note explains why (#54)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-cov-noledger-'));
+  try {
+    writeBaseFiles(tmp);
+    const out = run(tmp, ['--exclude-ledger', '/nonexistent/ledger.jsonl']);
+    assert.match(out.note, /--exclude-ledger is a no-op for this script/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('coverage: --include is deliberately a no-op (scope + note explain the full comparison)', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-cov-scope-'));
   try {

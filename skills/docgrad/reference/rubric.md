@@ -80,8 +80,15 @@ the reader the very thing the economy dimension measures. Draws come only from t
 ledger that fills it stops growing while `claims_total` stays higher —
 `inventory.claim_population` reports `emitted` / `population` / `truncated` / `cap` on every run so
 that state is never inferred from a coverage number that simply stopped moving. Raising
-`claim_candidates_cap` is the fix, and it only appends: the window is a prefix of one stable order,
-so a wider one draws everything a narrower one drew, in the same positions.
+`claim_candidates_cap` is the fix, and — **without `--exclude-ledger`** — it only appends: the
+window is a prefix of one stable order, so a wider one draws everything a narrower one drew, in the
+same positions. `--exclude-ledger <path>` (#54) is a different fix for a related cost: every ledger
+row otherwise occupies one of the `claim_candidates_cap` slots forever, so the window narrows to
+`cap` minus the ledger's size as it grows. Passed, `inventory.mjs` filters candidates already in
+that ledger out of the ranked list **before** the cap is applied, so `cap` counts drawable
+candidates instead — but the window it emits is then a prefix of the *filtered* order, not of the
+total order, and that filtered order shifts as the ledger grows, so "only appends" no longer holds
+in that mode (see [audit.md](audit.md) step 1).
 A "code coordinate" is either **path-shaped** inline code (`lib/foo.js`, `src/a.ts › parse()`) or **API-shaped** inline code
 (`foo()`, `.option()`, `program.opts()`) whose every segment exists as an identifier under `src_dirs`; the per-candidate split is
 `refs_path` / `refs_api`. With `src_dirs` unset the API shape is inert and contributes nothing —
@@ -113,6 +120,10 @@ round to re-derive them.
 > a flat coverage line and a round that drew nothing. `claim_population.truncated` is what tells
 > them apart, and [audit.md](audit.md) step 3 sets out the three causes of a short draw and the
 > different response each one needs. A capped coverage figure must be reported as capped.
+> This is the picture **without `--exclude-ledger`**. Run with it, the window instead holds a
+> prefix of the *drawable* (not-yet-ledgered) candidates, so the ceiling sits closer to
+> `claims_total` — but it is still a ceiling, and a config setting, just a moving one instead of a
+> fixed `claim_candidates_cap`th candidate (see [audit.md](audit.md) step 1).
 
 > **Report pass rate and coverage separately**: the star rating for this dimension follows the
 > **pass rate** (passes ÷ claims verified this round). **Cumulative coverage** (distinct claims in
@@ -385,12 +396,39 @@ individual dimension did not).
     ranking by reference count, so the first 60 candidates are the most densely referenced claims in the corpus. Widening it
     admits less specific ones, which need not pass at the same rate. The star may move for that reason alone; it is not a
     documentation change. Widening it does **not** reorder or re-draw anything already in the ledger — the window is a prefix
-    of one stable order — so the ledger itself stays comparable.
+    of one stable order — so the ledger itself stays comparable. **That comparability holds without `--exclude-ledger`
+    (#54, v1.8.0).** Run with it, the window is a prefix of the ledger-filtered order instead, which shifts as the ledger
+    itself grows — so a `claim_candidates_cap` change compared across two `--exclude-ledger` runs is not the same kind of
+    comparison as the one described above.
   - **`claim_candidates_cap` is deliberately *not* part of `corpus_hash`.** It selects no files and moves no denominator:
     `claims_total`, the freshness denominator, the orphan population and the pollution denominator are all identical either
     side of a change to it. Folding it in would draw a whole-round comparability break across all six dimensions — five of
     which cannot have been affected — every time someone applies the fix the tool itself recommends. The narrower, honest
     disclosure is the per-round `claim_population.truncated`, which is emitted whether or not anyone changed the field.
+- **v1.8.0 — the rules for applying the anchors are fingerprinted, and the sampling window counts what it can draw**
+  (issues #56, #54, #57) (**not an anchor change**): no ★1–★5 threshold moved and every shipped default is unchanged.
+  - **New `judgement_hash`**, covering `audit.md` and `placement.md` — the files that decide *how* the anchors are applied
+    (the scoring procedure, the sampling rule, the boundary rules; and what counts as a consistency deduction). `rubric_hash`
+    fingerprints the anchors; this fingerprints their application, and the two move independently. `rubric.md` is deliberately
+    **not** included — hashing it twice would move two fingerprints for one edit — and neither is `improve.md`, which
+    delegates the rating to `audit.md` and is never read by a plain `audit`.
+    - **It does not mark the break that motivated it.** v1.7.0's #48 added two correctness boundary rules, one of which can
+      only lower a pass rate, and nothing mechanical recorded that. `judgement_hash` makes the *next* such change detectable;
+      the v1.7.0 entry below remains the only disclosure of that one. A round from before v1.8.0 has no such field, so its
+      first appearance reads "unknown → first value", not as a change.
+  - **`--exclude-ledger` changes which claims a flagged run draws** (#54). The emitted window used to include claims the
+    ledger had already covered, so a nominal window of 60 offered 33 drawable candidates on one real repo, worsening as the
+    ledger grew. With the flag, `claim_candidates_cap` counts **drawable** candidates. Consequence for comparability: the
+    window is then a prefix of the *filtered* order, so **"raising the cap only appends" no longer holds for a flagged run** —
+    the filter moves as the ledger grows. Without the flag nothing changes at all, byte for byte.
+  - **Out-of-root paths are now refused** (#57). A configured path containing `..`, a configured path that is itself a symlink
+    out of the root, or a `*.md` symlink in the corpus pointing outside, now **fails the run** rather than quietly measuring
+    content from outside the repository. No fingerprint moves for this — `corpus_hash` digests the config's path *strings*,
+    not the collected file set — so a repo in one of those shapes finds out by the run stopping, not by a hash.
+    - One related figure can move **silently**: an out-of-root document link that pointed at a missing file used to count in
+      `dead_links` and now lands in `out_of_root_links`, so `dead_links` can shrink and linkage can improve with nothing else
+      changing. Report-only dimensions are unaffected; this one is rated.
+
 - **v1.7.0 — the economy thresholds became real, and the fingerprint gained a fourth field**
   (issue #50) (**not an anchor change**): the shipped numbers are unchanged — 20,000 / 10,000 / 5,000 / 3,000 and 10% — so a
   repo that never wrote an `economy:` block is graded exactly as before and its history stays comparable. What changed is

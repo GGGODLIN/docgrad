@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash } from '../skills/docgrad/scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash, judgementHash, loadLedgerClaimHashes } from '../skills/docgrad/scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -375,11 +375,20 @@ test('parseArgs: --config external; defaults to <root>/.docgrad.yml with no flag
   const bare = parseArgs([]);
   assert.equal(bare.configFile, path.join(process.cwd(), '.docgrad.yml'));
   assert.deepEqual(bare.include, []);
+  assert.equal(bare.excludeLedger, null, 'default off (#54)');
+});
+
+test('parseArgs: --exclude-ledger resolves like --config, relative to cwd', () => {
+  const a = parseArgs(['--exclude-ledger', '.docgrad/ledger.jsonl']);
+  assert.equal(a.excludeLedger, path.resolve('.docgrad/ledger.jsonl'));
+  const b = parseArgs(['--root', '/tmp/x', '--exclude-ledger', '/abs/ledger.jsonl']);
+  assert.equal(b.excludeLedger, path.resolve('/abs/ledger.jsonl'));
 });
 
 test('parseArgs: missing value and unknown argument throw (not swallowed silently)', () => {
   assert.throws(() => parseArgs(['--include']), /--include requires a value/);
   assert.throws(() => parseArgs(['--root', '--include', 'x']), /--root requires a value/);
+  assert.throws(() => parseArgs(['--exclude-ledger']), /--exclude-ledger requires a value/);
   assert.throws(() => parseArgs(['--dim', 'freshness']), /Unknown argument/);
 });
 
@@ -734,6 +743,48 @@ test('extractCodeRefs: skips backticks inside a code fence, skips non-path-shape
   assert.deepEqual(refs, []);
 });
 
+// #56: rubric_hash fingerprints the anchors, not the rules for applying them. v1.7.0 added two
+// boundary rules to audit.md — one of which can only lower a pass rate — and no fingerprint moved,
+// so the break could only be disclosed in prose. These tests pin which files decide a rating.
+test('judgementHash: covers the rule files, not the anchors, and each one moves it on its own', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-judge-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'reference'), { recursive: true });
+    const write = (rel, body) => fs.writeFileSync(path.join(tmp, rel), body);
+    write('reference/audit.md', 'step 1: run the scripts');
+    write('reference/placement.md', 'rule 4: grounds live with the conclusion');
+    write('reference/rubric.md', '★4 anchor A');
+    write('reference/improve.md', 'round flow');
+
+    const base = judgementHash(tmp);
+    assert.match(base, /^[0-9a-f]{8}$/);
+    assert.equal(judgementHash(tmp), base, 'same inputs must hash the same');
+
+    // audit.md carries the procedure and the boundary rules.
+    write('reference/audit.md', 'step 1: run the scripts (edited)');
+    const afterAudit = judgementHash(tmp);
+    assert.notEqual(afterAudit, base);
+
+    // placement.md decides what counts as a consistency deduction (SKILL.md blocker 2).
+    write('reference/placement.md', 'rule 4: grounds may live anywhere');
+    assert.notEqual(judgementHash(tmp), afterAudit);
+
+    // rubric.md is rubric_hash's job; hashing it twice would move two fingerprints for one edit.
+    const beforeRubric = judgementHash(tmp);
+    write('reference/rubric.md', '★4 anchor B');
+    assert.equal(judgementHash(tmp), beforeRubric, 'rubric.md must not move judgement_hash');
+
+    // improve.md delegates the rating to audit.md and is never read by a plain `audit`.
+    write('reference/improve.md', 'round flow, rewritten');
+    assert.equal(judgementHash(tmp), beforeRubric, 'improve.md must not move judgement_hash');
+
+    // Missing files read as unknown, not as a value — the rubric_hash contract.
+    assert.equal(judgementHash(fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-empty-'))), null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('docgradMeta: corpus_hash is null without a config, and present with one (backward-compatible signature)', () => {
   assert.equal(docgradMeta().corpus_hash, null, 'an old one-argument caller must not crash');
   const cfg = loadConfig(FIXTURE);
@@ -867,6 +918,7 @@ test('docgradMeta: returns null instead of throwing when files cannot be read', 
     assert.deepEqual(docgradMeta(tmp), {
       version: null,
       rubric_hash: null,
+      judgement_hash: null,
       thresholds_hash: null,
       corpus_hash: null,
     });
@@ -1060,4 +1112,55 @@ test('rankClaimCandidates: more refs comes first, ties broken by path then line 
     ranked.map((c) => `${c.path}:${c.line}`),
     ['a.md:1', 'a.md:9', 'b.md:2']
   );
+});
+
+// --- loadLedgerClaimHashes (#54) ---------------------------------------------------
+
+test('loadLedgerClaimHashes: collects distinct claim_hash values, ignores blank lines', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-ledger-'));
+  try {
+    const ledgerPath = path.join(tmp, 'ledger.jsonl');
+    fs.writeFileSync(
+      ledgerPath,
+      [
+        JSON.stringify({ claim_hash: 'aaa111', round: 1, verify: 'pass' }),
+        '',
+        JSON.stringify({ claim_hash: 'bbb222', round: 1, verify: 'fail' }),
+        JSON.stringify({ claim_hash: 'aaa111', round: 2, verify: 'pass' }), // re-verified: same hash again
+      ].join('\n')
+    );
+    const hashes = loadLedgerClaimHashes(ledgerPath);
+    assert.deepEqual([...hashes].sort(), ['aaa111', 'bbb222']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('loadLedgerClaimHashes: a missing file fails loudly rather than returning an empty set', () => {
+  assert.throws(
+    () => loadLedgerClaimHashes(path.join(os.tmpdir(), 'docgrad-no-such-ledger-', 'ledger.jsonl')),
+    /--exclude-ledger .*could not read this file/
+  );
+});
+
+test('loadLedgerClaimHashes: a malformed line (not JSON) fails loudly, naming the line', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-ledger-bad-'));
+  try {
+    const ledgerPath = path.join(tmp, 'ledger.jsonl');
+    fs.writeFileSync(ledgerPath, '{"claim_hash": "aaa111"}\nnot json at all\n');
+    assert.throws(() => loadLedgerClaimHashes(ledgerPath), /:2: not a valid JSON object/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('loadLedgerClaimHashes: a row without claim_hash fails loudly rather than being silently skipped', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-ledger-nohash-'));
+  try {
+    const ledgerPath = path.join(tmp, 'ledger.jsonl');
+    fs.writeFileSync(ledgerPath, '{"round": 1, "verify": "pass"}\n');
+    assert.throws(() => loadLedgerClaimHashes(ledgerPath), /has no non-empty claim_hash field/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

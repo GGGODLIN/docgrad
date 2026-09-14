@@ -129,6 +129,16 @@ const DEFAULTS = {
   // disclosed on every run (claim_population.truncated / emitted / population) and raising this
   // number is the documented remedy.
   //
+  // #54: without `--exclude-ledger`, every already-verified ledger row still occupies one of the
+  // `claim_candidates_cap` slots forever — the window narrows to `cap - (ledger size)` drawable
+  // candidates as the ledger grows, which is the same defect this cap exists to prevent, just one
+  // level down. `--exclude-ledger <path>` (inventory.mjs only, default off) filters candidates
+  // already in the ledger out of the ranked list **before** this cap is applied, so `cap` counts
+  // drawable candidates instead of emitted-including-already-verified ones. With the flag, the
+  // emitted window is a prefix of the *filtered* order, not of the total order, and that filtered
+  // order itself shifts as the ledger grows — so "raising the cap only appends" and "the window is
+  // the ceiling coverage can reach" hold only when the flag is off.
+  //
   // Default 60 = the value that was hardcoded in inventory.mjs before it became configurable.
   claim_candidates_cap: 60,
   scenario: null,
@@ -325,27 +335,35 @@ function takeValue(argv, i, flag) {
   return v;
 }
 
-// Flags shared by all four scripts:
-//   --root <dir>      target repo root (default: cwd)
-//   --config <file>   config file path (default: <root>/.docgrad.yml)
-//   --include <glob>  limit scope (scoped audit), repeatable or comma-separated; omit = full scope
+// Flags shared by all five scripts (#54):
+//   --root <dir>            target repo root (default: cwd)
+//   --config <file>         config file path (default: <root>/.docgrad.yml)
+//   --include <glob>        limit scope (scoped audit), repeatable or comma-separated; omit = full scope
+//   --exclude-ledger <path> path to a `.docgrad/ledger.jsonl`; default off. Only inventory.mjs draws
+//                           on it (it filters the ranked claim-candidate list before the cap is
+//                           applied) — coverage.mjs, freshness.mjs, links.mjs and retrieval.mjs all
+//                           accept it, like --include on coverage/retrieval, and report it as a
+//                           no-op in their own output note rather than silently ignoring it.
 export function parseArgs(argv = process.argv.slice(2)) {
   let rootArg = null;
   let configArg = null;
+  let excludeLedgerArg = null;
   const include = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--root') rootArg = takeValue(argv, i++, '--root');
     else if (a === '--config') configArg = takeValue(argv, i++, '--config');
+    else if (a === '--exclude-ledger') excludeLedgerArg = takeValue(argv, i++, '--exclude-ledger');
     else if (a === '--include') {
       include.push(...takeValue(argv, i++, '--include').split(',').map((s) => s.trim()).filter(Boolean));
-    } else throw new Error(`Unknown argument ${a} (supported: --root / --config / --include)`);
+    } else throw new Error(`Unknown argument ${a} (supported: --root / --config / --include / --exclude-ledger)`);
   }
   const root = path.resolve(rootArg ?? process.cwd());
   return {
     root,
     configFile: configArg ? path.resolve(configArg) : path.join(root, CONFIG_FILENAME),
     include,
+    excludeLedger: excludeLedgerArg ? path.resolve(excludeLedgerArg) : null,
   };
 }
 
@@ -363,13 +381,142 @@ function toPosix(p) {
   return p.split(path.sep).join('/');
 }
 
+// --- root containment (#57) --------------------------------------------------------
+//
+// docgrad is documented as a tool you run against repos you did not write (case-studies/01 clones
+// a third-party repo and grades it), and the repo being graded controls **both** `.docgrad.yml` and
+// the symlinks in its own tree. So every path these scripts open has to be proven to live inside
+// the root they were pointed at, or local file content ends up in the report and in the agent
+// context that reads it.
+//
+// **Built on fs.realpathSync, never on path.resolve.** A lexical check is defeated by one committed
+// symlink: `docs-x -> /` with `docs_dirs: ['docs-x/Users/v/notes/']` resolves lexically inside the
+// root, passes any prefix test, and then readdirSync follows it straight back out. Only the path
+// the kernel would actually open tells the truth.
+//
+// **The root is realpathed here, once per root — deliberately not in parseArgs().** `--root`'s
+// documented meaning is the path the caller typed (tests/lib.test.mjs asserts
+// `parseArgs().root === path.resolve('/tmp/x')`, and `configFile` is derived from it); on darwin
+// `/tmp -> /private/tmp`, so realpathing there would silently redefine the flag. The comparison is
+// realpath-to-realpath, and both sides are resolved in this one place.
+//
+// **Missing paths stay non-fatal.** realpathSync throws ENOENT, and a missing `docs_dir` /
+// `docs_files` entry is deliberately skipped today (see pushSingleFile: `.docgrad.yml` is
+// version-controlled and shared across branches, so a file that is simply not on this branch must
+// not stop the run). What gets resolved is therefore the deepest **existing** ancestor, with the
+// not-yet-existing tail re-appended lexically: a component that does not exist cannot hide a
+// symlink, and a path that does not exist cannot disclose anything either. Turning "not on this
+// branch" into exit 1 would be a worse bug than the one this closes.
+//
+// **Not checked, on purpose: `exclude` and `out_of_scope`.** Both are pure string prefix matchers
+// (matchesPathPrefix) over paths that have *already* been collected; neither one ever touches the
+// filesystem, so neither is a disclosure vector. Adding them here would buy uniformity, not
+// security, and would invite a later reader to believe they were one.
+//
+// **Residual risks, recorded rather than closed.** (1) TOCTOU: the check and the read are separate
+// syscalls, in five separate processes, seconds apart — a *concurrent* attacker could swap a path
+// in between. Closing it means carrying validated file handles across four files. (2) A dangling
+// symlink resolves to its own (contained) directory and so passes; that is correct, because opening
+// it discloses nothing — links.mjs, where a dangling symlink *is* an information channel, handles
+// that case separately and says so there.
+
+export class OutOfRootError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'OutOfRootError';
+  }
+}
+
+// The realpath of the deepest existing ancestor of absPath, with the missing tail re-appended.
+// null means "this cannot be resolved for a reason other than not existing yet" — an unreadable
+// ancestor or a symlink loop is a refusal to answer, and every caller fails closed on it.
+function realpathDeepest(absPath) {
+  let cur = path.resolve(absPath);
+  const tail = [];
+  for (;;) {
+    try {
+      const real = fs.realpathSync(cur);
+      return tail.length ? path.join(real, ...tail) : real;
+    } catch (err) {
+      const code = err?.code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return null;
+      const parent = path.dirname(cur);
+      if (parent === cur) return null; // climbed to the filesystem root without resolving anything
+      tail.unshift(path.basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+// One realpath of the root per root string, for the whole process: every configured path and every
+// tree entry is compared against it, and the answer cannot change under us any more than the TOCTOU
+// residual above already allows.
+const ROOT_REAL_CACHE = new Map();
+
+export function rootRealPath(rootDir) {
+  const key = path.resolve(rootDir);
+  if (!ROOT_REAL_CACHE.has(key)) ROOT_REAL_CACHE.set(key, realpathDeepest(key));
+  return ROOT_REAL_CACHE.get(key);
+}
+
+// Boundary-aware comparison, never startsWith: `/repo-evil` starts with `/repo` and is a different
+// tree. path.relative gives '' for the root itself and a `..` first segment for anything above it.
+// No case folding: two spellings differing only in case are two different paths on a case-sensitive
+// filesystem, and folding them would be a guess everywhere else. A first segment of exactly `..` is
+// the only way out — a name that merely begins with those characters (`..hidden`) is an ordinary
+// in-root entry and must stay allowed.
+export function isInsideRoot(rootReal, candidateReal) {
+  if (rootReal === null || candidateReal === null) return false;
+  const rel = path.relative(rootReal, candidateReal);
+  if (rel === '') return true;
+  if (path.isAbsolute(rel)) return false;
+  return rel.split(path.sep)[0] !== '..';
+}
+
+// Non-throwing predicate, for the one caller (links.mjs) that must classify rather than fail.
+export function pathInsideRoot(rootDir, absPath) {
+  return isInsideRoot(rootRealPath(rootDir), realpathDeepest(absPath));
+}
+
+function outOfRootMessage(field, shown, rootDir) {
+  return (
+    `${field}: ${shown} resolves outside the repository root ${rootDir}, so docgrad will not read it. ` +
+    `Paths in ${CONFIG_FILENAME} are resolved against --root (the repository being graded), not against ` +
+    `the directory the config file itself sits in, and a symlink whose target leaves the root counts as outside.`
+  );
+}
+
+// Proves an already-absolute candidate stays in the root; returns it so call sites can stay
+// expression-shaped. `shown` is what the error names — the repo-relative spelling wherever there
+// is one, because that is what the reader has to go and fix.
+export function assertInsideRoot(rootDir, absPath, field, shown = absPath) {
+  if (!pathInsideRoot(rootDir, absPath)) throw new OutOfRootError(outOfRootMessage(field, shown, rootDir));
+  return absPath;
+}
+
+// The configured-path form. Returns the **lexical** join, not the realpath: every caller goes on to
+// derive repo-relative paths from it, and handing back the resolved path would rewrite them
+// (on darwin a root under /tmp would start reporting files under /private/tmp).
+export function resolveInRoot(rootDir, rel, field) {
+  return assertInsideRoot(rootDir, path.join(rootDir, rel), field, rel);
+}
+
 function walkMarkdown(absDir, rootDir, out) {
   for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
+    const abs = path.join(absDir, entry.name);
+    // Dirent.isDirectory() is false for a symlink, so a symlinked directory reaches the branch
+    // below and is only looked at when its name ends in .md — which is exactly the shape #57
+    // reports (`notes.md -> /Users/you/.ssh/config`). Both branches are checked all the same: the
+    // walk starts from a configured directory that was proven contained, but each entry can leave
+    // the root on its own.
     if (entry.isDirectory()) {
       if (ALWAYS_SKIP_DIRS.has(entry.name)) continue;
-      walkMarkdown(path.join(absDir, entry.name), rootDir, out);
+      assertInsideRoot(rootDir, abs, 'docs_dirs', toPosix(path.relative(rootDir, abs)));
+      walkMarkdown(abs, rootDir, out);
     } else if (MD_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
-      out.push(toPosix(path.relative(rootDir, path.join(absDir, entry.name))));
+      const rel = toPosix(path.relative(rootDir, abs));
+      assertInsideRoot(rootDir, abs, 'docs_dirs', rel);
+      out.push(rel);
     }
   }
 }
@@ -424,9 +571,18 @@ export function matchesScope(relPath, include = []) {
 //     (the mirror image of the ENOTDIR you get when a single file is mistakenly put in docs_dirs).
 //   - already included -> don't push a duplicate (when the same file is listed both in this field
 //     and in what docs_dirs scanned up, it only counts once).
+//   - leaves the root -> throw (#57). Note the order: containment is decided **before** the
+//     existence check, so "outside the root" is an error even when the file is missing, while
+//     "inside the root but not on this branch" keeps its silent skip.
+//
+// Deliberately still **no extension filter here.** Its absence is a separate defect from the
+// containment hole, and adding one in this change would silently drop legitimate in-root entries
+// (`docs_files: ['NOTES.txt']` is valid today) — moving files_total, the freshness denominator and
+// the pollution denominator for repos doing nothing wrong. The extension-free route matters here
+// only because it is how an out-of-root file of any type got in.
 function pushSingleFile(rootDir, rel, field, out) {
   if (!rel) return;
-  const abs = path.join(rootDir, rel);
+  const abs = resolveInRoot(rootDir, rel, field);
   if (!fs.existsSync(abs)) return;
   if (fs.statSync(abs).isDirectory()) {
     throw new Error(`${field} may only list a single file, but ${rel} is a directory — put the whole directory in docs_dirs instead`);
@@ -529,7 +685,7 @@ export const GIT_UNAVAILABLE_NOTE = gitUnavailableNote(null);
 export function collectFiles(rootDir, config, { include = [], tracked } = {}) {
   const all = [];
   for (const dir of config.docs_dirs) {
-    const abs = path.join(rootDir, dir);
+    const abs = resolveInRoot(rootDir, dir, 'docs_dirs');
     if (fs.existsSync(abs)) walkMarkdown(abs, rootDir, all);
   }
   // docs_files: single files outside docs_dirs that are semantically **regular documents**
@@ -821,6 +977,10 @@ export function buildSrcSymbolIndex(rootDir, srcDirs = []) {
         visit(abs);
         continue;
       }
+      // Dirent.isFile() is false for a symlink, so this walk already declines to read one; the
+      // containment check that retrieval.mjs's walkFiles needs on every entry has no counterpart to
+      // do here. The configured src_dir below is the route that could leave the root, and it is
+      // checked there.
       if (!entry.isFile()) continue;
       let text;
       try {
@@ -845,7 +1005,7 @@ export function buildSrcSymbolIndex(rootDir, srcDirs = []) {
   };
 
   for (const dir of dirs) {
-    const abs = path.join(rootDir, dir);
+    const abs = resolveInRoot(rootDir, dir, 'src_dirs');
     if (fs.existsSync(abs)) visit(abs);
   }
   return { symbols, files_scanned: filesScanned, files_skipped: filesSkipped, bytes_scanned: bytesScanned };
@@ -1105,6 +1265,52 @@ function findManifest(startDir) {
   return null;
 }
 
+// --- judgement_hash ------------------------------------------------------------------
+//
+// rubric_hash fingerprints the **anchors**. It does not fingerprint the **rules for applying them**,
+// and those live in different files — which v1.7.0 demonstrated the hard way: #48 added two boundary
+// rules to audit.md, one of which can only lower a correctness pass rate, and no fingerprint moved.
+// The break had to be disclosed in prose and trusted to be read (#56).
+//
+// What is in, and why — decided by what the skill's own blockers say decides a rating (SKILL.md §2):
+//
+//   reference/audit.md      the scoring procedure, the sampling rule, the boundary rules. `audit`
+//                           runs it; `improve`/`loop` delegate to it ("run a full evaluation per
+//                           audit.md").
+//   reference/placement.md  "Before rating **consistency** you must also read placement.md — the
+//                           rules for judging placement and duplication live there." Editing it
+//                           changes what counts as a deduction, so it changes the consistency star.
+//
+// What is out, and why:
+//
+//   reference/rubric.md     already covered by rubric_hash. Hashing it twice would make one edit
+//                           move two fingerprints and tell a reader nothing extra.
+//   reference/improve.md    it is the round *flow* — recording, committing, graduation — and it
+//                           delegates the rating itself to audit.md. It can change which claims a
+//                           *loop* draws (it tells the round to pass --exclude-ledger), so it is the
+//                           closest call here; it is out because a plain `audit` never reads it, and
+//                           a fingerprint that moves for runs it cannot affect is noise.
+//
+// Whole-file, like rubric_hash: a formatting-only edit moves it. That is the same trade rubric_hash
+// already makes, and narrowing to rule sections would have to change rubric_hash too to stay
+// coherent — a separate decision, not a side effect of this one.
+const JUDGEMENT_FILES = ['reference/audit.md', 'reference/placement.md'];
+
+export function judgementHash(skillRoot = SKILL_ROOT) {
+  const h = createHash('sha256');
+  try {
+    for (const rel of JUDGEMENT_FILES) {
+      // The path is hashed alongside the content so that adding a file later cannot collide with an
+      // edit to an existing one.
+      h.update(rel, 'utf8');
+      h.update(fs.readFileSync(path.join(skillRoot, rel), 'utf8'), 'utf8');
+    }
+  } catch {
+    return null; // same contract as rubric_hash: unknown stays distinguishable from a value
+  }
+  return h.digest('hex').slice(0, 8);
+}
+
 export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   let version = null;
   try {
@@ -1123,6 +1329,7 @@ export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   return {
     version,
     rubric_hash: rubricHash,
+    judgement_hash: judgementHash(skillRoot),
     thresholds_hash: thresholdsHash(config),
     corpus_hash: corpusHash(config),
   };
@@ -1255,4 +1462,49 @@ export function rankClaimCandidates(perFile) {
   return perFile
     .flatMap(({ path: p, claims }) => claims.map((c) => ({ path: p, ...c })))
     .sort((a, b) => b.refs - a.refs || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) || a.line - b.line);
+}
+
+// --- #54: --exclude-ledger --------------------------------------------------------
+//
+// Reads a `.docgrad/ledger.jsonl` and returns the set of `claim_hash` values it contains, so
+// inventory.mjs can filter them out of the ranked candidate list before `claim_candidates_cap` is
+// applied — every ledger row currently costs the emitted window one slot forever, and this is the
+// fix (#54).
+//
+// **Fails loudly on anything short of a well-formed ledger.** A missing file, an unreadable one, or
+// a line that isn't a JSON object with a `claim_hash` string all throw. The alternative — falling
+// back to "nothing excluded" — would silently re-emit the unfiltered window while the caller
+// believes it asked for a filtered one, which is the exact defect this flag exists to close, just
+// hidden one layer deeper. A malformed ledger must stop the run, not degrade it quietly.
+export function loadLedgerClaimHashes(ledgerPath) {
+  let text;
+  try {
+    text = fs.readFileSync(ledgerPath, 'utf8');
+  } catch (err) {
+    throw new Error(
+      `--exclude-ledger ${ledgerPath}: could not read this file (${err.code === 'ENOENT' ? 'not found' : err.message}). ` +
+        'A missing or unreadable ledger must fail the run, not silently emit an unfiltered candidate window.'
+    );
+  }
+  const hashes = new Set();
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    let row;
+    try {
+      row = JSON.parse(raw);
+    } catch {
+      throw new Error(
+        `--exclude-ledger ${ledgerPath}:${i + 1}: not a valid JSON object. Each non-empty line of a ledger must be exactly one JSON object with a claim_hash field.`
+      );
+    }
+    if (row === null || typeof row !== 'object' || Array.isArray(row) || typeof row.claim_hash !== 'string' || !row.claim_hash) {
+      throw new Error(
+        `--exclude-ledger ${ledgerPath}:${i + 1}: this row has no non-empty claim_hash field. Every ledger row must carry the claim_hash it was verified against.`
+      );
+    }
+    hashes.add(row.claim_hash);
+  }
+  return hashes;
 }

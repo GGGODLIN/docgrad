@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 // coverage.mjs — coverage drift detection: mechanically detects "code moved but docs didn't keep up" via git.
-// Usage: node coverage.mjs [--root <repo>] [--config <file>]; JSON -> stdout.
+// Usage: node coverage.mjs [--root <repo>] [--config <file>] [--exclude-ledger <path>]; JSON -> stdout.
 // Treats each first-level subdirectory under src_dirs as an "area", checks whether docs mention it
 // and compares git timestamps.
 // --include is deliberately a no-op for this script: narrowing the docs side would misjudge
 // mentions outside scope as undocumented.
+// --exclude-ledger (#54) is also a no-op here: only inventory.mjs draws claim candidates from a
+// claim ledger; coverage drift has nothing to do with the claim ledger, so accepting and ignoring
+// the flag (like --include above) keeps it usable as a truly shared flag across all five scripts.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { loadConfig, collectFiles, parseArgs, fail, docgradMeta } from './lib.mjs';
+import { loadConfig, collectFiles, parseArgs, fail, docgradMeta, resolveInRoot } from './lib.mjs';
 
 const SKIP_DIRS = new Set(['node_modules', '.git']);
 
@@ -71,11 +74,15 @@ const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000)
 const toDate = (iso) => (iso ? iso.slice(0, 10) : null);
 
 try {
-  const { root, configFile, include } = parseArgs();
+  const { root, configFile, include, excludeLedger } = parseArgs();
   const config = loadConfig(root, configFile);
   const scopeNoteText = include.length
     ? 'scope does not apply to coverage drift: narrowing the docs side would misjudge mentions outside scope as undocumented, so this always compares the full corpus'
     : null;
+  const excludeLedgerNoteText = excludeLedger
+    ? '--exclude-ledger is a no-op for this script: only inventory.mjs draws claim candidates from a claim ledger, and coverage drift has nothing to do with it'
+    : null;
+  const combinedNoteText = [scopeNoteText, excludeLedgerNoteText].filter(Boolean).join('; ') || null;
   // Key order follows inventory.mjs — scope, then docgrad, then everything else — so a reader
   // comparing two scripts' JSON finds the same fingerprint in the same place.
   //
@@ -94,7 +101,7 @@ try {
           ...head,
           src_dirs: [],
           areas: [],
-          note: [scopeNoteText, 'src_dirs is unset, coverage drift cannot be measured'].filter(Boolean).join('; '),
+          note: [scopeNoteText, excludeLedgerNoteText, 'src_dirs is unset, coverage drift cannot be measured'].filter(Boolean).join('; '),
         },
         null,
         2
@@ -110,7 +117,11 @@ try {
   const loose_files = {};
   const areaEntries = [];
   for (const srcDir of config.src_dirs) {
-    const absSrc = path.join(root, srcDir);
+    // #57: a src_dir that leaves the root — `../` or a symlinked directory — would otherwise be
+    // enumerated here and have every file under it counted. countFiles below needs no check of its
+    // own: it recurses only into Dirent.isDirectory(), which is false for a symlink, and it reads
+    // nothing.
+    const absSrc = resolveInRoot(root, srcDir, 'src_dirs');
     const base = srcDir.replace(/\/+$/, ''); // strip trailing slash, POSIX area prefix
     let loose = 0;
     if (fs.existsSync(absSrc)) {
@@ -177,7 +188,7 @@ try {
     `${JSON.stringify(
       {
         ...head,
-        ...(scopeNoteText ? { note: scopeNoteText } : {}),
+        ...(combinedNoteText ? { note: combinedNoteText } : {}),
         src_dirs: config.src_dirs,
         thresholds: {
           drift_after_days: config.coverage.drift_after_days,

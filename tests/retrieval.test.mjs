@@ -126,6 +126,16 @@ test('retrieval: src_dirs unset -> areas degrades, note explains it', () => {
   }
 });
 
+test('retrieval: --exclude-ledger is a no-op, note explains why (#54)', () => {
+  const tmp = copyFixture();
+  try {
+    const out = run(tmp, ['--exclude-ledger', '/nonexistent/ledger.jsonl']);
+    assert.match(out.note, /--exclude-ledger is a no-op for this script/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('retrieval: --include is a no-op, note explains why (scope still returns null)', () => {
   const tmp = copyFixture();
   try {

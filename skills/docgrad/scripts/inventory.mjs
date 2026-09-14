@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // inventory.mjs — document inventory + CJK-aware token measurement + fixed cost/pollution surface + section-level structure metrics
-// Usage: node inventory.mjs [--root <repo>] [--config <file>] [--include <glob>]; JSON -> stdout.
+// Usage: node inventory.mjs [--root <repo>] [--config <file>] [--include <glob>] [--exclude-ledger <path>]; JSON -> stdout.
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -8,7 +8,7 @@ import {
   extractCodeRefs, extractApiRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
   gitTrackedFiles, gitUnavailableNote, matchesPathPrefix,
   buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, AUTHORSHIP_UNAVAILABLE_NOTE,
-  MAX_SRC_SYMBOL_FILE_BYTES, SHIPPED_TIERS, SHIPPED_POLLUTION_MAX,
+  MAX_SRC_SYMBOL_FILE_BYTES, SHIPPED_TIERS, SHIPPED_POLLUTION_MAX, loadLedgerClaimHashes,
 } from './lib.mjs';
 
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+\.)\s+/;
@@ -133,7 +133,7 @@ function measure(rootDir, relPath, config, symbols) {
 }
 
 try {
-  const { root, configFile, include } = parseArgs();
+  const { root, configFile, include, excludeLedger } = parseArgs();
   const config = loadConfig(root, configFile);
   // One git call, shared between collectFiles (exclude_untracked) and the untracked report below.
   const tracked = gitTrackedFiles(root);
@@ -179,17 +179,33 @@ try {
   // so claim-ledger sampling is reproducible. Only the first `claim_candidates_cap` entries are
   // emitted — the population size is totals.claims_total; this is the pick order for sampling.
   //
-  // The window is a **prefix** of one total order, so raising the cap only appends: every claim a
-  // narrower window could draw, a wider one draws in the same position. What the cap does decide is
-  // how far a ledger can keep growing before new draws dry up, so both ends of it are reported
-  // below rather than left for the reader to infer by counting array entries.
+  // Without --exclude-ledger, the window is a **prefix** of this one total order, so raising the
+  // cap only appends: every claim a narrower window could draw, a wider one draws in the same
+  // position. What the cap does decide is how far a ledger can keep growing before new draws dry
+  // up, so both ends of it are reported below rather than left for the reader to infer by counting
+  // array entries.
+  //
+  // With --exclude-ledger (#54), candidates already in the ledger are filtered out **before** the
+  // cap is applied, so the window is a prefix of the *filtered* order instead — and that filtered
+  // order shifts as the ledger grows, so "raising the cap only appends" no longer holds in that
+  // mode. See claim_population.exclude_ledger below.
+  //
+  // Out of scope for #54: the ranking below degrades to plain path/line order once `refs` stops
+  // discriminating (measured on a real repo: 77% of the population has refs: 1), and
+  // --exclude-ledger reaches that flat region sooner by excluding drawn candidates from the front.
+  // A better ranking signal is a design question, tracked separately at #60 — not fixed here.
   const rankedCandidates = rankClaimCandidates(
     filesRaw.map((f) => ({ path: f.path, claims: f._claimLines }))
   );
-  const claimCandidates = rankedCandidates
+  const excludedHashes = excludeLedger ? loadLedgerClaimHashes(excludeLedger) : null;
+  const drawableCandidates = excludedHashes
+    ? rankedCandidates.filter((c) => !excludedHashes.has(c.claim_hash))
+    : rankedCandidates;
+  const excludedByLedgerCount = excludedHashes ? rankedCandidates.length - drawableCandidates.length : 0;
+  const claimCandidates = drawableCandidates
     .slice(0, config.claim_candidates_cap)
     .map((c) => ({ ...c, docgrad_authored: authorshipOf(c.path) }));
-  const candidatesTruncated = claimCandidates.length < rankedCandidates.length;
+  const candidatesTruncated = claimCandidates.length < drawableCandidates.length;
   const files = filesRaw.map(({ _ruleLines, _claimLines, ...f }) => f);
   const totalTokens = files.reduce((s, f) => s + f.tokens_est, 0);
   const excludedTokens = excludedFiles.reduce((s, f) => s + f.tokens_est, 0);
@@ -350,9 +366,26 @@ try {
           emitted: claimCandidates.length,
           population: rankedCandidates.length,
           truncated: candidatesTruncated,
+          // Present only when --exclude-ledger was passed (#54) — its absence, not a false value,
+          // is what keeps a no-flag run byte-identical to before this flag existed.
+          ...(excludeLedger
+            ? {
+                exclude_ledger: {
+                  path: excludeLedger,
+                  ledger_claim_hashes: excludedHashes.size,
+                  excluded: excludedByLedgerCount,
+                  drawable: drawableCandidates.length,
+                },
+              }
+            : {}),
           notes: [
+            ...(excludeLedger
+              ? [`--exclude-ledger excluded ${excludedByLedgerCount} of ${rankedCandidates.length} ranked candidates (already verified in ${excludeLedger}) before claim_candidates_cap was applied, leaving ${drawableCandidates.length} drawable; cap counts drawable candidates in this mode, so it is not the same denominator as an unflagged run`]
+              : []),
             ...(candidatesTruncated
-              ? [`claim_candidates is a window onto the population, not all of it: ${claimCandidates.length} of ${rankedCandidates.length} candidates are emitted, in ranked order, because claim_candidates_cap is ${config.claim_candidates_cap}. A claim ledger can only draw from what is emitted, so once it covers all ${claimCandidates.length} of them every later round draws zero new claims and cumulative coverage freezes at ${claimCandidates.length}/${rankedCandidates.length} (${Math.round((claimCandidates.length / rankedCandidates.length) * 100)}%) — which is not the same thing as the corpus being fully covered. Raise claim_candidates_cap in .docgrad.yml to widen the window; the cost is inventory output size, and the ranked order of what is already emitted does not change.`]
+              ? excludeLedger
+                ? [`claim_candidates is a window onto the drawable population, not all of it: ${claimCandidates.length} of ${drawableCandidates.length} drawable candidates are emitted, in ranked order, because claim_candidates_cap is ${config.claim_candidates_cap}. This window is a prefix of the *filtered* (ledger-excluded) order, not of the total ${rankedCandidates.length}-candidate order, and that filtered order shifts as the ledger grows — raising claim_candidates_cap in .docgrad.yml still widens it, but "only appends" does not hold while this flag is on.`]
+                : [`claim_candidates is a window onto the population, not all of it: ${claimCandidates.length} of ${rankedCandidates.length} candidates are emitted, in ranked order, because claim_candidates_cap is ${config.claim_candidates_cap}. A claim ledger can only draw from what is emitted, so once it covers all ${claimCandidates.length} of them every later round draws zero new claims and cumulative coverage freezes at ${claimCandidates.length}/${rankedCandidates.length} (${Math.round((claimCandidates.length / rankedCandidates.length) * 100)}%) — which is not the same thing as the corpus being fully covered. Raise claim_candidates_cap in .docgrad.yml to widen the window; the cost is inventory output size, and the ranked order of what is already emitted does not change.`]
               : []),
             ...(symbolIndex
               ? []
