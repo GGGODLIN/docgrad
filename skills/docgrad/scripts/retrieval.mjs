@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { loadConfig, collectFiles, parseArgs, fail, docgradMeta, estimateTokens, extractLinks, extractCodeRefs } from './lib.mjs';
+import { loadConfig, collectFiles, parseArgs, fail, docgradMeta, estimateTokens, extractLinks, extractCodeRefs, resolveInRoot, assertInsideRoot } from './lib.mjs';
 
 const SKIP_DIRS = new Set(['node_modules', '.git']);
 const CHURN_WINDOW_DAYS = 90;
@@ -45,7 +45,14 @@ function commitsSince(root, rel, days) {
   }
 }
 
-function walkFiles(absDir, out) {
+// #57: every entry this returns is read by hasCodePointer() through readTextSafe(), and the `else`
+// branch pushes **any** non-directory dirent — Dirent.isDirectory() is false for a symlink, so a
+// symlinked file inside an otherwise perfectly contained src_dir had its body read and leaked
+// through the code_pointer boolean. Containment therefore applies to every entry, not only to the
+// configured directory the walk started from. This is the code-side counterpart of a `notes.md`
+// symlink in docs/, and it is the higher-value route of the two because it reads arbitrary
+// non-markdown file bodies.
+function walkFiles(rootDir, absDir, out) {
   let entries;
   try {
     entries = fs.readdirSync(absDir, { withFileTypes: true });
@@ -54,8 +61,8 @@ function walkFiles(absDir, out) {
   }
   for (const entry of entries) {
     if (SKIP_DIRS.has(entry.name)) continue;
-    const abs = path.join(absDir, entry.name);
-    if (entry.isDirectory()) walkFiles(abs, out);
+    const abs = assertInsideRoot(rootDir, path.join(absDir, entry.name), 'src_dirs', path.relative(rootDir, path.join(absDir, entry.name)));
+    if (entry.isDirectory()) walkFiles(rootDir, abs, out);
     else out.push(abs);
   }
 }
@@ -71,14 +78,15 @@ function readTextSafe(absPath) {
 }
 
 // The actual file listing under path (the file itself, or a directory walked recursively, skipping
-// node_modules/.git); doesn't exist -> [].
-function resolveFiles(root, relPath) {
-  const abs = path.join(root, relPath);
+// node_modules/.git); doesn't exist -> []. `field` names the config key in a containment error,
+// because this serves both `scenarios` and the src_dirs-derived area list.
+function resolveFiles(root, relPath, field) {
+  const abs = resolveInRoot(root, relPath, field);
   if (!fs.existsSync(abs)) return [];
   const stat = fs.statSync(abs);
   if (stat.isFile()) return [relPath];
   const out = [];
-  walkFiles(abs, out);
+  walkFiles(root, abs, out);
   return out.map((a) => path.relative(root, a).split(path.sep).join('/'));
 }
 
@@ -190,7 +198,10 @@ try {
     const seen = new Set();
     let sum = 0;
     for (const f of config.entry_files) {
-      const abs = path.join(root, f);
+      // collectFiles() has already rejected an out-of-root entry_files path before this runs, so
+      // this is defence in depth rather than the enforcing check — but this loop reads files by
+      // itself, and a second reader of the same field must not be the one place the rule is missing.
+      const abs = resolveInRoot(root, f, 'entry_files');
       if (!fs.existsSync(abs)) continue;
       let key = abs;
       try {
@@ -208,7 +219,7 @@ try {
   // --- scenarios ---------------------------------------------------------------------
   const scenarioPaths = config.scenarios ?? [];
   const scenarios = scenarioPaths.map((scenarioPath) => {
-    const files = resolveFiles(root, scenarioPath);
+    const files = resolveFiles(root, scenarioPath, 'scenarios');
     const churn_commits = gitOk ? commitsSince(root, scenarioPath, CHURN_WINDOW_DAYS) : null;
 
     const docs = [];
@@ -266,7 +277,7 @@ try {
   } else {
     const areaList = [];
     for (const srcDir of config.src_dirs) {
-      const absSrc = path.join(root, srcDir);
+      const absSrc = resolveInRoot(root, srcDir, 'src_dirs');
       const base = srcDir.replace(/\/+$/, '');
       if (!fs.existsSync(absSrc)) continue;
       for (const entry of fs.readdirSync(absSrc, { withFileTypes: true })) {
@@ -276,7 +287,7 @@ try {
     }
     areaList.sort();
     areas = areaList.map((area) => {
-      const files = resolveFiles(root, area);
+      const files = resolveFiles(root, area, 'src_dirs');
       let fan_in = 0;
       for (const { refs } of docRefs) {
         if (refs.some((ref) => !ref.basenameOnly && refCovers(ref.path, area, srcPrefixes))) fan_in += 1;

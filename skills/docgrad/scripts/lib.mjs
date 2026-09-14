@@ -363,13 +363,142 @@ function toPosix(p) {
   return p.split(path.sep).join('/');
 }
 
+// --- root containment (#57) --------------------------------------------------------
+//
+// docgrad is documented as a tool you run against repos you did not write (case-studies/01 clones
+// a third-party repo and grades it), and the repo being graded controls **both** `.docgrad.yml` and
+// the symlinks in its own tree. So every path these scripts open has to be proven to live inside
+// the root they were pointed at, or local file content ends up in the report and in the agent
+// context that reads it.
+//
+// **Built on fs.realpathSync, never on path.resolve.** A lexical check is defeated by one committed
+// symlink: `docs-x -> /` with `docs_dirs: ['docs-x/Users/v/notes/']` resolves lexically inside the
+// root, passes any prefix test, and then readdirSync follows it straight back out. Only the path
+// the kernel would actually open tells the truth.
+//
+// **The root is realpathed here, once per root — deliberately not in parseArgs().** `--root`'s
+// documented meaning is the path the caller typed (tests/lib.test.mjs asserts
+// `parseArgs().root === path.resolve('/tmp/x')`, and `configFile` is derived from it); on darwin
+// `/tmp -> /private/tmp`, so realpathing there would silently redefine the flag. The comparison is
+// realpath-to-realpath, and both sides are resolved in this one place.
+//
+// **Missing paths stay non-fatal.** realpathSync throws ENOENT, and a missing `docs_dir` /
+// `docs_files` entry is deliberately skipped today (see pushSingleFile: `.docgrad.yml` is
+// version-controlled and shared across branches, so a file that is simply not on this branch must
+// not stop the run). What gets resolved is therefore the deepest **existing** ancestor, with the
+// not-yet-existing tail re-appended lexically: a component that does not exist cannot hide a
+// symlink, and a path that does not exist cannot disclose anything either. Turning "not on this
+// branch" into exit 1 would be a worse bug than the one this closes.
+//
+// **Not checked, on purpose: `exclude` and `out_of_scope`.** Both are pure string prefix matchers
+// (matchesPathPrefix) over paths that have *already* been collected; neither one ever touches the
+// filesystem, so neither is a disclosure vector. Adding them here would buy uniformity, not
+// security, and would invite a later reader to believe they were one.
+//
+// **Residual risks, recorded rather than closed.** (1) TOCTOU: the check and the read are separate
+// syscalls, in five separate processes, seconds apart — a *concurrent* attacker could swap a path
+// in between. Closing it means carrying validated file handles across four files. (2) A dangling
+// symlink resolves to its own (contained) directory and so passes; that is correct, because opening
+// it discloses nothing — links.mjs, where a dangling symlink *is* an information channel, handles
+// that case separately and says so there.
+
+export class OutOfRootError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'OutOfRootError';
+  }
+}
+
+// The realpath of the deepest existing ancestor of absPath, with the missing tail re-appended.
+// null means "this cannot be resolved for a reason other than not existing yet" — an unreadable
+// ancestor or a symlink loop is a refusal to answer, and every caller fails closed on it.
+function realpathDeepest(absPath) {
+  let cur = path.resolve(absPath);
+  const tail = [];
+  for (;;) {
+    try {
+      const real = fs.realpathSync(cur);
+      return tail.length ? path.join(real, ...tail) : real;
+    } catch (err) {
+      const code = err?.code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return null;
+      const parent = path.dirname(cur);
+      if (parent === cur) return null; // climbed to the filesystem root without resolving anything
+      tail.unshift(path.basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+// One realpath of the root per root string, for the whole process: every configured path and every
+// tree entry is compared against it, and the answer cannot change under us any more than the TOCTOU
+// residual above already allows.
+const ROOT_REAL_CACHE = new Map();
+
+export function rootRealPath(rootDir) {
+  const key = path.resolve(rootDir);
+  if (!ROOT_REAL_CACHE.has(key)) ROOT_REAL_CACHE.set(key, realpathDeepest(key));
+  return ROOT_REAL_CACHE.get(key);
+}
+
+// Boundary-aware comparison, never startsWith: `/repo-evil` starts with `/repo` and is a different
+// tree. path.relative gives '' for the root itself and a `..` first segment for anything above it.
+// No case folding: two spellings differing only in case are two different paths on a case-sensitive
+// filesystem, and folding them would be a guess everywhere else. A first segment of exactly `..` is
+// the only way out — a name that merely begins with those characters (`..hidden`) is an ordinary
+// in-root entry and must stay allowed.
+export function isInsideRoot(rootReal, candidateReal) {
+  if (rootReal === null || candidateReal === null) return false;
+  const rel = path.relative(rootReal, candidateReal);
+  if (rel === '') return true;
+  if (path.isAbsolute(rel)) return false;
+  return rel.split(path.sep)[0] !== '..';
+}
+
+// Non-throwing predicate, for the one caller (links.mjs) that must classify rather than fail.
+export function pathInsideRoot(rootDir, absPath) {
+  return isInsideRoot(rootRealPath(rootDir), realpathDeepest(absPath));
+}
+
+function outOfRootMessage(field, shown, rootDir) {
+  return (
+    `${field}: ${shown} resolves outside the repository root ${rootDir}, so docgrad will not read it. ` +
+    `Paths in ${CONFIG_FILENAME} are resolved against --root (the repository being graded), not against ` +
+    `the directory the config file itself sits in, and a symlink whose target leaves the root counts as outside.`
+  );
+}
+
+// Proves an already-absolute candidate stays in the root; returns it so call sites can stay
+// expression-shaped. `shown` is what the error names — the repo-relative spelling wherever there
+// is one, because that is what the reader has to go and fix.
+export function assertInsideRoot(rootDir, absPath, field, shown = absPath) {
+  if (!pathInsideRoot(rootDir, absPath)) throw new OutOfRootError(outOfRootMessage(field, shown, rootDir));
+  return absPath;
+}
+
+// The configured-path form. Returns the **lexical** join, not the realpath: every caller goes on to
+// derive repo-relative paths from it, and handing back the resolved path would rewrite them
+// (on darwin a root under /tmp would start reporting files under /private/tmp).
+export function resolveInRoot(rootDir, rel, field) {
+  return assertInsideRoot(rootDir, path.join(rootDir, rel), field, rel);
+}
+
 function walkMarkdown(absDir, rootDir, out) {
   for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
+    const abs = path.join(absDir, entry.name);
+    // Dirent.isDirectory() is false for a symlink, so a symlinked directory reaches the branch
+    // below and is only looked at when its name ends in .md — which is exactly the shape #57
+    // reports (`notes.md -> /Users/you/.ssh/config`). Both branches are checked all the same: the
+    // walk starts from a configured directory that was proven contained, but each entry can leave
+    // the root on its own.
     if (entry.isDirectory()) {
       if (ALWAYS_SKIP_DIRS.has(entry.name)) continue;
-      walkMarkdown(path.join(absDir, entry.name), rootDir, out);
+      assertInsideRoot(rootDir, abs, 'docs_dirs', toPosix(path.relative(rootDir, abs)));
+      walkMarkdown(abs, rootDir, out);
     } else if (MD_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
-      out.push(toPosix(path.relative(rootDir, path.join(absDir, entry.name))));
+      const rel = toPosix(path.relative(rootDir, abs));
+      assertInsideRoot(rootDir, abs, 'docs_dirs', rel);
+      out.push(rel);
     }
   }
 }
@@ -424,9 +553,18 @@ export function matchesScope(relPath, include = []) {
 //     (the mirror image of the ENOTDIR you get when a single file is mistakenly put in docs_dirs).
 //   - already included -> don't push a duplicate (when the same file is listed both in this field
 //     and in what docs_dirs scanned up, it only counts once).
+//   - leaves the root -> throw (#57). Note the order: containment is decided **before** the
+//     existence check, so "outside the root" is an error even when the file is missing, while
+//     "inside the root but not on this branch" keeps its silent skip.
+//
+// Deliberately still **no extension filter here.** Its absence is a separate defect from the
+// containment hole, and adding one in this change would silently drop legitimate in-root entries
+// (`docs_files: ['NOTES.txt']` is valid today) — moving files_total, the freshness denominator and
+// the pollution denominator for repos doing nothing wrong. The extension-free route matters here
+// only because it is how an out-of-root file of any type got in.
 function pushSingleFile(rootDir, rel, field, out) {
   if (!rel) return;
-  const abs = path.join(rootDir, rel);
+  const abs = resolveInRoot(rootDir, rel, field);
   if (!fs.existsSync(abs)) return;
   if (fs.statSync(abs).isDirectory()) {
     throw new Error(`${field} may only list a single file, but ${rel} is a directory — put the whole directory in docs_dirs instead`);
@@ -529,7 +667,7 @@ export const GIT_UNAVAILABLE_NOTE = gitUnavailableNote(null);
 export function collectFiles(rootDir, config, { include = [], tracked } = {}) {
   const all = [];
   for (const dir of config.docs_dirs) {
-    const abs = path.join(rootDir, dir);
+    const abs = resolveInRoot(rootDir, dir, 'docs_dirs');
     if (fs.existsSync(abs)) walkMarkdown(abs, rootDir, all);
   }
   // docs_files: single files outside docs_dirs that are semantically **regular documents**
@@ -821,6 +959,10 @@ export function buildSrcSymbolIndex(rootDir, srcDirs = []) {
         visit(abs);
         continue;
       }
+      // Dirent.isFile() is false for a symlink, so this walk already declines to read one; the
+      // containment check that retrieval.mjs's walkFiles needs on every entry has no counterpart to
+      // do here. The configured src_dir below is the route that could leave the root, and it is
+      // checked there.
       if (!entry.isFile()) continue;
       let text;
       try {
@@ -845,7 +987,7 @@ export function buildSrcSymbolIndex(rootDir, srcDirs = []) {
   };
 
   for (const dir of dirs) {
-    const abs = path.join(rootDir, dir);
+    const abs = resolveInRoot(rootDir, dir, 'src_dirs');
     if (fs.existsSync(abs)) visit(abs);
   }
   return { symbols, files_scanned: filesScanned, files_skipped: filesSkipped, bytes_scanned: bytesScanned };

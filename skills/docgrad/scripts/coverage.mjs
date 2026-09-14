@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { loadConfig, collectFiles, parseArgs, fail, docgradMeta } from './lib.mjs';
+import { loadConfig, collectFiles, parseArgs, fail, docgradMeta, resolveInRoot } from './lib.mjs';
 
 const SKIP_DIRS = new Set(['node_modules', '.git']);
 
@@ -110,7 +110,11 @@ try {
   const loose_files = {};
   const areaEntries = [];
   for (const srcDir of config.src_dirs) {
-    const absSrc = path.join(root, srcDir);
+    // #57: a src_dir that leaves the root — `../` or a symlinked directory — would otherwise be
+    // enumerated here and have every file under it counted. countFiles below needs no check of its
+    // own: it recurses only into Dirent.isDirectory(), which is false for a symlink, and it reads
+    // nothing.
+    const absSrc = resolveInRoot(root, srcDir, 'src_dirs');
     const base = srcDir.replace(/\/+$/, ''); // strip trailing slash, POSIX area prefix
     let loose = 0;
     if (fs.existsSync(absSrc)) {
