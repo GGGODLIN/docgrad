@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash, loadLedgerClaimHashes } from '../skills/docgrad/scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash, judgementHash, loadLedgerClaimHashes } from '../skills/docgrad/scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -743,6 +743,48 @@ test('extractCodeRefs: skips backticks inside a code fence, skips non-path-shape
   assert.deepEqual(refs, []);
 });
 
+// #56: rubric_hash fingerprints the anchors, not the rules for applying them. v1.7.0 added two
+// boundary rules to audit.md — one of which can only lower a pass rate — and no fingerprint moved,
+// so the break could only be disclosed in prose. These tests pin which files decide a rating.
+test('judgementHash: covers the rule files, not the anchors, and each one moves it on its own', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-judge-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'reference'), { recursive: true });
+    const write = (rel, body) => fs.writeFileSync(path.join(tmp, rel), body);
+    write('reference/audit.md', 'step 1: run the scripts');
+    write('reference/placement.md', 'rule 4: grounds live with the conclusion');
+    write('reference/rubric.md', '★4 anchor A');
+    write('reference/improve.md', 'round flow');
+
+    const base = judgementHash(tmp);
+    assert.match(base, /^[0-9a-f]{8}$/);
+    assert.equal(judgementHash(tmp), base, 'same inputs must hash the same');
+
+    // audit.md carries the procedure and the boundary rules.
+    write('reference/audit.md', 'step 1: run the scripts (edited)');
+    const afterAudit = judgementHash(tmp);
+    assert.notEqual(afterAudit, base);
+
+    // placement.md decides what counts as a consistency deduction (SKILL.md blocker 2).
+    write('reference/placement.md', 'rule 4: grounds may live anywhere');
+    assert.notEqual(judgementHash(tmp), afterAudit);
+
+    // rubric.md is rubric_hash's job; hashing it twice would move two fingerprints for one edit.
+    const beforeRubric = judgementHash(tmp);
+    write('reference/rubric.md', '★4 anchor B');
+    assert.equal(judgementHash(tmp), beforeRubric, 'rubric.md must not move judgement_hash');
+
+    // improve.md delegates the rating to audit.md and is never read by a plain `audit`.
+    write('reference/improve.md', 'round flow, rewritten');
+    assert.equal(judgementHash(tmp), beforeRubric, 'improve.md must not move judgement_hash');
+
+    // Missing files read as unknown, not as a value — the rubric_hash contract.
+    assert.equal(judgementHash(fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-empty-'))), null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('docgradMeta: corpus_hash is null without a config, and present with one (backward-compatible signature)', () => {
   assert.equal(docgradMeta().corpus_hash, null, 'an old one-argument caller must not crash');
   const cfg = loadConfig(FIXTURE);
@@ -876,6 +918,7 @@ test('docgradMeta: returns null instead of throwing when files cannot be read', 
     assert.deepEqual(docgradMeta(tmp), {
       version: null,
       rubric_hash: null,
+      judgement_hash: null,
       thresholds_hash: null,
       corpus_hash: null,
     });

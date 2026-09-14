@@ -1265,6 +1265,52 @@ function findManifest(startDir) {
   return null;
 }
 
+// --- judgement_hash ------------------------------------------------------------------
+//
+// rubric_hash fingerprints the **anchors**. It does not fingerprint the **rules for applying them**,
+// and those live in different files — which v1.7.0 demonstrated the hard way: #48 added two boundary
+// rules to audit.md, one of which can only lower a correctness pass rate, and no fingerprint moved.
+// The break had to be disclosed in prose and trusted to be read (#56).
+//
+// What is in, and why — decided by what the skill's own blockers say decides a rating (SKILL.md §2):
+//
+//   reference/audit.md      the scoring procedure, the sampling rule, the boundary rules. `audit`
+//                           runs it; `improve`/`loop` delegate to it ("run a full evaluation per
+//                           audit.md").
+//   reference/placement.md  "Before rating **consistency** you must also read placement.md — the
+//                           rules for judging placement and duplication live there." Editing it
+//                           changes what counts as a deduction, so it changes the consistency star.
+//
+// What is out, and why:
+//
+//   reference/rubric.md     already covered by rubric_hash. Hashing it twice would make one edit
+//                           move two fingerprints and tell a reader nothing extra.
+//   reference/improve.md    it is the round *flow* — recording, committing, graduation — and it
+//                           delegates the rating itself to audit.md. It can change which claims a
+//                           *loop* draws (it tells the round to pass --exclude-ledger), so it is the
+//                           closest call here; it is out because a plain `audit` never reads it, and
+//                           a fingerprint that moves for runs it cannot affect is noise.
+//
+// Whole-file, like rubric_hash: a formatting-only edit moves it. That is the same trade rubric_hash
+// already makes, and narrowing to rule sections would have to change rubric_hash too to stay
+// coherent — a separate decision, not a side effect of this one.
+const JUDGEMENT_FILES = ['reference/audit.md', 'reference/placement.md'];
+
+export function judgementHash(skillRoot = SKILL_ROOT) {
+  const h = createHash('sha256');
+  try {
+    for (const rel of JUDGEMENT_FILES) {
+      // The path is hashed alongside the content so that adding a file later cannot collide with an
+      // edit to an existing one.
+      h.update(rel, 'utf8');
+      h.update(fs.readFileSync(path.join(skillRoot, rel), 'utf8'), 'utf8');
+    }
+  } catch {
+    return null; // same contract as rubric_hash: unknown stays distinguishable from a value
+  }
+  return h.digest('hex').slice(0, 8);
+}
+
 export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   let version = null;
   try {
@@ -1283,6 +1329,7 @@ export function docgradMeta(skillRoot = SKILL_ROOT, config = null) {
   return {
     version,
     rubric_hash: rubricHash,
+    judgement_hash: judgementHash(skillRoot),
     thresholds_hash: thresholdsHash(config),
     corpus_hash: corpusHash(config),
   };

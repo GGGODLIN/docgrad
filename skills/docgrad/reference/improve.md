@@ -76,14 +76,14 @@
    Any dimension dropping → revert the change that caused the drop, and note it.
 5. **Record and commit**:
    - Append one line to `.docgrad/history.jsonl` (create it if it doesn't exist). `docgrad_version`, `rubric_hash`,
-     `thresholds_hash` and `corpus_hash` **must be copied straight from `inventory.mjs`'s output `docgrad` block** (all four
-     live there), don't fill them in yourself:
+     `judgement_hash`, `thresholds_hash` and `corpus_hash` **must be copied straight from `inventory.mjs`'s
+     output `docgrad` block** (all five live there), don't fill them in yourself:
 
      ```json
-     {"round": 3, "date": "2026-07-12", "dimension": "linkage", "docgrad_version": "1.1.0", "rubric_hash": "b6e4f7f3", "thresholds_hash": "ec596daf", "corpus_hash": "684034d6", "scores": {"completeness": 4, "correctness": 3, "freshness": 4, "linkage": 4, "consistency": 4, "economy": 4}, "coverage": {"claims_verified": 23, "claims_total": 68}, "notes": "fixed 12 dead links; folded 2 orphans into the index"}
+     {"round": 3, "date": "2026-07-12", "dimension": "linkage", "docgrad_version": "1.1.0", "rubric_hash": "b6e4f7f3", "judgement_hash": "c40cc974", "thresholds_hash": "ec596daf", "corpus_hash": "684034d6", "scores": {"completeness": 4, "correctness": 3, "freshness": 4, "linkage": 4, "consistency": 4, "economy": 4}, "coverage": {"claims_verified": 23, "claims_total": 68}, "notes": "fixed 12 dead links; folded 2 orphans into the index"}
      ```
 
-     The four version fields are for `report` to draw comparability breakpoints: when `rubric_hash` changes it means the ruler changed,
+     The five version fields are for `report` to draw comparability breakpoints: when `rubric_hash` changes it means the ruler changed,
      and the scores before and after can't be compared directly; when `corpus_hash` changes it means the set of files being measured
      changed (`docs_dirs`/`docs_files`/`entry_files`/`exclude`/`out_of_scope`/`index_file`/`exclude_untracked`), which moves `files_total`,
      `claims_total`, the freshness denominator and the pollution denominator at once — every dimension in that round is affected,
@@ -98,6 +98,13 @@
      such field, so the round where a repo's custom `economy:` block went from inert to authoritative reads as "unknown → first
      value", not as a change. That transition is a real break and it is stated in the v1.7.0 CHANGELOG rather than detectable
      here.
+
+     `judgement_hash` (added v1.8.0) covers the files that carry **the rules for applying the anchors** — `audit.md` (the
+     scoring procedure, the sampling rule, the boundary rules) and `placement.md` (what counts as a consistency deduction).
+     `rubric_hash` fingerprints the anchors themselves; this one fingerprints how they are applied, and the two move
+     independently. Treat a move exactly like a `rubric_hash` move. Same blind spot as the others: rounds recorded **before**
+     v1.8.0 have no such field, so its first appearance reads as "unknown → first value" rather than as a change — and in
+     particular it does **not** retroactively mark v1.7.0's correctness break (#48), which is the break that motivated it.
 
      A dimension judged **not measurable** (see the design-ceiling section below — currently only correctness, when the corpus
      holds no verifiable claims) is recorded as `null`, never as a number. `report` must render it as `n/a` and must not
