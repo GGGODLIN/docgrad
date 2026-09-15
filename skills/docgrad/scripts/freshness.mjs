@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // freshness.mjs — date-signal coverage + comparison against real git log dates
-// Usage: node freshness.mjs [--root <repo>] [--config <file>] [--include <glob>] [--exclude-ledger <path>]; JSON -> stdout.
+// Usage: node freshness.mjs [--root <repo>] [--config <file>] [--include <glob>] [--exclude-ledger <path>] [--locate-ledger <path>]; JSON -> stdout.
 // env DOCGRAD_TODAY=YYYY-MM-DD can override "today" (for reproducible tests).
 // --exclude-ledger (#54) is a no-op here: only inventory.mjs draws claim candidates from a claim
 // ledger; freshness measures date signals, which the claim ledger has nothing to do with. Accepted
@@ -62,10 +62,13 @@ function dateConcentration(claimedDates) {
 const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000);
 
 try {
-  const { root, configFile, include, excludeLedger } = parseArgs();
+  const { root, configFile, include, excludeLedger, locateLedger } = parseArgs();
   const config = loadConfig(root, configFile);
   const { included } = collectFiles(root, config, { include });
   const today = process.env.DOCGRAD_TODAY ?? new Date().toISOString().slice(0, 10);
+  const locateLedgerNoteText = locateLedger
+    ? '--locate-ledger is a no-op for this script: only inventory.mjs can locate a ledgered claim in the corpus, and freshness measures date signals, which the claim ledger has nothing to do with'
+    : null;
   const excludeLedgerNoteText = excludeLedger
     ? '--exclude-ledger is a no-op for this script: only inventory.mjs draws claim candidates from a claim ledger, and freshness measures date signals, which the claim ledger has nothing to do with'
     : null;
@@ -85,7 +88,7 @@ try {
         // Same position as in inventory.mjs (right after scope) so two scripts' JSON can be
         // compared field by field: which tool version, which rubric, which corpus definition.
         docgrad: docgradMeta(undefined, config),
-        ...(excludeLedgerNoteText ? { note: excludeLedgerNoteText } : {}),
+        ...((() => { const n = [excludeLedgerNoteText, locateLedgerNoteText].filter(Boolean).join('; '); return n ? { note: n } : {}; })()),
         // the actual convention list applied (a single value is still returned as an array;
         // with multiple values they're tried in order, see lib.mjs's extractClaimedDate).
         convention: parseFreshnessConventions(config.freshness.convention),

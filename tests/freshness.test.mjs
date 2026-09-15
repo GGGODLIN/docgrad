@@ -349,3 +349,22 @@ test('freshness: with two dated fields in one frontmatter, document order wins o
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('freshness: --locate-ledger is a no-op, note explains why (#63)', () => {
+  const out = JSON.parse(
+    execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE, '--locate-ledger', '/nonexistent/ledger.jsonl'], { encoding: 'utf8' })
+  );
+  assert.match(out.note, /--locate-ledger is a no-op for this script/);
+});
+
+test('freshness: both ledger flags at once produce one note naming both (#63)', () => {
+  const out = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [SCRIPT, '--root', FIXTURE, '--exclude-ledger', '/nonexistent/a.jsonl', '--locate-ledger', '/nonexistent/b.jsonl'],
+      { encoding: 'utf8' }
+    )
+  );
+  assert.match(out.note, /--exclude-ledger is a no-op for this script/);
+  assert.match(out.note, /--locate-ledger is a no-op for this script/);
+});

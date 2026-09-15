@@ -8,7 +8,7 @@ import {
   extractCodeRefs, extractApiRefs, extractClaimLines, rankClaimCandidates, docgradMeta,
   gitTrackedFiles, gitUnavailableNote, matchesPathPrefix,
   buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, AUTHORSHIP_UNAVAILABLE_NOTE,
-  MAX_SRC_SYMBOL_FILE_BYTES, SHIPPED_TIERS, SHIPPED_POLLUTION_MAX, loadLedgerClaimHashes,
+  MAX_SRC_SYMBOL_FILE_BYTES, SHIPPED_TIERS, SHIPPED_POLLUTION_MAX, loadLedgerClaimHashes, loadLedgerRows, locateLedgerClaims,
 } from './lib.mjs';
 
 const LIST_ITEM_RE = /^\s*(?:[-*+]|\d+\.)\s+/;
@@ -133,7 +133,7 @@ function measure(rootDir, relPath, config, symbols) {
 }
 
 try {
-  const { root, configFile, include, excludeLedger } = parseArgs();
+  const { root, configFile, include, excludeLedger, locateLedger } = parseArgs();
   const config = loadConfig(root, configFile);
   // One git call, shared between collectFiles (exclude_untracked) and the untracked report below.
   const tracked = gitTrackedFiles(root);
@@ -206,6 +206,47 @@ try {
     .slice(0, config.claim_candidates_cap)
     .map((c) => ({ ...c, docgrad_authored: authorshipOf(c.path) }));
   const candidatesTruncated = claimCandidates.length < drawableCandidates.length;
+  // #63 prerequisite. Built from `rankedCandidates` — the **unfiltered** population — on purpose:
+  // in the improve loop this flag always arrives alongside --exclude-ledger, and locating against
+  // the filtered list would report every ledgered claim as not-located, which is the exact opposite
+  // of what was asked. The two flags are independent and may name different files.
+  const locateLedgerBlock = (() => {
+    if (!locateLedger) return null;
+    const ledgerRows = loadLedgerRows(locateLedger, '--locate-ledger');
+    const entries = locateLedgerClaims(rankedCandidates, ledgerRows);
+    const located = entries.filter((e) => e.located).length;
+    const multiPosition = entries.filter((e) => e.positions.length > 1).length;
+    const notLocated = entries.length - located;
+    const note = [];
+    if (notLocated) {
+      note.push(
+        `${notLocated} of ${entries.length} ledgered claims have no position in this round's corpus: the claim text was edited, its document left the corpus, or it was deleted. claim_hash is content-derived, so an edited claim is a different claim — those ledger rows no longer describe anything that is here, and they are reported rather than dropped.`
+      );
+    }
+    if (multiPosition) {
+      note.push(
+        `${multiPosition} ledgered claims occupy more than one position: the same claim text appears in several documents. Every position is listed; this is a duplication finding for the consistency dimension, not an error.`
+      );
+    }
+    if (excludeLedger) {
+      note.push(
+        'positions were located against the unfiltered claim population, so --exclude-ledger (also passed on this run) did not hide any of them.'
+      );
+    }
+    return {
+      path: locateLedger,
+      // `lines` is the ledger's line count; `distinct` is the number of distinct claim_hash values.
+      // A docgrad ledger is append-only and re-verification appends a new line for a hash already
+      // present, so these two differ on every real ledger. located + not_located === distinct.
+      lines: ledgerRows.length,
+      distinct: entries.length,
+      located,
+      not_located: notLocated,
+      multi_position: multiPosition,
+      entries,
+      note,
+    };
+  })();
   const files = filesRaw.map(({ _ruleLines, _claimLines, ...f }) => f);
   const totalTokens = files.reduce((s, f) => s + f.tokens_est, 0);
   const excludedTokens = excludedFiles.reduce((s, f) => s + f.tokens_est, 0);
@@ -400,6 +441,8 @@ try {
           ],
         },
         claim_candidates: claimCandidates,
+        // Absent entirely unless --locate-ledger was passed: no flag, no new key.
+        ...(locateLedgerBlock ? { locate_ledger: locateLedgerBlock } : {}),
         entry_cost: entryCost,
         pollution: {
           excluded_files: excludedFiles.map((f) => ({ path: f.path, tokens_est: f.tokens_est })),

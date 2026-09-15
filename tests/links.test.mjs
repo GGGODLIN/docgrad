@@ -181,3 +181,11 @@ test('links: an out-of-root file:// target is never stat\'ed (#57 holds for the 
     cleanup();
   }
 });
+
+test('links: --locate-ledger is a no-op, note explains why, and it need not even exist (#63)', () => {
+  const out = JSON.parse(
+    execFileSync(process.execPath, [SCRIPT, '--root', FIXTURE, '--locate-ledger', '/nonexistent/ledger.jsonl'], { encoding: 'utf8' })
+  );
+  assert.match(out.note, /--locate-ledger is a no-op for this script/);
+  assert.deepEqual(out.orphans, ['docs/orphan.md']); // behaves exactly like the unflagged run otherwise
+});

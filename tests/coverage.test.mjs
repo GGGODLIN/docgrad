@@ -228,3 +228,14 @@ test('coverage: output carries the docgrad fingerprint, right after scope (#45)'
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('coverage: --locate-ledger is a no-op, note explains why (#63)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-cov-noloc-'));
+  try {
+    writeBaseFiles(tmp);
+    const out = run(tmp, ['--locate-ledger', '/nonexistent/ledger.jsonl']);
+    assert.match(out.note, /--locate-ledger is a no-op for this script/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

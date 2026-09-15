@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, parseFreshnessFields, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash, judgementHash, loadLedgerClaimHashes } from '../skills/docgrad/scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, parseFreshnessFields, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash, judgementHash, loadLedgerClaimHashes, loadLedgerRows } from '../skills/docgrad/scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -1189,4 +1189,24 @@ test('lib: parseYamlSubset inline list — commas inside a quoted item do not sp
   // regression caught in review: a quote may only open at the start of an item
   assert.deepEqual(parseYamlSubset("exclude: [docs/owner's/, docs/archive/]\n").exclude, ["docs/owner's/", 'docs/archive/']);
   assert.deepEqual(parseYamlSubset('a: [it"s, "q, r"]\n').a, ['it"s', 'q, r']);
+});
+
+test('loadLedgerRows: error text names the flag it was called for, and loadLedgerClaimHashes keeps its own wording (#63)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-ledger-flag-'));
+  try {
+    const missing = path.join(tmp, 'nope.jsonl');
+    assert.throws(() => loadLedgerRows(missing, '--locate-ledger'), /--locate-ledger .*could not read this file/);
+    assert.throws(() => loadLedgerClaimHashes(missing), /--exclude-ledger .*could not read this file/);
+    const ledgerPath = path.join(tmp, 'ledger.jsonl');
+    fs.writeFileSync(ledgerPath, `${JSON.stringify({ claim_hash: 'aaa', doc: 'docs/a.md' })}\n${JSON.stringify({ claim_hash: 'aaa', doc: 'docs/a.md' })}\n`);
+    // Rows are per line (a ledger is append-only); hashes are deduplicated.
+    assert.equal(loadLedgerRows(ledgerPath).length, 2);
+    assert.equal(loadLedgerClaimHashes(ledgerPath).size, 1);
+    assert.equal(loadLedgerRows(ledgerPath)[0].doc, 'docs/a.md');
+    // A row without `doc` is null, never a guessed path.
+    fs.writeFileSync(ledgerPath, `${JSON.stringify({ claim_hash: 'bbb' })}\n`);
+    assert.equal(loadLedgerRows(ledgerPath)[0].doc, null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
