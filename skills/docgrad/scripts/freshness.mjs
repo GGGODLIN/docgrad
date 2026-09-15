@@ -72,6 +72,9 @@ try {
   const excludeLedgerNoteText = excludeLedger
     ? '--exclude-ledger is a no-op for this script: only inventory.mjs draws claim candidates from a claim ledger, and freshness measures date signals, which the claim ledger has nothing to do with'
     : null;
+  // Named, like the other three scripts' combinedNoteText — the shape a fourth shared flag
+  // should extend rather than re-invent (docs/how-to.md §Extend the measurement scripts).
+  const combinedNoteText = [excludeLedgerNoteText, locateLedgerNoteText].filter(Boolean).join('; ') || null;
 
   const results = included.map((rel) => {
     const claimed = extractClaimedDate(fs.readFileSync(path.join(root, rel), 'utf8'), config.freshness);
@@ -88,7 +91,7 @@ try {
         // Same position as in inventory.mjs (right after scope) so two scripts' JSON can be
         // compared field by field: which tool version, which rubric, which corpus definition.
         docgrad: docgradMeta(undefined, config),
-        ...((() => { const n = [excludeLedgerNoteText, locateLedgerNoteText].filter(Boolean).join('; '); return n ? { note: n } : {}; })()),
+        ...(combinedNoteText ? { note: combinedNoteText } : {}),
         // the actual convention list applied (a single value is still returned as an array;
         // with multiple values they're tried in order, see lib.mjs's extractClaimedDate).
         convention: parseFreshnessConventions(config.freshness.convention),

@@ -1618,6 +1618,10 @@ export function locateLedgerClaims(rankedCandidates, ledgerRows) {
     if (!byHash.has(c.claim_hash)) byHash.set(c.claim_hash, []);
     byHash.get(c.claim_hash).push({ path: c.path, line: c.line, section_lines: c.section_lines });
   }
+  // First row wins for a repeated hash: a ledger is append-only, so the same claim_hash recurs
+  // across rounds and only `doc` differs between those rows. `doc` is an untrusted locating aid,
+  // so which one is echoed changes nothing that is measured — but it is stated rather than left
+  // to whichever order the file happened to be in (docs/design.md §Scripts contract).
   const seen = new Map();
   for (const row of ledgerRows) if (!seen.has(row.claim_hash)) seen.set(row.claim_hash, row);
   const entries = [];
