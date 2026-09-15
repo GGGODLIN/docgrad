@@ -228,3 +228,31 @@ test('coverage: output carries the docgrad fingerprint, right after scope (#45)'
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('coverage: --locate-ledger is a no-op, note explains why (#63)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-cov-noloc-'));
+  try {
+    writeBaseFiles(tmp);
+    const out = run(tmp, ['--locate-ledger', '/nonexistent/ledger.jsonl']);
+    assert.match(out.note, /--locate-ledger is a no-op for this script/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('coverage: --locate-ledger no-op note survives the src_dirs-unset early return too (#63)', () => {
+  // Regression: the early return composed its note from its own list and dropped the new flag's
+  // note, so a docs-only repo lost the explanation while a repo with src_dirs kept it. The
+  // first #63 test could not catch this — writeBaseFiles() sets src_dirs.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-cov-nosrc-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), '# D\n\nRule 0 is in `thing0.ts`.\n');
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+    const out = run(tmp, ['--locate-ledger', '/nonexistent/ledger.jsonl']);
+    assert.match(out.note, /--locate-ledger is a no-op for this script/);
+    assert.match(out.note, /src_dirs is unset/, 'the pre-existing explanation is still there');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

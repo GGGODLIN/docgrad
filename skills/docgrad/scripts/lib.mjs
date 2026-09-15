@@ -402,15 +402,20 @@ export function parseArgs(argv = process.argv.slice(2)) {
   let rootArg = null;
   let configArg = null;
   let excludeLedgerArg = null;
+  let locateLedgerArg = null;
   const include = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--root') rootArg = takeValue(argv, i++, '--root');
     else if (a === '--config') configArg = takeValue(argv, i++, '--config');
     else if (a === '--exclude-ledger') excludeLedgerArg = takeValue(argv, i++, '--exclude-ledger');
+    else if (a === '--locate-ledger') locateLedgerArg = takeValue(argv, i++, '--locate-ledger');
     else if (a === '--include') {
       include.push(...takeValue(argv, i++, '--include').split(',').map((s) => s.trim()).filter(Boolean));
-    } else throw new Error(`Unknown argument ${a} (supported: --root / --config / --include / --exclude-ledger)`);
+    } else
+      throw new Error(
+        `Unknown argument ${a} (supported: --root / --config / --include / --exclude-ledger / --locate-ledger)`
+      );
   }
   const root = path.resolve(rootArg ?? process.cwd());
   return {
@@ -418,6 +423,10 @@ export function parseArgs(argv = process.argv.slice(2)) {
     configFile: configArg ? path.resolve(configArg) : path.join(root, CONFIG_FILENAME),
     include,
     excludeLedger: excludeLedgerArg ? path.resolve(excludeLedgerArg) : null,
+    // The two ledger flags are independent: --exclude-ledger narrows what is *emitted*,
+    // --locate-ledger asks where already-ledgered claims *are*. They may name different files,
+    // and in the improve loop they are both passed on every round with a ledger.
+    locateLedger: locateLedgerArg ? path.resolve(locateLedgerArg) : null,
   };
 }
 
@@ -1546,17 +1555,17 @@ export function rankClaimCandidates(perFile) {
 // back to "nothing excluded" — would silently re-emit the unfiltered window while the caller
 // believes it asked for a filtered one, which is the exact defect this flag exists to close, just
 // hidden one layer deeper. A malformed ledger must stop the run, not degrade it quietly.
-export function loadLedgerClaimHashes(ledgerPath) {
+export function loadLedgerRows(ledgerPath, flag = '--exclude-ledger') {
   let text;
   try {
     text = fs.readFileSync(ledgerPath, 'utf8');
   } catch (err) {
     throw new Error(
-      `--exclude-ledger ${ledgerPath}: could not read this file (${err.code === 'ENOENT' ? 'not found' : err.message}). ` +
-        'A missing or unreadable ledger must fail the run, not silently emit an unfiltered candidate window.'
+      `${flag} ${ledgerPath}: could not read this file (${err.code === 'ENOENT' ? 'not found' : err.message}). ` +
+        'A missing or unreadable ledger must fail the run, not be silently treated as empty.'
     );
   }
-  const hashes = new Set();
+  const rows = [];
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i += 1) {
     const raw = lines[i].trim();
@@ -1566,15 +1575,63 @@ export function loadLedgerClaimHashes(ledgerPath) {
       row = JSON.parse(raw);
     } catch {
       throw new Error(
-        `--exclude-ledger ${ledgerPath}:${i + 1}: not a valid JSON object. Each non-empty line of a ledger must be exactly one JSON object with a claim_hash field.`
+        `${flag} ${ledgerPath}:${i + 1}: not a valid JSON object. Each non-empty line of a ledger must be exactly one JSON object with a claim_hash field.`
       );
     }
     if (row === null || typeof row !== 'object' || Array.isArray(row) || typeof row.claim_hash !== 'string' || !row.claim_hash) {
       throw new Error(
-        `--exclude-ledger ${ledgerPath}:${i + 1}: this row has no non-empty claim_hash field. Every ledger row must carry the claim_hash it was verified against.`
+        `${flag} ${ledgerPath}:${i + 1}: this row has no non-empty claim_hash field. Every ledger row must carry the claim_hash it was verified against.`
       );
     }
-    hashes.add(row.claim_hash);
+    // `doc` is the ledger's own locating field (see reference/improve.md's row example) — kept as a
+    // locating *aid* only. Nothing here trusts it: a row's position is recomputed from this round's
+    // corpus scan, so a stale or tampered `doc`/`line` cannot move where a claim is reported.
+    rows.push({ claim_hash: row.claim_hash, doc: typeof row.doc === 'string' ? row.doc : null });
   }
-  return hashes;
+  return rows;
+}
+
+export function loadLedgerClaimHashes(ledgerPath, flag = '--exclude-ledger') {
+  return new Set(loadLedgerRows(ledgerPath, flag).map((r) => r.claim_hash));
+}
+
+// --- #63 prerequisite: --locate-ledger --------------------------------------------------------
+//
+// Answers "where are my already-ledgered claims *now*", which no other output can: improve.md
+// mandates --exclude-ledger on every round that has a ledger, and that filters ledgered candidates
+// out **before** claim_candidates_cap is applied, so a loop round emits zero of them.
+//
+// Three properties the callers depend on:
+//   1. It reads the **unfiltered** ranked population, so --exclude-ledger never hides a position.
+//   2. It is uncapped — claim_candidates_cap governs the emitted window, not this.
+//   3. A hash with no current position is emitted with `located: false`, never dropped. A claim
+//      whose text was edited since it was ledgered has no position by construction (claim_hash is
+//      content-derived), and silently omitting it would read as "nothing to protect here" — the
+//      one reading that must never be available to a caller.
+//
+// A claim_hash can legitimately hold several positions at once: the hash is derived from the claim
+// text alone, so the same anchored sentence in two documents is one hash in two places — which is
+// the duplication the consistency dimension exists to find. Every position is reported.
+export function locateLedgerClaims(rankedCandidates, ledgerRows) {
+  const byHash = new Map();
+  for (const c of rankedCandidates) {
+    if (!byHash.has(c.claim_hash)) byHash.set(c.claim_hash, []);
+    byHash.get(c.claim_hash).push({ path: c.path, line: c.line, section_lines: c.section_lines });
+  }
+  // First row wins for a repeated hash: a ledger is append-only, so the same claim_hash recurs
+  // across rounds and only `doc` differs between those rows. `doc` is an untrusted locating aid,
+  // so which one is echoed changes nothing that is measured — but it is stated rather than left
+  // to whichever order the file happened to be in (docs/design.md §Scripts contract).
+  const seen = new Map();
+  for (const row of ledgerRows) if (!seen.has(row.claim_hash)) seen.set(row.claim_hash, row);
+  const entries = [];
+  for (const [claim_hash, row] of seen) {
+    const positions = byHash.get(claim_hash) ?? [];
+    entries.push(
+      positions.length
+        ? { claim_hash, located: true, positions }
+        : { claim_hash, located: false, positions: [], ledger_doc: row.doc }
+    );
+  }
+  return entries;
 }

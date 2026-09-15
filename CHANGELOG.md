@@ -24,6 +24,52 @@ either gap will measure differently, which is the point.
   apostrophe inside a plain item is unchanged. A config whose inline list previously mis-split on a
   quoted comma will now parse differently — and, for `exclude`/`docs_dirs`, hash differently.
 
+### Added — `inventory.mjs --locate-ledger <path>` (#63 prerequisite)
+
+Reports where every claim already recorded in a claim ledger sits **in this round's corpus**. Nothing
+else could answer that question: `reference/improve.md` step 1 mandates `--exclude-ledger` on every
+round that has a ledger, and that flag filters ledgered candidates out **before**
+`claim_candidates_cap` is applied — so a real loop round emits exactly zero of the positions a caller
+would need.
+
+Three properties callers are meant to rely on, each with a test:
+
+- **Reads the unfiltered population.** In the loop the two ledger flags always arrive together;
+  locating against the filtered list would report every ledgered claim as not-located, the exact
+  opposite of the question. They are independent and may name different files.
+- **Uncapped.** `claim_candidates_cap` governs the emitted window, not this. A ledger of 100 against
+  the default cap of 60 reports 100.
+- **A claim with no current position is reported, never dropped.** `claim_hash` is derived from the
+  claim text, so a claim edited since it was ledgered has no position by construction. Such a row is
+  emitted with `located: false`; omitting it would read as "nothing here", which is the one reading a
+  caller must never be given. Measured on this repo's own ledger: 1 of 3 rows is already in this
+  state.
+
+Shape: `locate_ledger: {path, lines, distinct, located, not_located, multi_position, entries, note}`,
+present **only** when the flag is passed. `lines` is the ledger's **non-empty row** count (blank lines are skipped, as
+`--exclude-ledger` already skips them) and `distinct` the number of distinct `claim_hash` values — a ledger is append-only and re-verification appends a row for a hash
+already present, so the two differ on every real ledger; `located + not_located === distinct`. One
+hash may hold several positions at once (the same claim sentence in two documents is one hash in two
+places, which is a duplication finding rather than an error) and every position is listed. A row's own
+`doc` field is echoed as `ledger_doc` for not-located rows and is **never trusted**: positions are
+recomputed from this round's scan, so a stale or tampered `doc`/`line` cannot move where a claim is
+reported.
+
+The other four scripts accept the flag and report the no-op in their own `note`, as they already do
+for `--include` and `--exclude-ledger` (`docs/how-to.md` §Extend the measurement scripts).
+
+**Fingerprints and cost.** `rubric_hash`, `judgement_hash`, `thresholds_hash` and `corpus_hash` are
+all unchanged — this release touches none of `reference/rubric.md`, `reference/audit.md`,
+`reference/placement.md`, nor any corpus-selecting config field. The one measurable cost is
+`entry_cost`: documenting the flag in `SKILL.md` §Scripts took this repo from **1,556 to 1,633
+tokens** (+77), well inside the ★4 band and far from the ★5 ceiling of 3,000.
+
+Without the flag, output is unchanged: no new key, and byte-identical JSON from all five scripts
+across the five `tests/fixtures/` repos. (On *this* repo the unflagged `inventory.mjs` output moves by
+one field — `claim_population.src_symbols` 2,365 → 2,408 — because `src_dirs` is
+`skills/docgrad/scripts/` and the new functions add identifiers to the symbol index. Editing the
+scripts at all does that; it is not a behavioural change from the flag.)
+
 ## 1.8.0 — 2026-09-14
 
 Four defects fixed (#54 #56 #57 #55). **No ★1–★5 threshold moved** and every shipped default is

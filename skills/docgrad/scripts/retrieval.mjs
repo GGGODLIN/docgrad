@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // retrieval.mjs — traceability + marginal cost (a newer measurement script, report-only, see reference/rubric.md §Token economy)
-// Usage: node retrieval.mjs [--root <repo>] [--config <file>] [--include <glob, see note below for why it's a no-op>] [--exclude-ledger <path>]; JSON -> stdout.
+// Usage: node retrieval.mjs [--root <repo>] [--config <file>] [--include <glob, see note below for why it's a no-op>] [--exclude-ledger <path>] [--locate-ledger <path>]; JSON -> stdout.
 // --exclude-ledger (#54) is also a no-op here, for an unrelated reason: only inventory.mjs draws
 // claim candidates from a claim ledger, and retrieval measures traceability/marginal cost, not
 // correctness. Accepted and ignored, like --include.
@@ -121,7 +121,7 @@ function hasCodePointer(root, files, docsDirs, docBasenames) {
 }
 
 try {
-  const { root, configFile, include, excludeLedger } = parseArgs();
+  const { root, configFile, include, excludeLedger, locateLedger } = parseArgs();
   const config = loadConfig(root, configFile);
   const srcPrefixes = config.src_dirs.map((d) => d.replace(/\/+$/, '')).filter(Boolean);
   const { included } = collectFiles(root, config);
@@ -130,6 +130,11 @@ try {
   if (include.length) {
     notes.push(
       '--include is a no-op for this script: traceability and marginal cost are full-index/retrieval concepts, and narrowing scope would drop the routing chain and cross-file anchors (same reasoning as coverage.mjs)'
+    );
+  }
+  if (locateLedger) {
+    notes.push(
+      '--locate-ledger is a no-op for this script: only inventory.mjs can locate a ledgered claim in the corpus, and retrieval measures traceability/marginal cost, which the claim ledger has nothing to do with'
     );
   }
   if (excludeLedger) {

@@ -251,3 +251,13 @@ test('retrieval: a symlinked entry-file alias is charged once, matching inventor
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('retrieval: --locate-ledger is a no-op, note explains why (#63)', () => {
+  const tmp = copyFixture();
+  try {
+    const out = run(tmp, ['--locate-ledger', '/nonexistent/ledger.jsonl']);
+    assert.match(out.note, /--locate-ledger is a no-op for this script/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

@@ -961,3 +961,186 @@ test('inventory: the untracked note names which git failure occurred (#52)', () 
     fs.rmSync(binDir, { recursive: true, force: true });
   }
 });
+
+// --- #63 prerequisite: --locate-ledger ---------------------------------------------------------
+//
+// The flag exists because no other output can answer "where are my ledgered claims now": improve.md
+// mandates --exclude-ledger on every round that has a ledger, and that filters ledgered candidates
+// out before the cap, so a loop round emits zero of them.
+
+function writeLocateLedger(tmp, rows, name = 'ledger.jsonl') {
+  const dir = path.join(tmp, '.docgrad');
+  fs.mkdirSync(dir, { recursive: true });
+  const ledgerPath = path.join(dir, name);
+  fs.writeFileSync(ledgerPath, rows.map((r) => JSON.stringify({ round: 1, result: 'pass', ...r })).join('\n') + '\n');
+  return ledgerPath;
+}
+
+test('inventory: --locate-ledger reports every ledgered claim, uncapped, even when --exclude-ledger removed all of them from the window (#63)', () => {
+  const tmp = claimRepo(100); // well past the default cap of 60
+  try {
+    const baseline = runInventory(tmp);
+    assert.equal(baseline.claim_candidates.length, 60, 'the emitted window is capped');
+    // Every hash in the population, not just the emitted window.
+    const full = claimRepo(100);
+    let allHashes;
+    try {
+      fs.appendFileSync(path.join(full, '.docgrad.yml'), 'claim_candidates_cap: 200\n');
+      allHashes = runInventory(full).claim_candidates.map((c) => c.claim_hash);
+    } finally {
+      fs.rmSync(full, { recursive: true, force: true });
+    }
+    assert.equal(allHashes.length, 100);
+    const ledgerPath = writeLocateLedger(tmp, allHashes.map((h) => ({ claim_hash: h })));
+    const out = runInventory(tmp, '--locate-ledger', ledgerPath, '--exclude-ledger', ledgerPath);
+    assert.equal(out.claim_candidates.length, 0, '--exclude-ledger removed the whole window');
+    assert.equal(out.locate_ledger.distinct, 100);
+    assert.equal(out.locate_ledger.located, 100, 'locating reads the unfiltered population');
+    assert.equal(out.locate_ledger.not_located, 0);
+    assert.equal(out.locate_ledger.located + out.locate_ledger.not_located, out.locate_ledger.distinct);
+    assert.ok(out.locate_ledger.note.some((n) => n.includes('--exclude-ledger')));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: --locate-ledger ignores the ledger row\'s own doc/line and reports where the claim is this round', () => {
+  const tmp = claimRepo(5);
+  try {
+    const hash = runInventory(tmp).claim_candidates[0].claim_hash;
+    const ledgerPath = writeLocateLedger(tmp, [{ claim_hash: hash, doc: 'docs/moved-away.md', line: 9999 }]);
+    const out = runInventory(tmp, '--locate-ledger', ledgerPath);
+    assert.equal(out.locate_ledger.located, 1);
+    const [entry] = out.locate_ledger.entries;
+    assert.equal(entry.positions.length, 1);
+    assert.equal(entry.positions[0].path, 'docs/rules.md', 'the position comes from this round\'s scan');
+    assert.notEqual(entry.positions[0].line, 9999);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: --locate-ledger reports a claim that no longer exists as located:false rather than dropping it (#63)', () => {
+  const tmp = claimRepo(5);
+  try {
+    const ledgerPath = writeLocateLedger(tmp, [
+      { claim_hash: runInventory(tmp).claim_candidates[0].claim_hash },
+      { claim_hash: 'deadbeef0000', doc: 'docs/gone.md' },
+    ]);
+    const out = runInventory(tmp, '--locate-ledger', ledgerPath);
+    assert.equal(out.locate_ledger.distinct, 2);
+    assert.equal(out.locate_ledger.located, 1);
+    assert.equal(out.locate_ledger.not_located, 1);
+    const missing = out.locate_ledger.entries.find((e) => e.claim_hash === 'deadbeef0000');
+    assert.ok(missing, 'an unlocatable row must still appear — silence would read as "nothing to protect here"');
+    assert.equal(missing.located, false);
+    assert.deepEqual(missing.positions, []);
+    assert.equal(missing.ledger_doc, 'docs/gone.md', 'the ledger\'s own doc is echoed as a locating aid only');
+    assert.ok(out.locate_ledger.note.some((n) => n.includes('no position in this round')));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: --locate-ledger counts distinct claim_hash values, not ledger lines (a ledger is append-only)', () => {
+  const tmp = claimRepo(5);
+  try {
+    const hash = runInventory(tmp).claim_candidates[0].claim_hash;
+    // Re-verification appends a new line for a hash already present — improve.md's ledger is
+    // append-only and never rewritten, so lines > distinct on every real ledger.
+    const ledgerPath = writeLocateLedger(tmp, [
+      { claim_hash: hash, round: 1 },
+      { claim_hash: hash, round: 2 },
+      { claim_hash: hash, round: 3 },
+    ]);
+    const out = runInventory(tmp, '--locate-ledger', ledgerPath);
+    assert.equal(out.locate_ledger.lines, 3);
+    assert.equal(out.locate_ledger.distinct, 1);
+    assert.equal(out.locate_ledger.entries.length, 1);
+    assert.equal(out.locate_ledger.located + out.locate_ledger.not_located, out.locate_ledger.distinct);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: --locate-ledger reports every position when one claim text occupies several (claim_hash is content-derived)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-locate-dup-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'), { recursive: true });
+    const claim = 'Routing is implemented in `router.ts`.';
+    fs.writeFileSync(path.join(tmp, 'docs', 'a.md'), `# A\n\n${claim}\n`);
+    fs.writeFileSync(path.join(tmp, 'docs', 'b.md'), `# B\n\n${claim}\n`);
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\n');
+    const hash = runInventory(tmp).claim_candidates[0].claim_hash;
+    const ledgerPath = writeLocateLedger(tmp, [{ claim_hash: hash }]);
+    const out = runInventory(tmp, '--locate-ledger', ledgerPath);
+    assert.equal(out.locate_ledger.distinct, 1);
+    assert.equal(out.locate_ledger.multi_position, 1);
+    const [entry] = out.locate_ledger.entries;
+    assert.equal(entry.positions.length, 2);
+    assert.deepEqual(entry.positions.map((p) => p.path).sort(), ['docs/a.md', 'docs/b.md']);
+    assert.ok(out.locate_ledger.note.some((n) => n.includes('more than one position')));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: without --locate-ledger the output carries no locate_ledger key at all', () => {
+  const tmp = claimRepo(5);
+  try {
+    assert.ok(!('locate_ledger' in runInventory(tmp)));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: --locate-ledger pointing at a missing file fails loudly, naming the flag that was passed', () => {
+  const tmp = claimRepo(5);
+  try {
+    const res = spawnSync(
+      process.execPath,
+      [SCRIPT, '--root', tmp, '--locate-ledger', path.join(tmp, 'nope', 'ledger.jsonl')],
+      { encoding: 'utf8' }
+    );
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /--locate-ledger .*could not read this file/);
+    assert.doesNotMatch(res.stderr, /--exclude-ledger/, 'the error must name the flag actually passed');
+    assert.equal(res.stdout.trim(), '');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: an unknown flag is still rejected after --locate-ledger was added', () => {
+  const tmp = claimRepo(5);
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, '--root', tmp, '--locate-ledgers', 'x'], { encoding: 'utf8' });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /Unknown argument --locate-ledgers/);
+    assert.match(res.stderr, /--locate-ledger/, 'the supported list names the real flag');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('inventory: a scoped --locate-ledger run names scope narrowing as a cause of not_located (#63)', () => {
+  const tmp = claimRepo(5);
+  try {
+    const hashes = runInventory(tmp).claim_candidates.map((c) => c.claim_hash);
+    const ledgerPath = writeLocateLedger(tmp, hashes.map((h) => ({ claim_hash: h })));
+    const scoped = runInventory(tmp, '--locate-ledger', ledgerPath, '--include', 'docs/nothing/**');
+    assert.equal(scoped.locate_ledger.located, 0, 'the scoped corpus contains none of them');
+    assert.equal(scoped.locate_ledger.not_located, hashes.length);
+    assert.match(
+      scoped.locate_ledger.note.join(' '),
+      /--include narrowed this run/,
+      'without this, a scoped caller reads "not located" as "the claim was edited or deleted"'
+    );
+    // Unscoped, the same ledger locates everything and the scope clause is absent.
+    const full = runInventory(tmp, '--locate-ledger', ledgerPath);
+    assert.equal(full.locate_ledger.located, hashes.length);
+    assert.equal(full.locate_ledger.note.length, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

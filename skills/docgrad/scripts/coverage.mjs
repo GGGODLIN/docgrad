@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // coverage.mjs — coverage drift detection: mechanically detects "code moved but docs didn't keep up" via git.
-// Usage: node coverage.mjs [--root <repo>] [--config <file>] [--exclude-ledger <path>]; JSON -> stdout.
+// Usage: node coverage.mjs [--root <repo>] [--config <file>] [--exclude-ledger <path>] [--locate-ledger <path>]; JSON -> stdout.
 // Treats each first-level subdirectory under src_dirs as an "area", checks whether docs mention it
 // and compares git timestamps.
 // --include is deliberately a no-op for this script: narrowing the docs side would misjudge
@@ -74,15 +74,18 @@ const dayDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000)
 const toDate = (iso) => (iso ? iso.slice(0, 10) : null);
 
 try {
-  const { root, configFile, include, excludeLedger } = parseArgs();
+  const { root, configFile, include, excludeLedger, locateLedger } = parseArgs();
   const config = loadConfig(root, configFile);
   const scopeNoteText = include.length
     ? 'scope does not apply to coverage drift: narrowing the docs side would misjudge mentions outside scope as undocumented, so this always compares the full corpus'
     : null;
+  const locateLedgerNoteText = locateLedger
+    ? '--locate-ledger is a no-op for this script: only inventory.mjs can locate a ledgered claim in the corpus, and coverage drift has nothing to do with it'
+    : null;
   const excludeLedgerNoteText = excludeLedger
     ? '--exclude-ledger is a no-op for this script: only inventory.mjs draws claim candidates from a claim ledger, and coverage drift has nothing to do with it'
     : null;
-  const combinedNoteText = [scopeNoteText, excludeLedgerNoteText].filter(Boolean).join('; ') || null;
+  const combinedNoteText = [scopeNoteText, excludeLedgerNoteText, locateLedgerNoteText].filter(Boolean).join('; ') || null;
   // Key order follows inventory.mjs — scope, then docgrad, then everything else — so a reader
   // comparing two scripts' JSON finds the same fingerprint in the same place.
   //
@@ -101,7 +104,9 @@ try {
           ...head,
           src_dirs: [],
           areas: [],
-          note: [scopeNoteText, excludeLedgerNoteText, 'src_dirs is unset, coverage drift cannot be measured'].filter(Boolean).join('; '),
+          note: [scopeNoteText, excludeLedgerNoteText, locateLedgerNoteText, 'src_dirs is unset, coverage drift cannot be measured']
+            .filter(Boolean)
+            .join('; '),
         },
         null,
         2

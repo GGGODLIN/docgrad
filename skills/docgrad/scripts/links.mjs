@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // links.mjs — dead links/bad anchors/orphans (reachability computed transitively from index_file + entry_files)
-// Usage: node links.mjs [--root <repo>] [--config <file>] [--include <glob>] [--exclude-ledger <path>]; JSON -> stdout.
+// Usage: node links.mjs [--root <repo>] [--config <file>] [--include <glob>] [--exclude-ledger <path>] [--locate-ledger <path>]; JSON -> stdout.
 // When scope-limited, only dead links/bad anchors are emitted: orphans and reachable ratio are
 // full-index concepts that go wrong once scope narrows, so they're never computed under scope.
 // --exclude-ledger (#54) is a no-op here: only inventory.mjs draws claim candidates from a claim
@@ -112,9 +112,12 @@ function safeDecode(s) {
 }
 
 try {
-  const { root, configFile, include, excludeLedger } = parseArgs();
+  const { root, configFile, include, excludeLedger, locateLedger } = parseArgs();
   const scoped = include.length > 0;
   const config = loadConfig(root, configFile);
+  const locateLedgerNoteText = locateLedger
+    ? '--locate-ledger is a no-op for this script: only inventory.mjs can locate a ledgered claim in the corpus, and link checking has nothing to do with it'
+    : null;
   const excludeLedgerNoteText = excludeLedger
     ? '--exclude-ledger is a no-op for this script: only inventory.mjs draws claim candidates from a claim ledger, and link checking has nothing to do with it'
     : null;
@@ -175,7 +178,7 @@ try {
   const scopeNoteText = scoped
     ? 'scope-limited: orphans/reachable ratio not computed (reachability is a full-index concept), only dead links and bad anchors are counted'
     : null;
-  const combinedNoteText = [scopeNoteText, excludeLedgerNoteText].filter(Boolean).join('; ') || null;
+  const combinedNoteText = [scopeNoteText, excludeLedgerNoteText, locateLedgerNoteText].filter(Boolean).join('; ') || null;
 
   const roots = [config.index_file, ...config.entry_files].filter((p) => p && includedSet.has(p));
   const reachable = new Set(roots);

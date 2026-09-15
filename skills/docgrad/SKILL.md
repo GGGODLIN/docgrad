@@ -62,6 +62,7 @@ Shared flags: `--config <file>` (when the config file is not at the root), `--in
 each explains in its `note` why narrowing the scope would misjudge its own measurement. They do not
 reject it, so a scoped run against them does not fail; it silently measures the full corpus, which
 is why the note matters),
+`--locate-ledger <path>` (path to a claim ledger, #63 — only `inventory.mjs` acts on it, emitting a `locate_ledger` block that says where each ledgered claim sits in this round's corpus, uncapped and read off the unfiltered population; the other four accept it and report it as a no-op in their own `note`),
 `--exclude-ledger <path>` (path to `.docgrad/ledger.jsonl`, #54 — only `inventory.mjs` acts on it,
 filtering already-ledgered candidates out of `claim_candidates` before `claim_candidates_cap` is
 applied; the other four scripts accept it and report it as a no-op in their own `note`).
