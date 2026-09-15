@@ -20,7 +20,9 @@ either gap will measure differently, which is the point.
   per convention, the first document line naming a listed keyword *and* carrying a date wins. For
   the fields an active convention reads, an empty string, empty list or non-string element is now a
   config error instead of a keyword that matches nothing. Inline-list items are split on commas
-  outside quotes, so a quoted item may contain one; an apostrophe inside a plain item is unchanged.
+  outside quotes, so a quoted item may contain one (YAML quote escaping is still not supported); an
+  apostrophe inside a plain item is unchanged. A config whose inline list previously mis-split on a
+  quoted comma will now parse differently — and, for `exclude`/`docs_dirs`, hash differently.
 
 ## 1.8.0 — 2026-09-14
 

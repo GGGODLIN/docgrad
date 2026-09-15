@@ -330,8 +330,7 @@ test('freshness: a scalar keyword and the same keyword as a one-element list mea
     const b = spawnSync(process.execPath, [SCRIPT, '--root', list], { encoding: 'utf8' });
     assert.equal(a.status, 0, a.stderr);
     assert.equal(b.status, 0, b.stderr);
-    const strip = (t) => JSON.parse(t.replace(/"corpus_hash": "[^"]*"/, '"corpus_hash": "x"'));
-    assert.deepEqual(strip(a.stdout), strip(b.stdout));
+    assert.deepEqual(JSON.parse(a.stdout), JSON.parse(b.stdout)); // corpus_hash included: the keyword fields are not part of it
   } finally {
     fs.rmSync(scalar, { recursive: true, force: true });
     fs.rmSync(list, { recursive: true, force: true });

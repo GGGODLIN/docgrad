@@ -90,7 +90,8 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
    `freshness:`) when the corpus grew under more than one date-line habit. The entries should name the *same* signal — "when
    was this document last updated" — under different spellings; a field that means something else (a session date, an
    evidence cutoff) makes the corpus look fresher than it is. Keywords are matched verbatim (no trimming), a plain string is
-   never split on commas. Conventions are still tried in the order `convention` lists them; within one convention, the first
+   never split on commas. A quoted list item may contain a comma; YAML quote escaping (`''` inside a single-quoted item) is not
+   supported by the config parser. Conventions are still tried in the order `convention` lists them; within one convention, the first
    line in document order that names any listed keyword *and* carries a date wins
 8. `targets`: default all 4 (six dimensions), ask "which dimensions are you willing to lower to 3?" (multi-select).
    If economy is hard to hit because the repo's entry file is inherently large, prefer lowering the target over changing
