@@ -278,6 +278,36 @@ test('freshness: frontmatter field list — a first field without a date does no
   }
 });
 
+const CONFIG_ERROR_CASES = [
+  ['empty heading_field list under an active heading-line convention',
+    '  convention: heading-line\n  field: "Last updated:"\n  heading_field: []', /freshness\.heading_field must name at least one keyword/],
+  ['non-string list element', '  convention: frontmatter\n  field: [last_updated, 3]', /freshness\.field\[1\] must be a non-empty keyword string/],
+  ['empty-string keyword under an active convention', '  convention: frontmatter\n  field: ""', /freshness\.field must be a non-empty keyword string/],
+];
+for (const [label, freshnessLines, expected] of CONFIG_ERROR_CASES) {
+  test(`freshness: config error — ${label}`, () => {
+    const tmp = makeMixedConventionFixture(freshnessLines);
+    try {
+      const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+      assert.notEqual(r.status, 0);
+      assert.match(r.stderr, expected);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
+
+test('freshness: a field nobody reads is not validated — convention: none with field: "" still runs, as before', () => {
+  const tmp = makeMixedConventionFixture('  convention: none\n  field: ""');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).files_with_signal, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('freshness: a quoted keyword containing a comma survives the inline list, end to end through .docgrad.yml', () => {
   const tmp = makeMixedConventionFixture('  convention: heading-line\n  field: "Last updated:"\n  heading_field: ["Updated, last:", "Other:"]');
   fs.writeFileSync(path.join(tmp, 'docs', 'hl.md'), '# HL\n\n> Updated, last: 2026-07-05\n');
@@ -292,23 +322,30 @@ test('freshness: a quoted keyword containing a comma survives the inline list, e
   }
 });
 
-test('freshness: an empty heading_field list is a config error even when field is set (it would otherwise match nothing silently)', () => {
-  const tmp = makeMixedConventionFixture('  convention: heading-line\n  field: "Last updated:"\n  heading_field: []');
+test('freshness: a scalar keyword and the same keyword as a one-element list measure identically', () => {
+  const scalar = makeMixedConventionFixture('  convention: heading-line\n  field: "Last updated:"');
+  const list = makeMixedConventionFixture('  convention: heading-line\n  field: ["Last updated:"]');
   try {
-    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
-    assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /freshness\.heading_field must name at least one keyword/);
+    const a = spawnSync(process.execPath, [SCRIPT, '--root', scalar], { encoding: 'utf8' });
+    const b = spawnSync(process.execPath, [SCRIPT, '--root', list], { encoding: 'utf8' });
+    assert.equal(a.status, 0, a.stderr);
+    assert.equal(b.status, 0, b.stderr);
+    const strip = (t) => JSON.parse(t.replace(/"corpus_hash": "[^"]*"/, '"corpus_hash": "x"'));
+    assert.deepEqual(strip(a.stdout), strip(b.stdout));
   } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(scalar, { recursive: true, force: true });
+    fs.rmSync(list, { recursive: true, force: true });
   }
 });
 
-test('freshness: a non-string list element is a config error, not a keyword', () => {
-  const tmp = makeMixedConventionFixture('  convention: frontmatter\n  field: [last_updated, 3]');
+test('freshness: with two dated fields in one frontmatter, document order wins over list order', () => {
+  const tmp = makeMixedConventionFixture('  convention: frontmatter\n  field: [last_session, last_updated]');
+  fs.writeFileSync(path.join(tmp, 'docs', 'fm.md'), '---\nlast_updated: 2026-07-01\nlast_session: 2026-07-09\n---\n# FM\n');
+  fs.rmSync(path.join(tmp, 'docs', 'hl.md'));
   try {
     const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
-    assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /freshness\.field\[1\] must be a non-empty keyword string/);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).date_concentration.date, '2026-07-01'); // the earlier *line*, not the earlier list entry
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

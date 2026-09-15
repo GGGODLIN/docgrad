@@ -112,6 +112,7 @@ function makeFileUriFixture() {
   const alias = `${real}-alias`;
   fs.symlinkSync(real, alias);
   fs.writeFileSync(path.join(real, 'docs', 'a#b.md'), '# hash in name\n');
+  fs.writeFileSync(path.join(real, 'docs', 'a%23b.md'), '# literal percent-two-three in name\n');
   fs.writeFileSync(path.join(real, 'docs', '100%.md'), '# percent in name\n');
   fs.writeFileSync(path.join(real, '..notes.md'), '# two leading dots, not a parent reference\n');
   return { real, alias, cleanup: () => { fs.rmSync(alias, { force: true }); fs.rmSync(real, { recursive: true, force: true }); } };
@@ -127,10 +128,11 @@ test('links: file:// URI targets join the normal pipeline — both root spelling
       `[via realpath](${url(path.join(real, 'docs/orphan.md'))})`,
       `[via the alias the command line uses](${url(path.join(alias, 'docs/guide.md'))})`,
       `[hash in filename, encoded once](${url(path.join(real, 'docs/a#b.md'))})`,
+      `[literal %23 in filename, so the URL carries %2523](${url(path.join(real, 'docs/a%23b.md'))})`,
       `[percent in filename](${url(path.join(real, 'docs/100%.md'))})`,
       `[two leading dots](${url(path.join(real, '..notes.md'))})`,
       `[the root itself](${url(real)}/)`,
-      `[localhost host is the local machine](file://localhost${real}/docs/guide.md)`,
+      `[localhost host is the local machine](${url(path.join(real, 'docs/guide.md')).replace('file://', 'file://localhost')})`,
       `[valid anchor](${url(path.join(real, 'docs/guide.md'))}#中文標題)`,
       `[bad anchor](${url(path.join(real, 'docs/guide.md'))}#no-such-anchor)`,
       `[missing inside root](${url(path.join(real, 'docs/nope.md'))})`,
@@ -144,8 +146,8 @@ test('links: file:// URI targets join the normal pipeline — both root spelling
     // orphan.md is linked from CLAUDE.md via file:// -> it is an edge -> no orphans left
     assert.deepEqual(out.orphans, []);
     assert.equal(out.reachable_ratio, 1);
-    // exactly one file:// target points at nothing inside the root; a#b.md, 100%.md, ..notes.md and
-    // the root itself all exist and are not dead
+    // exactly one file:// target points at nothing inside the root; a#b.md, a%23b.md (decoded once,
+    // not twice), 100%.md, ..notes.md and the root itself all exist and are not dead
     assert.deepEqual(
       out.dead_links.map((d) => d.target).sort(),
       ['./nope.md', url(path.join(real, 'docs/nope.md'))].sort()

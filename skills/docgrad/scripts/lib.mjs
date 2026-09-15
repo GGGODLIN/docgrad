@@ -36,22 +36,29 @@ function parseScalar(v) {
 }
 
 // Items are split on commas outside quotes, so a quoted item may contain one
-// (`["Updated, last:", "Other:"]` is two items). Quotes are otherwise left to parseScalar.
+// (`["Updated, last:", "Other:"]` is two items). A quote only opens at the start of an item —
+// an apostrophe inside a plain item (`docs/owner's/`) is ordinary text, as it always was.
 function splitInlineItems(inner) {
   const items = [];
   let cur = '';
   let quote = null;
+  let atItemStart = true;
   for (const c of inner) {
     if (quote) {
       cur += c;
       if (c === quote) quote = null;
-    } else if (c === '"' || c === "'") {
+    } else if (atItemStart && (c === '"' || c === "'")) {
       quote = c;
       cur += c;
+      atItemStart = false;
     } else if (c === ',') {
       items.push(cur);
       cur = '';
-    } else cur += c;
+      atItemStart = true;
+    } else {
+      cur += c;
+      if (c !== ' ' && c !== '\t') atItemStart = false;
+    }
   }
   items.push(cur);
   return items;
@@ -315,12 +322,17 @@ export function validateConfigTypes(config, configFile = CONFIG_FILENAME) {
 export const SHIPPED_TIERS = [20000, 10000, 5000, 3000];
 export const SHIPPED_POLLUTION_MAX = 0.1;
 
-// freshness.field / freshness.heading_field: a keyword string, or a list of them. Both are matched
-// verbatim (a leading space in `" Updated:"` is a deliberate word boundary, not noise), so nothing
-// is trimmed or coerced here: a non-string, an empty string, or an empty list is a config error
-// rather than a keyword that silently matches nothing.
+// freshness.field / freshness.heading_field: a keyword string, or an inline list of them. Only the
+// fields the active conventions read are validated (frontmatter -> field; heading-line ->
+// heading_field, falling back to field), so `convention: none` keeps accepting whatever it always
+// accepted. Keywords are matched verbatim — nothing is trimmed or coerced — so an empty string, a
+// non-string, or an empty list is a config error rather than a keyword that silently matches nothing.
 function validateFreshnessFields(freshness, configFile) {
-  for (const name of ['field', 'heading_field']) {
+  const conventions = parseFreshnessConventions(freshness.convention);
+  const active = new Set();
+  if (conventions.includes('frontmatter')) active.add('field');
+  if (conventions.includes('heading-line')) active.add(freshness.heading_field == null ? 'field' : 'heading_field');
+  for (const name of active) {
     const value = freshness[name];
     if (value === null || value === undefined) continue;
     const items = Array.isArray(value) ? value : [value];
@@ -902,9 +914,9 @@ function extractClaimedDateOne(text, convention, freshness) {
   if (convention === 'frontmatter') {
     const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!fm) return null;
-    // Document order decides: the first frontmatter line that names one of the fields *and* carries
-    // a date wins, so `last_updated: null` followed by `last_session: 2026-09-04` yields the date
-    // instead of stopping at the first field seen.
+    // Within this convention, document order decides: the first frontmatter line that names one of
+    // the fields *and* carries a date wins (`last_updated: null` followed by `last_session:
+    // 2026-09-04` yields the date). Conventions themselves are still tried in config order.
     const fields = parseFreshnessFields(freshness.field);
     for (const l of fm[1].split(/\r?\n/)) {
       if (!fields.some((field) => l.trimStart().startsWith(`${field}:`))) continue;

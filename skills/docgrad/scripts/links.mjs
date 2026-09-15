@@ -19,20 +19,15 @@ const FILE_URI_RE = /^file:/i;
 
 // --- file: URI link targets -------------------------------------------------------
 //
-// `file:///abs/path/doc.md` is a standard URI scheme, not an external resource. It is mapped onto a
-// root-relative path and then joins the same pipeline as any other link — existence, corpus
-// membership, anchors — with the root containment check (#57) still applied afterwards.
-//
-// Contract: returns a root-relative posix path (`''` for the root itself), or null when the target
-// is not a local file the root can contain: a host other than `localhost` (RFC 8089 treats an
-// empty host and `localhost` as the local machine; anything else is not looked up), a URI the URL
-// parser rejects, or a path outside every spelling of the root. Both `--root` as given and its
-// realpath are tried, because an absolute URI is written from whichever spelling the author's
-// shell printed. Nothing here touches the filesystem: the caller classifies null as out-of-root
-// and never stats it.
-//
-// The raw target is decoded exactly once, by the URL API; `%23` in the path stays a `#` in the
-// filename instead of becoming a fragment, and `%2F` is refused as the API defines.
+// `file:///abs/path/doc.md` is a URI, not an external resource: it is mapped onto a root-relative
+// path and then joins the same pipeline as any other link, containment check (#57) included.
+// Returns a root-relative posix path (`''` for the root itself) or null, which the caller files
+// under out_of_root_links without ever stat'ing the target. null covers: a host other than
+// `localhost` (RFC 8089: empty host and `localhost` are the local machine; nothing else is looked
+// up), a URI the URL parser rejects, and a path outside both spellings of the root — `--root` as
+// given and its realpath, since an absolute URI is written from whichever the author's shell
+// printed. The URL API decodes the target exactly once, so `%23` stays a `#` in the filename and
+// `%2F` is refused. Only the root's realpath is resolved here, never the target.
 function fileUriToRel(root, uri) {
   let abs;
   try {

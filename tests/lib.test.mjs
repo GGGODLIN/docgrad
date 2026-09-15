@@ -1181,9 +1181,12 @@ test('lib: extractClaimedDate with list-valued heading_field picks whichever key
   assert.equal(extractClaimedDate('# C\n\nno date line\n', freshness), null);
 });
 
-test('lib: parseYamlSubset inline list — commas inside quotes do not split the item', () => {
+test('lib: parseYamlSubset inline list — commas inside a quoted item do not split it; an apostrophe inside a plain item is text', () => {
   const parsed = parseYamlSubset('freshness:\n  heading_field: ["Updated, last:", "Other:", plain]\n');
   assert.deepEqual(parsed.freshness.heading_field, ['Updated, last:', 'Other:', 'plain']);
   assert.deepEqual(parseYamlSubset('a: [x, "y,z"]\n').a, ['x', 'y,z']);
   assert.deepEqual(parseYamlSubset('a: []\n').a, []);
+  // regression caught in review: a quote may only open at the start of an item
+  assert.deepEqual(parseYamlSubset("exclude: [docs/owner's/, docs/archive/]\n").exclude, ["docs/owner's/", 'docs/archive/']);
+  assert.deepEqual(parseYamlSubset('a: [it"s, "q, r"]\n').a, ['it"s', 'q, r']);
 });
