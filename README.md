@@ -263,6 +263,8 @@ docgrad/
 ├── .codex-plugin/      # Codex manifest
 ├── .agents/            # Codex / Antigravity workspace discovery
 ├── plugin.json         # Antigravity manifest
+├── CONTRIBUTING.md     # how to contribute, and the fingerprint discipline
+├── INTEROP.md          # composing with other skills (sepia, …)
 ├── case-studies/       # measured runs, with reproduction commands
 ├── evals/              # skill-level evals (is the star rating reproducible?)
 ├── tests/              # unit tests for the scripts
@@ -281,6 +283,10 @@ whether a star rating is stable.
 
 Design notes: [docs/design.md](docs/design.md). Common development tasks:
 [docs/how-to.md](docs/how-to.md). Prior work this draws on: [NOTICE.md](NOTICE.md).
+
+Contributing — the fingerprint discipline, the reserved commit prefix, and what a PR has to carry:
+[CONTRIBUTING.md](CONTRIBUTING.md). How docgrad composes with other skills, and what it deliberately
+leaves uncombined: [INTEROP.md](INTEROP.md).
 
 ## License
 
