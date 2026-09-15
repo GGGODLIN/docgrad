@@ -101,3 +101,38 @@ test('links: output carries the docgrad fingerprint, right after scope (#45)', (
   // Same placement as inventory.mjs, so the five scripts' JSON can be compared field by field.
   assert.deepEqual(Object.keys(out).slice(0, 2), ['scope', 'docgrad']);
 });
+
+test('links: file:// URI targets are mapped onto the root and judged like relative links, never reported dead for existing (#file-uri)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-fileuri-'));
+  fs.cpSync(FIXTURE, tmp, { recursive: true });
+  const real = fs.realpathSync(tmp);
+  fs.appendFileSync(
+    path.join(tmp, 'CLAUDE.md'),
+    [
+      '',
+      `[via realpath](file://${real}/docs/orphan.md)`,
+      `[via given root](file://${tmp}/docs/guide.md)`,
+      `[missing inside root](file://${real}/docs/nope.md)`,
+      `[bad anchor](file://${real}/docs/guide.md#no-such-anchor)`,
+      '[outside root](file:///etc/hosts)',
+      '',
+    ].join('\n')
+  );
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    // the existing file:// link is an edge: docs/orphan.md is no longer an orphan
+    assert.deepEqual(out.orphans, []);
+    assert.equal(out.reachable_ratio, 1);
+    // only the one that points at nothing inside the root is dead — not the four that exist or leave
+    assert.deepEqual(
+      out.dead_links.map((d) => d.target).sort(),
+      ['./nope.md', `file://${real}/docs/nope.md`].sort()
+    );
+    // outside the root: classified, never stat'ed, never dead
+    assert.deepEqual(out.out_of_root_links.map((d) => d.target), ['file:///etc/hosts']);
+    // the anchor part of a file:// URI is checked like any other anchor
+    assert.ok(out.bad_anchors.some((b) => b.anchor === 'no-such-anchor'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

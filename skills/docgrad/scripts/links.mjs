@@ -7,12 +7,40 @@
 // ledger; link checking has nothing to do with it. Accepted and ignored, like --include above.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   loadConfig, collectFiles, parseArgs, fail, docgradMeta,
-  extractHeadings, extractLinks, githubSlug, CJK_RE, pathInsideRoot,
+  extractHeadings, extractLinks, githubSlug, CJK_RE, pathInsideRoot, rootRealPath,
 } from './lib.mjs';
 
 const EXTERNAL_RE = /^(https?:|mailto:|tel:|data:)/i;
+const FILE_URI_RE = /^file:/i;
+
+// --- file: URI link targets -------------------------------------------------------
+//
+// `file:///abs/path/doc.md` is a standard URI scheme, not an external resource, and some doc trees
+// use it on purpose (terminal emulators make it clickable where a relative path is not). Until now
+// it fell through EXTERNAL_RE, was resolved as a *relative* path named "file:///…", and every one of
+// them was reported dead — 45 of 45 existed on the tree this was first measured on.
+//
+// It is mapped onto a root-relative path and then joins the same pipeline as any other link. Two
+// roots are tried, the one given on the command line and its realpath, because an absolute URI is
+// typically written from whichever the author's shell printed. Anything that escapes both, or has a
+// host part, is returned as null and lands in the out-of-root bucket: like every other out-of-root
+// target it is never stat'ed (#57).
+function fileUriToRel(root, uri) {
+  let abs;
+  try {
+    abs = fileURLToPath(uri);
+  } catch {
+    return null;
+  }
+  for (const base of [root, rootRealPath(root)]) {
+    const rel = path.relative(base, abs);
+    if (rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)) return rel.split(path.sep).join('/');
+  }
+  return null;
+}
 const MD_TARGET_RE = /\.(md|mdx|markdown)$/i;
 
 // --- out-of-root link targets (#57) -------------------------------------------------
@@ -109,16 +137,19 @@ try {
       const hashIndex = target.indexOf('#');
       const rawPath = safeDecode(hashIndex === -1 ? target : target.slice(0, hashIndex));
       const anchor = hashIndex === -1 ? null : safeDecode(target.slice(hashIndex + 1));
+      const fileUriRel = FILE_URI_RE.test(rawPath) ? fileUriToRel(root, rawPath) : undefined;
       const resolved =
-        rawPath === ''
-          ? rel // a pure anchor link points at itself
-          : rawPath.startsWith('/')
-            ? path.posix.normalize(rawPath.slice(1))
-            : path.posix.normalize(path.posix.join(path.posix.dirname(rel), rawPath));
+        fileUriRel !== undefined
+          ? fileUriRel
+          : rawPath === ''
+            ? rel // a pure anchor link points at itself
+            : rawPath.startsWith('/')
+              ? path.posix.normalize(rawPath.slice(1))
+              : path.posix.normalize(path.posix.join(path.posix.dirname(rel), rawPath));
       // Classified before anything is stat'ed, and never counted as dead: "this link leaves the
       // repository" and "this link points at nothing" are different facts, and the second one is
       // the one that would have to be answered by looking outside the root.
-      if (targetOutOfRoot(root, resolved)) {
+      if (resolved === null || targetOutOfRoot(root, resolved)) {
         out_of_root_links.push({ file: rel, line, target });
         continue;
       }
