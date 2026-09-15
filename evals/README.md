@@ -1,6 +1,6 @@
 # docgrad evals
 
-> **Last updated:** 2026-09-13
+> **Last updated:** 2026-09-16
 
 Skill-level evaluation: this measures "when an agent uses this skill to score a repo, is the
 result stable and correct" — not the scripts' unit behavior (that's `tests/`,
@@ -30,7 +30,7 @@ real-scenario testing) call for.
 
 | case | what it tests | pass condition |
 |---|---|---|
-| `linkage-known` | **reproducibility** | dead links 1/12 = 8.33% can only be linkage ★2; the rating must be identical across multiple runs |
+| `linkage-known` | **reproducibility** | dead links 1/12 = 8.33% can only be linkage ★2. The per-run grader checks that one star; **whether it is identical across runs is checked here, by reading the `--runs 5` distribution** — a judge sees one transcript and cannot see a distribution, so asking it for cross-run consistency is asking for something outside its view |
 | `planted-contradiction` | **sampling coverage** | the contradiction sits in the sentence **next to** the anchor line (no code ref) — checking only the anchor line would miss it |
 | `clean-baseline` | **false positives** | a fully clean repo must not be docked; raising sensitivity must not turn into false positives everywhere |
 
@@ -54,8 +54,8 @@ claude plugin eval . --runs 5
 
 ## Current status: the harness runs, the suite does not score yet
 
-`claude plugin eval` **does run now** (v1.7.0, 2026-09-14). Getting there took unpicking five
-separate blockers, four of which are fixed in this directory. They are written down because each one
+`claude plugin eval` **does run now** (v1.7.0, 2026-09-14). Getting there took unpicking seven
+separate blockers, six of which are fixed in this directory. They are written down because each one
 produced the same symptom — `score 0.00`, `judge votes: FAIL FAIL FAIL` — and a score of zero says
 nothing about which layer failed.
 
@@ -65,14 +65,17 @@ nothing about which layer failed.
 | 2 | Graders had no `type:` frontmatter | `invalid case.yaml: graders: Required` | **Fixed**: `type: llm` added; each rubric's body is unchanged |
 | 3 | Each run starts in an **empty** workspace | the fixture is not there; Claude reports it cannot read anything | **Fixed**: `case.yaml` → `context.scaffold_script` copies the fixture in and gives it its own git history |
 | 4 | No `Bash` in the sandbox | the five measurement scripts cannot run at all | **Fixed**: run with `--allow-tools Bash`. A case's own `allowed_tools` cannot grant it |
-| 5 | **`git` cannot execute in the sandbox** | every git-derived signal is `null`; freshness rounds down | **Open** — see below |
+| 5 | **`git` cannot execute in the sandbox** | every git-derived signal is `null`; freshness rounds down | **Fixed**: `evals/lib/provide-tools.sh` resolves the real binary at scaffold time and puts an exec wrapper at `./bin/git`; the prompt runs the scripts with `PATH="$PWD/bin:$PATH"` |
+| 6 | **`scaffold_script` does not run without `--scaffold`** | the fixture is never copied in; the case runs against an empty workspace, which is blocker 3 again with the fix in place | **Fixed** in the invocation, not the suite: pass `--scaffold`. The flag is author-supplied bash running as you, so the harness will not run it implicitly |
+| 7 | **`node` is not on the sandbox's default PATH** | the five scripts cannot be executed; the session either fails or goes looking for an install by itself | **Fixed**: the same helper also writes `./bin/node`. Measured 2026-09-15 — a run scored only because the model found an fnm install unaided and said so in its report |
+| 8 | **A usage limit hit mid-run** | `score 0`, `passed: false` — the same shape as a failed case | **Cannot be fixed, must be recognised**: the run is void, not failing. See below |
 
 Blocker 4 is worth stating plainly because it is a property of this tool, not of this suite:
 **docgrad's six dimensions are built on the output of five Node scripts, not on an LLM's impression
 of the documents.** Without `Bash` the audit is structurally impossible, and the harness removes
 ungranted tools from the session entirely. Any eval of docgrad must grant it.
 
-### Blocker 5: git
+### Blocker 5: git — what it cost, and what fixing it bought
 
 On macOS `/usr/bin/git` is the `xcrun` shim. Inside the sandbox it cannot write its cache and so
 cannot find the real binary:
@@ -83,16 +86,77 @@ git: error: Failed to locate 'git'.
 xcode-select: Failed to locate 'git', and no install could be requested
 ```
 
-Prepending a real git to `PATH` in the invoking shell **does not help** — the sandbox does not
+Prepending a real git to `PATH` in the invoking shell does **not** help — the sandbox does not
 inherit it. `env:` in `prompt.md` cannot be used either: its keys must match `EVAL_[A-Z0-9_]*`, so
 `PATH` and `TMPDIR` are not settable there.
 
-The consequence is not one missing number. `freshness.mjs` needs `gitDate()` to produce a mismatch,
-so `mismatches: []` becomes **vacuous**, the ★4 criterion "only isolated mismatches" cannot be
-established, and docgrad correctly rounds down to ★3 — which then fails `clean-baseline`'s criterion
-3 ("both linkage and freshness ≥★4"). **The rating was right; the input was half missing.**
+The way through is the asymmetry: **the scaffold runs before the sandboxed session, and its own
+`git init` works.** So `evals/lib/provide-tools.sh` resolves the real binary there (`xcrun -f git`,
+where xcrun can still write its cache) and writes an exec wrapper to `./bin/git`; the session never
+touches the shim. Symlinks are resolved before the path is baked in, because a version manager's
+per-shell symlink stops existing when that shell does.
 
-Tracked separately; until it is solved the suite cannot produce a valid distribution.
+**Measured, `clean-baseline`, 2026-09-15**, same flags either side:
+
+| | without the wrapper | with it |
+|---|---|---|
+| `inventory.untracked.count` | `null` — *"git is present but failed to run here"* | `0`, the check ran |
+| Freshness | **★3** — `mismatches: []` and `stale: []` are *unrun*, not clean | **★4** |
+| Judge votes | FAIL FAIL FAIL | PASS FAIL FAIL |
+
+That is the whole shape of this blocker in one table: the rating was never wrong, the input was half
+missing, and docgrad rounded down exactly as `rubric.md` principle 4 tells it to.
+
+### The case still does not pass, for a reason that is not git
+
+With git working, `clean-baseline` scored 1 of 3 judge votes. All four of its numbered criteria hold
+in the transcript — zero false positives, the ledger at 1/1 `pass`, linkage ★5 and freshness ★4, and
+both ★5s named as design ceilings. What the judges reacted to was the grader's own opening sentence,
+which used to read *"This fixture is deliberately free of any defects"* while the run reported
+**Completeness ★2** — three files with no build, test or deploy instructions, which is a true finding
+and not a false positive. The preamble overclaimed on a dimension the case does not test, and the
+judges weighed the framing over the list. It now says what the fixture actually is.
+
+### Reading a zero: three things that produce one
+
+A `score 0` says nothing about which layer failed — that is the whole reason the table above exists.
+Three distinguishable causes, in `evals/results/<run>/aggregate-result.json`:
+
+| Cause | How to tell |
+|---|---|
+| The judges evaluated and voted it down | `explanation: "judge votes: FAIL FAIL FAIL"`, and `judgeVotes` is present |
+| The grader never ran (usage limit, transport error) | `explanation: "grader threw: …"`, **`judgeVotes` is absent**, and the arm carries `error` |
+| The session could not do the work at all | the transcript has no scorecard; blockers 4–7 all land here |
+
+The middle one cost a diagnosis on 2026-09-15: a run stopped at the judge call with
+`You've hit your session limit`, recorded `score: 0`, and would have read as "the third grader fix
+also failed" if `explanation` had not been checked. Read `explanation` before concluding anything
+from a zero.
+
+### Writing a grader: it can only judge what one transcript shows
+
+Two of the three cases failed for the same reason, and neither reason was docgrad's. Both had
+numbered criteria that the transcript **fully satisfied**, and both failed anyway, because the prose
+around those criteria asked the judge for something outside its view:
+
+- `clean-baseline` opened with *"this fixture is deliberately free of any defects"*, while the
+  fixture genuinely has no build, test or deploy documentation — so the run reported completeness ★2,
+  a true finding, and the judges weighed the framing over the list. Fixed by saying what the fixture
+  actually is and scoping the pass condition to the numbered criteria.
+- `linkage-known` closed with *"the rating must be perfectly consistent across multiple runs"*. A
+  per-run judge sees one transcript and cannot see a distribution. That requirement is real, but it
+  belongs to whoever reads the `--runs 5` output, not to the grader; it now lives in the case table
+  above. Its criterion 3 also named `docs/orphan.md`, a file this fixture does not contain — copied
+  from `tests/fixtures/basic` — so a judge trying to verify it found nothing to check.
+
+Three rules follow, and they are cheap to apply:
+
+1. **Scope first, criteria second.** State what the fixture is and is not, and say "judge only the
+   numbered criteria", before the list rather than after it.
+2. **Name only files the fixture has.** A criterion about an absent file is vacuous at best and
+   corrosive at worst — it makes the whole grader look like it describes a different fixture.
+3. **Never ask for a cross-run property.** Anything about stability, distribution or repeatability
+   is the operator's check, not the judge's.
 
 ### What running it anyway was worth
 
@@ -102,7 +166,19 @@ working tree"* for a directory that **is** one — because the code inferred "no
 diagnoses call for opposite follow-ups. Fixed in the same release: the classification is now
 three-way and carries git's own words. An eval that scored 0.00 on every case still paid for itself.
 
-### The only reproducibility evidence so far is hand-run
+### First machine-produced distribution (2026-09-16)
+
+`--runs 5`, three cases, `$17.94`, 46 minutes. **The rating each case exists to pin was identical in
+all five runs of all three cases** — linkage ★2 ×5, consistency ★2 ×5, and `clean-baseline` identical
+cell for cell. What moved was the judges: vote counts of 3/3 ×5, `1/3 3/3 2/3 2/3 3/3`, and
+`2/3 1/3 3/3 0/3 3/3` respectively, against dimension ratings that did not change. Full table and the
+hypotheses tested against it: [case-studies/03-fixtures.md](../case-studies/03-fixtures.md).
+
+Read that asymmetry carefully, because it is the point of running five: **the measurement is
+reproducible and the grading is not.** A suite whose graders disagree with themselves cannot fail a
+tool; it can only fail to say anything. That is now the open work, and it is not docgrad's.
+
+### The earlier reproducibility evidence is hand-run
 
 Because the harness has never produced a score, the three cases were **executed by hand**, with their
 `prompt.md` text unchanged and each output scored against its `graders/criteria.md`: three fixtures ×

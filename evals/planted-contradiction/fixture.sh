@@ -7,6 +7,10 @@
 set -euo pipefail
 
 SUITE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# #59: a git and a node the sandboxed session can actually execute, resolved where they resolve.
+. "$SUITE_DIR/../lib/provide-tools.sh"
+
 FIXTURE="$SUITE_DIR/../fixtures/planted-contradiction"
 
 rm -rf target

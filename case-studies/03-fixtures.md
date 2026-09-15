@@ -1,6 +1,6 @@
 # Case study 3 — is the rating reproducible, and did translating it change anything?
 
-> **Last updated:** 2026-09-13
+> **Last updated:** 2026-09-16
 
 **What this measures:** whether two runs of the same audit on the same fixture produce the same star
 ratings, and whether the English rubric rates the same as the Traditional Chinese one it was
@@ -112,6 +112,48 @@ A 1.4% difference on six runs per arm, inside the spread of either arm. **Transl
 English did not measurably change the cost of one audit** — even though the English corpus is 22%
 larger in bytes, it is only about 4% larger in tokens, and an audit's cost is dominated by the
 scripts' JSON output and the fixture reads rather than by the instruction text.
+
+## The harness finally scored it — and it agrees with the hand runs
+
+> **Added 2026-09-16, docgrad v1.9.0.** Everything above was executed by hand, because
+> `claude plugin eval` could not produce a score until [#59](https://github.com/redtear1115/docgrad/issues/59)
+> was fixed. It now can. This section is the first machine-produced distribution, and it is reported
+> beside the hand runs rather than replacing them.
+
+Three cases × five runs, `claude plugin eval . --allow-tools Bash --runs 5 --scaffold --ablation none`.
+$17.94, 46 minutes.
+
+**The star each case exists to pin was identical in all five runs, in all three cases:**
+
+| Case | The rating under test | 5 runs |
+|---|---|---|
+| `linkage-known` | Linkage ★2 (dead links 1/12 = 8.33%) | ★2 ×5 |
+| `planted-contradiction` | Consistency ★2 (the planted sign contradiction) | ★2 ×5 |
+| `clean-baseline` | all six dimensions | identical cell for cell ×5 |
+
+That is the reproducibility claim this case study exists to make, now measured mechanically rather
+than by hand, and it agrees with the 12 hand runs above.
+
+**What did move was the graders, and the transcripts do not explain it:**
+
+| Case | Judge votes across the five runs | Runs passed |
+|---|---|---|
+| `clean-baseline` | 3/3, 3/3, 3/3, 3/3, 3/3 | 5 of 5 |
+| `linkage-known` | 1/3, 3/3, 2/3, 2/3, 3/3 | 4 of 5 |
+| `planted-contradiction` | 2/3, 1/3, 3/3, **0/3**, 3/3 | 3 of 5 |
+
+`planted-contradiction`'s run 4 scored **0 of 3** while carrying the most explicit deduction of the
+five — it named the sign, gave both directions, and arbitrated against the code in as many words —
+and run 5 scored 3 of 3 with a terser one. The six dimension ratings were identical in both. Three
+hypotheses were tested against the transcripts (`borderline` count, deduction phrasing, transcript
+length); none correlates with the vote. Tracked as its own defect; it is a property of the graders,
+not of the tool being graded.
+
+**One genuine discretion gap did surface**, and it is exactly the kind `--runs 5` exists to find:
+`linkage-known`'s **completeness split ★1/★2** over the same fixture (three runs at ★1, two at ★2).
+It sits outside that case's pass condition, so it changed no result — but by this suite's own rule
+("★2/★2/★3 across three runs means room for discretion remains at that point"), it is a defect in
+the completeness anchors and is tracked separately.
 
 ## Threats to validity
 

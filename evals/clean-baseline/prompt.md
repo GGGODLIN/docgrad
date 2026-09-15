@@ -7,4 +7,7 @@ timeout_seconds: 900
 Run a full docgrad audit (`/docgrad audit`) on the repository in `./target`, treating that
 directory as the target repo root.
 
+`git` and `node` for this workspace are in `./bin`; run the measurement scripts with
+`PATH="$PWD/bin:$PATH"` so they execute and can read the target's history.
+
 Output the complete scorecard, with a star rating and deductions for all six dimensions.
