@@ -221,3 +221,131 @@ test('freshness: output carries the docgrad fingerprint, right after scope (#45)
   // Same placement as inventory.mjs, so the five scripts' JSON can be compared field by field.
   assert.deepEqual(Object.keys(out).slice(0, 2), ['scope', 'docgrad']);
 });
+
+test('freshness: heading_field as a list -> files written under either date-line habit both get a signal', () => {
+  const tmp = makeMixedConventionFixture(
+    '  convention: heading-line\n  field: "Last updated:"\n  heading_field: ["Last updated:", "Updated:"]'
+  );
+  fs.writeFileSync(path.join(tmp, 'docs', 'hl2.md'), '# HL2\n\n> Updated: 2026-07-03\n\n第二種寫法。\n');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.files_total, 3);
+    assert.equal(out.files_with_signal, 2); // hl.md + hl2.md; fm.md has no heading line
+    assert.equal(out.coverage_ratio, 0.6667);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: field as a list -> frontmatter written under either key gets a signal', () => {
+  const tmp = makeMixedConventionFixture('  convention: frontmatter\n  field: [last_updated, last_session]');
+  fs.writeFileSync(path.join(tmp, 'docs', 'fm2.md'), '---\nlast_session: 2026-07-04\n---\n# FM2\n');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.files_total, 3);
+    assert.equal(out.files_with_signal, 2); // fm.md + fm2.md
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: an empty field list is rejected like a missing field', () => {
+  const tmp = makeMixedConventionFixture('  convention: frontmatter\n  field: []');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /freshness\.field must name at least one keyword/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: frontmatter field list — a first field without a date does not stop the search (document order decides)', () => {
+  const tmp = makeMixedConventionFixture('  convention: frontmatter\n  field: [last_updated, last_session]');
+  fs.writeFileSync(path.join(tmp, 'docs', 'fm.md'), '---\nlast_updated: null\nlast_session: 2026-07-04\n---\n# FM\n');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.files_with_signal, 1); // fm.md via last_session; hl.md has no frontmatter
+    assert.equal(out.date_concentration.date, '2026-07-04');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+const CONFIG_ERROR_CASES = [
+  ['empty heading_field list under an active heading-line convention',
+    '  convention: heading-line\n  field: "Last updated:"\n  heading_field: []', /freshness\.heading_field must name at least one keyword/],
+  ['non-string list element', '  convention: frontmatter\n  field: [last_updated, 3]', /freshness\.field\[1\] must be a non-empty keyword string/],
+  ['empty-string keyword under an active convention', '  convention: frontmatter\n  field: ""', /freshness\.field must be a non-empty keyword string/],
+];
+for (const [label, freshnessLines, expected] of CONFIG_ERROR_CASES) {
+  test(`freshness: config error — ${label}`, () => {
+    const tmp = makeMixedConventionFixture(freshnessLines);
+    try {
+      const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+      assert.notEqual(r.status, 0);
+      assert.match(r.stderr, expected);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
+
+test('freshness: a field nobody reads is not validated — convention: none with field: "" still runs, as before', () => {
+  const tmp = makeMixedConventionFixture('  convention: none\n  field: ""');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).files_with_signal, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: a quoted keyword containing a comma survives the inline list, end to end through .docgrad.yml', () => {
+  const tmp = makeMixedConventionFixture('  convention: heading-line\n  field: "Last updated:"\n  heading_field: ["Updated, last:", "Other:"]');
+  fs.writeFileSync(path.join(tmp, 'docs', 'hl.md'), '# HL\n\n> Updated, last: 2026-07-05\n');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.files_with_signal, 1);
+    assert.equal(out.date_concentration.date, '2026-07-05');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: a scalar keyword and the same keyword as a one-element list measure identically', () => {
+  const scalar = makeMixedConventionFixture('  convention: heading-line\n  field: "Last updated:"');
+  const list = makeMixedConventionFixture('  convention: heading-line\n  field: ["Last updated:"]');
+  try {
+    const a = spawnSync(process.execPath, [SCRIPT, '--root', scalar], { encoding: 'utf8' });
+    const b = spawnSync(process.execPath, [SCRIPT, '--root', list], { encoding: 'utf8' });
+    assert.equal(a.status, 0, a.stderr);
+    assert.equal(b.status, 0, b.stderr);
+    assert.deepEqual(JSON.parse(a.stdout), JSON.parse(b.stdout)); // corpus_hash included: the keyword fields are not part of it
+  } finally {
+    fs.rmSync(scalar, { recursive: true, force: true });
+    fs.rmSync(list, { recursive: true, force: true });
+  }
+});
+
+test('freshness: with two dated fields in one frontmatter, document order wins over list order', () => {
+  const tmp = makeMixedConventionFixture('  convention: frontmatter\n  field: [last_session, last_updated]');
+  fs.writeFileSync(path.join(tmp, 'docs', 'fm.md'), '---\nlast_updated: 2026-07-01\nlast_session: 2026-07-09\n---\n# FM\n');
+  fs.rmSync(path.join(tmp, 'docs', 'hl.md'));
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).date_concentration.date, '2026-07-01'); // the earlier *line*, not the earlier list entry
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

@@ -1,6 +1,6 @@
 # init — one-time setup
 
-> **Last updated:** 2026-09-13
+> **Last updated:** 2026-09-15
 
 Purpose: scan the target repo → confirm via questionnaire → write `.docgrad.yml` into the target repo's root (under version control, shared by the team).
 When `.docgrad.yml` already exists, rerunning init = rescan, using the existing config as the questionnaire's defaults.
@@ -85,7 +85,14 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
    §Version history and comparability notes) — a deliberate one-off, not something to toggle back and forth between rounds.
 7. freshness `convention` (frontmatter / heading-line / none; multi-select — when a repo mixes both conventions, select more than
    one and write them comma-separated) + `field` (for frontmatter) / `heading_field` (for heading-line; can be left blank when
-   only one convention is chosen and it's already described by `field` — the scripts fall back to `field`)
+   only one convention is chosen and it's already described by `field` — the scripts fall back to `field`). Both take a single
+   keyword or a YAML **inline** list (`heading_field: ["Last updated:", "Updated:"]`; a block list is not supported under
+   `freshness:`) when the corpus grew under more than one date-line habit. The entries should name the *same* signal — "when
+   was this document last updated" — under different spellings; a field that means something else (a session date, an
+   evidence cutoff) makes the corpus look fresher than it is. Keywords are matched verbatim (no trimming), a plain string is
+   never split on commas. A quoted list item may contain a comma; YAML quote escaping (`''` inside a single-quoted item) is not
+   supported by the config parser. Conventions are still tried in the order `convention` lists them; within one convention, the first
+   line in document order that names any listed keyword *and* carries a date wins
 8. `targets`: default all 4 (six dimensions), ask "which dimensions are you willing to lower to 3?" (multi-select).
    If economy is hard to hit because the repo's entry file is inherently large, prefer lowering the target over changing
    `economy.entry_cost_tiers`. Both are legitimate; they say different things. Lowering the target says "this repo accepts
@@ -145,6 +152,7 @@ freshness:
   convention: frontmatter   # single value; when mixing both conventions: frontmatter,heading-line
   field: last_updated
   # heading_field: "Last updated:"   # inline keyword for heading-line; can be omitted when only one convention is chosen and field is already set
+  # heading_field: ["Last updated:", "Updated:"]   # inline-list form: several spellings of the same signal; field takes a list the same way
 coverage:
   drift_after_days: 30   # how many days doc can lag behind code before it counts as drift (default 30)
   min_commits: 3         # how many code commits in that period before it counts as drift (default 3)

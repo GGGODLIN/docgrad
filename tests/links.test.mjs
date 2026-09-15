@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
 const SCRIPT = fileURLToPath(new URL('../skills/docgrad/scripts/links.mjs', import.meta.url));
@@ -100,4 +100,84 @@ test('links: output carries the docgrad fingerprint, right after scope (#45)', (
   assert.match(out.docgrad.corpus_hash, /^[0-9a-f]{8}$/);
   // Same placement as inventory.mjs, so the five scripts' JSON can be compared field by field.
   assert.deepEqual(Object.keys(out).slice(0, 2), ['scope', 'docgrad']);
+});
+
+const FS_TRACE = fileURLToPath(new URL('./helpers/fs-trace.mjs', import.meta.url));
+
+// A basic-fixture copy whose --root is a *symlink* to the real tree, so "both spellings of the root"
+// is exercised for real: `real` is what realpath prints, `alias` is what the command line says.
+function makeFileUriFixture() {
+  const real = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-fileuri-')));
+  fs.cpSync(FIXTURE, real, { recursive: true });
+  const alias = `${real}-alias`;
+  fs.symlinkSync(real, alias);
+  fs.writeFileSync(path.join(real, 'docs', 'a#b.md'), '# hash in name\n');
+  fs.writeFileSync(path.join(real, 'docs', 'a%23b.md'), '# literal percent-two-three in name\n');
+  fs.writeFileSync(path.join(real, 'docs', '100%.md'), '# percent in name\n');
+  fs.writeFileSync(path.join(real, '..notes.md'), '# two leading dots, not a parent reference\n');
+  return { real, alias, cleanup: () => { fs.rmSync(alias, { force: true }); fs.rmSync(real, { recursive: true, force: true }); } };
+}
+
+test('links: file:// URI targets join the normal pipeline — both root spellings, one URL decode, localhost host, ..name, root itself', () => {
+  const { real, alias, cleanup } = makeFileUriFixture();
+  const url = (p) => pathToFileURL(p).href;
+  fs.appendFileSync(
+    path.join(real, 'CLAUDE.md'),
+    [
+      '',
+      `[via realpath](${url(path.join(real, 'docs/orphan.md'))})`,
+      `[via the alias the command line uses](${url(path.join(alias, 'docs/guide.md'))})`,
+      `[hash in filename, encoded once](${url(path.join(real, 'docs/a#b.md'))})`,
+      `[literal %23 in filename, so the URL carries %2523](${url(path.join(real, 'docs/a%23b.md'))})`,
+      `[percent in filename](${url(path.join(real, 'docs/100%.md'))})`,
+      `[two leading dots](${url(path.join(real, '..notes.md'))})`,
+      `[the root itself](${url(real)}/)`,
+      `[localhost host is the local machine](${url(path.join(real, 'docs/guide.md')).replace('file://', 'file://localhost')})`,
+      `[valid anchor](${url(path.join(real, 'docs/guide.md'))}#中文標題)`,
+      `[bad anchor](${url(path.join(real, 'docs/guide.md'))}#no-such-anchor)`,
+      `[missing inside root](${url(path.join(real, 'docs/nope.md'))})`,
+      '[outside root](file:///etc/hosts)',
+      '[remote host is not looked up](file://other-host/share/doc.md)',
+      '',
+    ].join('\n')
+  );
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', alias], { encoding: 'utf8' }));
+    // orphan.md is linked from CLAUDE.md via file:// -> it is an edge -> no orphans left
+    assert.deepEqual(out.orphans, []);
+    assert.equal(out.reachable_ratio, 1);
+    // exactly one file:// target points at nothing inside the root; a#b.md, a%23b.md (decoded once,
+    // not twice), 100%.md, ..notes.md and the root itself all exist and are not dead
+    assert.deepEqual(
+      out.dead_links.map((d) => d.target).sort(),
+      ['./nope.md', url(path.join(real, 'docs/nope.md'))].sort()
+    );
+    // leaves the root, or names another host: classified, never dead
+    assert.deepEqual(
+      out.out_of_root_links.map((d) => d.target).sort(),
+      ['file:///etc/hosts', 'file://other-host/share/doc.md'].sort()
+    );
+    // the fragment of a file:// URI is an anchor like any other: the real heading passes, the fake fails
+    assert.deepEqual(out.bad_anchors.filter((b) => /^file:/.test(b.target)).map((b) => b.anchor), ['no-such-anchor']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('links: an out-of-root file:// target is never stat\'ed (#57 holds for the new scheme)', () => {
+  const { real, alias, cleanup } = makeFileUriFixture();
+  const probe = path.join(os.tmpdir(), `docgrad-fileuri-probe-${process.pid}.md`);
+  fs.writeFileSync(probe, '# exists, and must not be looked at\n');
+  fs.appendFileSync(path.join(real, 'CLAUDE.md'), `\n[probe](${pathToFileURL(probe).href})\n`);
+  const traceFile = path.join(real, 'trace.txt');
+  try {
+    const r = execFileSync(process.execPath, [FS_TRACE, traceFile, SCRIPT, '--root', alias], { encoding: 'utf8' });
+    const out = JSON.parse(r);
+    assert.deepEqual(out.out_of_root_links.map((d) => d.target), [pathToFileURL(probe).href]);
+    const trace = fs.readFileSync(traceFile, 'utf8').split('\n').filter(Boolean);
+    assert.deepEqual(trace.filter((p) => path.resolve(p) === path.resolve(probe)), []);
+  } finally {
+    fs.rmSync(probe, { force: true });
+    cleanup();
+  }
 });

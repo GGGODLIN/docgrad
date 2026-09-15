@@ -35,9 +35,38 @@ function parseScalar(v) {
   return v;
 }
 
+// Items are split on commas outside quotes, so a quoted item may contain one
+// (`["Updated, last:", "Other:"]` is two items). A quote only opens at the start of an item —
+// an apostrophe inside a plain item (`docs/owner's/`) is ordinary text, as it always was.
+function splitInlineItems(inner) {
+  const items = [];
+  let cur = '';
+  let quote = null;
+  let atItemStart = true;
+  for (const c of inner) {
+    if (quote) {
+      cur += c;
+      if (c === quote) quote = null;
+    } else if (atItemStart && (c === '"' || c === "'")) {
+      quote = c;
+      cur += c;
+      atItemStart = false;
+    } else if (c === ',') {
+      items.push(cur);
+      cur = '';
+      atItemStart = true;
+    } else {
+      cur += c;
+      if (c !== ' ' && c !== '\t') atItemStart = false;
+    }
+  }
+  items.push(cur);
+  return items;
+}
+
 function parseInlineList(v) {
   const inner = v.slice(1, -1).trim();
-  return inner === '' ? [] : inner.split(',').map((s) => parseScalar(s));
+  return inner === '' ? [] : splitInlineItems(inner).map((s) => parseScalar(s));
 }
 
 export function parseYamlSubset(text) {
@@ -293,6 +322,30 @@ export function validateConfigTypes(config, configFile = CONFIG_FILENAME) {
 export const SHIPPED_TIERS = [20000, 10000, 5000, 3000];
 export const SHIPPED_POLLUTION_MAX = 0.1;
 
+// freshness.field / freshness.heading_field: a keyword string, or an inline list of them. Only the
+// fields the active conventions read are validated (frontmatter -> field; heading-line ->
+// heading_field, falling back to field), so `convention: none` keeps accepting whatever it always
+// accepted. Keywords are matched verbatim — nothing is trimmed or coerced — so an empty string, a
+// non-string, or an empty list is a config error rather than a keyword that silently matches nothing.
+function validateFreshnessFields(freshness, configFile) {
+  const conventions = parseFreshnessConventions(freshness.convention);
+  const active = new Set();
+  if (conventions.includes('frontmatter')) active.add('field');
+  if (conventions.includes('heading-line')) active.add(freshness.heading_field == null ? 'field' : 'heading_field');
+  for (const name of active) {
+    const value = freshness[name];
+    if (value === null || value === undefined) continue;
+    const items = Array.isArray(value) ? value : [value];
+    if (items.length === 0) {
+      throw new Error(`${configFile}: freshness.${name} must name at least one keyword — write freshness.${name}: "Last updated:" or freshness.${name}: ["Last updated:", "Updated:"]`);
+    }
+    const bad = items.findIndex((e) => typeof e !== 'string' || e === '');
+    if (bad !== -1) {
+      throw new Error(`${configFile}: freshness.${name}${Array.isArray(value) ? `[${bad}]` : ''} must be a non-empty keyword string, but got ${describeValue(items[bad])}`);
+    }
+  }
+}
+
 export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILENAME)) {
   if (!fs.existsSync(configFile)) {
     throw new Error(`Could not find ${configFile} (root: ${rootDir}). Run /docgrad init first.`);
@@ -311,10 +364,11 @@ export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILEN
     economy: { ...DEFAULTS.economy, ...(parsed.economy ?? {}) },
   };
   validateConfigTypes(config, configFile);
+  validateFreshnessFields(config.freshness, configFile);
   const needsField = parseFreshnessConventions(config.freshness.convention).some(
     (c) => c === 'frontmatter' || c === 'heading-line'
   );
-  if (needsField && !config.freshness.field) {
+  if (needsField && parseFreshnessFields(config.freshness.field).length === 0) {
     throw new Error(`freshness.field must be set when freshness.convention is ${config.freshness.convention}`);
   }
   return config;
@@ -847,21 +901,37 @@ export function parseFreshnessConventions(convention) {
     .filter(Boolean);
 }
 
+// field / heading_field: a keyword or a YAML inline list of keywords naming the same date signal
+// (`heading_field: ["Last updated:", "Updated:"]`). Keywords are used verbatim — validated, not
+// trimmed or coerced, at config load — and a plain string is never split, so the list is the only
+// way to name several.
+export function parseFreshnessFields(value) {
+  if (value === null || value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
 function extractClaimedDateOne(text, convention, freshness) {
   if (convention === 'frontmatter') {
     const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!fm) return null;
-    const line = fm[1].split(/\r?\n/).find((l) => l.trimStart().startsWith(`${freshness.field}:`));
-    const m = line && line.match(DATE_RE);
-    return m ? m[1] : null;
+    // Within this convention, document order decides: the first frontmatter line that names one of
+    // the fields *and* carries a date wins (`last_updated: null` followed by `last_session:
+    // 2026-09-04` yields the date). Conventions themselves are still tried in config order.
+    const fields = parseFreshnessFields(freshness.field);
+    for (const l of fm[1].split(/\r?\n/)) {
+      if (!fields.some((field) => l.trimStart().startsWith(`${field}:`))) continue;
+      const m = l.match(DATE_RE);
+      if (m) return m[1];
+    }
+    return null;
   }
   if (convention === 'heading-line') {
     // Falls back to field when heading_field is unset (an old config that only sets field but
     // wants heading-line behavior).
-    const field = freshness.heading_field ?? freshness.field;
-    if (!field) return null;
+    const fields = parseFreshnessFields(freshness.heading_field ?? freshness.field);
+    if (fields.length === 0) return null;
     for (const line of text.split(/\r?\n/).slice(0, 30)) {
-      if (line.includes(field)) {
+      if (fields.some((field) => line.includes(field))) {
         const m = line.match(DATE_RE);
         if (m) return m[1];
       }

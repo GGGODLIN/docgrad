@@ -3,6 +3,27 @@
 Version authority is `version` in [.claude-plugin/plugin.json](.claude-plugin/plugin.json); this file records changes per version.
 For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](docs/how-to.md) §Cut a release.
 
+## Unreleased
+
+Two measurement gaps closed. No ★1–★5 threshold moved and no default changed; a repo affected by
+either gap will measure differently, which is the point.
+
+- **Fixed: `file://` link targets were always dead** (`links.mjs`). They fell through the
+  external-scheme check and were resolved as a relative path literally named `file:///…`. A `file:`
+  URI is now mapped onto the root (both `--root` as given and its realpath are tried) and judged
+  like any other link; a target outside the root, or on a host other than `localhost`, goes to
+  `out_of_root_links` and is never stat'ed (#57). Decoded once, by the URL parser. `retrieval.mjs`
+  keeps its own link resolution and does not yet read `file://`.
+- **Added: `freshness.field` / `heading_field` take an inline list** (`lib.mjs`, `init.md` item 7),
+  e.g. `heading_field: ["Last updated:", "Updated:"]`, for a corpus with more than one spelling of
+  the same date signal. Keywords are verbatim (a string is one keyword, never split or trimmed);
+  per convention, the first document line naming a listed keyword *and* carrying a date wins. For
+  the fields an active convention reads, an empty string, empty list or non-string element is now a
+  config error instead of a keyword that matches nothing. Inline-list items are split on commas
+  outside quotes, so a quoted item may contain one (YAML quote escaping is still not supported); an
+  apostrophe inside a plain item is unchanged. A config whose inline list previously mis-split on a
+  quoted comma will now parse differently — and, for `exclude`/`docs_dirs`, hash differently.
+
 ## 1.8.0 — 2026-09-14
 
 Four defects fixed (#54 #56 #57 #55). **No ★1–★5 threshold moved** and every shipped default is
