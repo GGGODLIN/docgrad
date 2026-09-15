@@ -5,27 +5,29 @@ For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](doc
 
 ## Unreleased
 
-Two measurement gaps closed; **no ★1–★5 threshold moved**, every shipped default is unchanged, and
-no hash moves for a config that does not use the new list form.
+Two measurement gaps closed. **No ★1–★5 threshold moved**, every shipped default is unchanged, and
+no fingerprint moves — but a repo affected by either gap *will* measure differently: that is the
+point, and `dead_links` / freshness `coverage_ratio` are the numbers to compare before and after.
 
 - **Fixed: `file://` link targets were always dead.** A `[text](file:///abs/path/doc.md)` link fell
   through the external-scheme check, was resolved as a *relative* path literally named `file:///…`,
-  and reported dead — on the doc tree this was first measured on, 45 of 45 such targets existed. The
-  URI is now mapped onto the root (both the `--root` as given and its realpath are tried, since an
-  absolute URI is written from whichever the author's shell printed) and then joins the same pipeline
-  as any other link: an existing target is a reachability edge, a missing one inside the root is dead,
-  and one that leaves the root — or carries a host part — lands in `out_of_root_links` and is never
-  stat'ed, exactly as #57 requires. Anchors on a `file://` URI are checked like any other anchor.
-  `links.mjs`; test in `tests/links.test.mjs`.
-- **Added: `freshness.field` and `freshness.heading_field` accept a list.** A corpus that grew under
-  more than one date-line habit (`> Updated:` in one directory, `> Last updated:` in another,
-  `last_session:` vs `last_updated:` in frontmatter) was read as "no signal" for every file written
-  under the habit the config did not name. `heading_field: ["Last updated:", "Updated:"]` names them
-  all; a plain string is deliberately **not** split on commas — a keyword may contain one — so the
-  YAML list is the only way to name several. An empty list is rejected like a missing field. Neither
-  field is part of any hash, so a config that keeps the single-string form measures exactly as before.
-  `lib.mjs › parseFreshnessFields`; `reference/init.md` item 7; tests in `tests/freshness.test.mjs`
-  and `tests/lib.test.mjs`.
+  and reported dead whether or not the file existed. It is now mapped onto the root and joins the
+  same pipeline as any other link: an existing target inside the root is not dead, and is a
+  reachability edge when it is part of the corpus; a missing one inside the root is dead; one that
+  leaves the root, or names a host other than `localhost`, lands in `out_of_root_links` and is never
+  stat'ed (#57). Both `--root` as given and its realpath are tried, since an absolute URI is written
+  from whichever spelling the author's shell printed. The URI is decoded once, by the URL parser, so
+  `%23` in a filename stays a `#` rather than becoming a fragment. `links.mjs`; `retrieval.mjs` keeps
+  its own link resolution and does not yet understand `file://` — its `depth_from_index` can still
+  read `null` for a document that `links.mjs` reaches through such a link.
+- **Added: `freshness.field` and `freshness.heading_field` accept an inline list.** A corpus that grew
+  under more than one date-line habit was read as "no signal" for every file written under the
+  spelling the config did not name. `heading_field: ["Last updated:", "Updated:"]` names them all.
+  Keywords are matched verbatim (a string is one keyword, never split or trimmed); the first matching
+  line in document order wins; an empty list, an empty string or a non-string element is a config
+  error. A quoted inline-list item may contain a comma (`parseInlineList` now respects quotes — this
+  applies to every inline list in `.docgrad.yml`, where a comma inside quotes previously split the
+  item). Neither field is part of any hash. `lib.mjs`; `reference/init.md` item 7.
 
 ## 1.8.0 — 2026-09-14
 
