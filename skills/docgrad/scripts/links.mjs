@@ -14,34 +14,42 @@ import {
 } from './lib.mjs';
 
 const EXTERNAL_RE = /^(https?:|mailto:|tel:|data:)/i;
+const MD_TARGET_RE = /\.(md|mdx|markdown)$/i;
 const FILE_URI_RE = /^file:/i;
 
 // --- file: URI link targets -------------------------------------------------------
 //
-// `file:///abs/path/doc.md` is a standard URI scheme, not an external resource, and some doc trees
-// use it on purpose (terminal emulators make it clickable where a relative path is not). Until now
-// it fell through EXTERNAL_RE, was resolved as a *relative* path named "file:///…", and every one of
-// them was reported dead — 45 of 45 existed on the tree this was first measured on.
+// `file:///abs/path/doc.md` is a standard URI scheme, not an external resource. It is mapped onto a
+// root-relative path and then joins the same pipeline as any other link — existence, corpus
+// membership, anchors — with the root containment check (#57) still applied afterwards.
 //
-// It is mapped onto a root-relative path and then joins the same pipeline as any other link. Two
-// roots are tried, the one given on the command line and its realpath, because an absolute URI is
-// typically written from whichever the author's shell printed. Anything that escapes both, or has a
-// host part, is returned as null and lands in the out-of-root bucket: like every other out-of-root
-// target it is never stat'ed (#57).
+// Contract: returns a root-relative posix path (`''` for the root itself), or null when the target
+// is not a local file the root can contain: a host other than `localhost` (RFC 8089 treats an
+// empty host and `localhost` as the local machine; anything else is not looked up), a URI the URL
+// parser rejects, or a path outside every spelling of the root. Both `--root` as given and its
+// realpath are tried, because an absolute URI is written from whichever spelling the author's
+// shell printed. Nothing here touches the filesystem: the caller classifies null as out-of-root
+// and never stats it.
+//
+// The raw target is decoded exactly once, by the URL API; `%23` in the path stays a `#` in the
+// filename instead of becoming a fragment, and `%2F` is refused as the API defines.
 function fileUriToRel(root, uri) {
   let abs;
   try {
-    abs = fileURLToPath(uri);
+    const url = new URL(uri);
+    if (url.hostname !== '' && url.hostname !== 'localhost') return null;
+    abs = fileURLToPath(url);
   } catch {
     return null;
   }
   for (const base of [root, rootRealPath(root)]) {
+    if (base === null) continue;
     const rel = path.relative(base, abs);
-    if (rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)) return rel.split(path.sep).join('/');
+    if (rel === '') return '';
+    if (!path.isAbsolute(rel) && rel.split(path.sep)[0] !== '..') return rel.split(path.sep).join('/');
   }
   return null;
 }
-const MD_TARGET_RE = /\.(md|mdx|markdown)$/i;
 
 // --- out-of-root link targets (#57) -------------------------------------------------
 //
@@ -135,9 +143,12 @@ try {
       if (EXTERNAL_RE.test(target)) continue;
       total_links += 1;
       const hashIndex = target.indexOf('#');
-      const rawPath = safeDecode(hashIndex === -1 ? target : target.slice(0, hashIndex));
+      const rawTarget = hashIndex === -1 ? target : target.slice(0, hashIndex);
       const anchor = hashIndex === -1 ? null : safeDecode(target.slice(hashIndex + 1));
-      const fileUriRel = FILE_URI_RE.test(rawPath) ? fileUriToRel(root, rawPath) : undefined;
+      // A file: URI is handed to the URL parser undecoded — it decodes once itself; decoding first
+      // would turn a `%23` in the filename into a second `#`.
+      const fileUriRel = FILE_URI_RE.test(rawTarget) ? fileUriToRel(root, rawTarget) : undefined;
+      const rawPath = fileUriRel !== undefined ? null : safeDecode(rawTarget);
       const resolved =
         fileUriRel !== undefined
           ? fileUriRel
