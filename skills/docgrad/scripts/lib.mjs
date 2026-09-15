@@ -314,7 +314,7 @@ export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILEN
   const needsField = parseFreshnessConventions(config.freshness.convention).some(
     (c) => c === 'frontmatter' || c === 'heading-line'
   );
-  if (needsField && !config.freshness.field) {
+  if (needsField && parseFreshnessFields(config.freshness.field).length === 0) {
     throw new Error(`freshness.field must be set when freshness.convention is ${config.freshness.convention}`);
   }
   return config;
@@ -847,21 +847,36 @@ export function parseFreshnessConventions(convention) {
     .filter(Boolean);
 }
 
+// field / heading_field accept a single keyword or a YAML list of keywords
+// (`heading_field: ["Last updated:", "Updated:"]`): a corpus that grew under more than one
+// date-line habit is measured as one corpus instead of being read as "no signal" for every file
+// written under the other habit. A plain string is never split — a keyword may legitimately
+// contain a comma — so the list form is the only way to name several.
+export function parseFreshnessFields(value) {
+  if (value === null || value === undefined) return [];
+  return (Array.isArray(value) ? value : [value])
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+}
+
 function extractClaimedDateOne(text, convention, freshness) {
   if (convention === 'frontmatter') {
     const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!fm) return null;
-    const line = fm[1].split(/\r?\n/).find((l) => l.trimStart().startsWith(`${freshness.field}:`));
+    const fields = parseFreshnessFields(freshness.field);
+    const line = fm[1]
+      .split(/\r?\n/)
+      .find((l) => fields.some((field) => l.trimStart().startsWith(`${field}:`)));
     const m = line && line.match(DATE_RE);
     return m ? m[1] : null;
   }
   if (convention === 'heading-line') {
     // Falls back to field when heading_field is unset (an old config that only sets field but
     // wants heading-line behavior).
-    const field = freshness.heading_field ?? freshness.field;
-    if (!field) return null;
+    const fields = parseFreshnessFields(freshness.heading_field ?? freshness.field);
+    if (fields.length === 0) return null;
     for (const line of text.split(/\r?\n/).slice(0, 30)) {
-      if (line.includes(field)) {
+      if (fields.some((field) => line.includes(field))) {
         const m = line.match(DATE_RE);
         if (m) return m[1];
       }

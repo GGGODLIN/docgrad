@@ -85,7 +85,9 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
    §Version history and comparability notes) — a deliberate one-off, not something to toggle back and forth between rounds.
 7. freshness `convention` (frontmatter / heading-line / none; multi-select — when a repo mixes both conventions, select more than
    one and write them comma-separated) + `field` (for frontmatter) / `heading_field` (for heading-line; can be left blank when
-   only one convention is chosen and it's already described by `field` — the scripts fall back to `field`)
+   only one convention is chosen and it's already described by `field` — the scripts fall back to `field`). Both take a single
+   keyword or a YAML list (`heading_field: ["Last updated:", "Updated:"]`) when the corpus grew under more than one date-line
+   habit; a plain string is never split on commas, so the list form is the only way to name several
 8. `targets`: default all 4 (six dimensions), ask "which dimensions are you willing to lower to 3?" (multi-select).
    If economy is hard to hit because the repo's entry file is inherently large, prefer lowering the target over changing
    `economy.entry_cost_tiers`. Both are legitimate; they say different things. Lowering the target says "this repo accepts
@@ -145,6 +147,7 @@ freshness:
   convention: frontmatter   # single value; when mixing both conventions: frontmatter,heading-line
   field: last_updated
   # heading_field: "Last updated:"   # inline keyword for heading-line; can be omitted when only one convention is chosen and field is already set
+  # heading_field: ["Last updated:", "Updated:"]   # list form: a corpus with more than one date-line habit; field takes a list the same way
 coverage:
   drift_after_days: 30   # how many days doc can lag behind code before it counts as drift (default 30)
   min_commits: 3         # how many code commits in that period before it counts as drift (default 3)

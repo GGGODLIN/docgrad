@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash, judgementHash, loadLedgerClaimHashes } from '../skills/docgrad/scripts/lib.mjs';
+import { parseYamlSubset, loadConfig, resolveRoot, parseArgs, matchesScope, collectFiles, estimateTokens, githubSlug, extractHeadings, extractLinks, extractClaimedDate, parseFreshnessConventions, parseFreshnessFields, extractCodeRefs, validateConfigTypes, docgradMeta, corpusHash, gitTrackedFiles, extractClaimLines, rankClaimCandidates, claimHash, CLAIM_HASH_CHARS, buildSrcSymbolIndex, gitAddCommitSubjects, isDocgradAuthored, thresholdsHash, judgementHash, loadLedgerClaimHashes } from '../skills/docgrad/scripts/lib.mjs';
 import { fileURLToPath } from 'node:url';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/basic/', import.meta.url));
@@ -1163,4 +1163,19 @@ test('loadLedgerClaimHashes: a row without claim_hash fails loudly rather than b
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('lib: parseFreshnessFields — string stays one keyword (never split on commas), list is kept, empty/null -> []', () => {
+  assert.deepEqual(parseFreshnessFields('Last updated:'), ['Last updated:']);
+  assert.deepEqual(parseFreshnessFields('Updated, last:'), ['Updated, last:']);
+  assert.deepEqual(parseFreshnessFields(['Last updated:', ' Updated: ']), ['Last updated:', 'Updated:']);
+  assert.deepEqual(parseFreshnessFields(null), []);
+  assert.deepEqual(parseFreshnessFields([]), []);
+});
+
+test('lib: extractClaimedDate with list-valued heading_field picks whichever keyword the file uses', () => {
+  const freshness = { convention: 'heading-line', field: null, heading_field: ['Last updated:', 'Updated:'] };
+  assert.equal(extractClaimedDate('# A\n\n> Updated: 2026-01-02\n', freshness), '2026-01-02');
+  assert.equal(extractClaimedDate('# B\n\n> **Last updated:** 2026-01-03\n', freshness), '2026-01-03');
+  assert.equal(extractClaimedDate('# C\n\nno date line\n', freshness), null);
 });

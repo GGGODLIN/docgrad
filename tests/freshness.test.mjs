@@ -221,3 +221,45 @@ test('freshness: output carries the docgrad fingerprint, right after scope (#45)
   // Same placement as inventory.mjs, so the five scripts' JSON can be compared field by field.
   assert.deepEqual(Object.keys(out).slice(0, 2), ['scope', 'docgrad']);
 });
+
+test('freshness: heading_field as a list -> files written under either date-line habit both get a signal', () => {
+  const tmp = makeMixedConventionFixture(
+    '  convention: heading-line\n  field: "Last updated:"\n  heading_field: ["Last updated:", "Updated:"]'
+  );
+  fs.writeFileSync(path.join(tmp, 'docs', 'hl2.md'), '# HL2\n\n> Updated: 2026-07-03\n\n第二種寫法。\n');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.files_total, 3);
+    assert.equal(out.files_with_signal, 2); // hl.md + hl2.md; fm.md has no heading line
+    assert.equal(out.coverage_ratio, 0.6667);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: field as a list -> frontmatter written under either key gets a signal', () => {
+  const tmp = makeMixedConventionFixture('  convention: frontmatter\n  field: [last_updated, last_session]');
+  fs.writeFileSync(path.join(tmp, 'docs', 'fm2.md'), '---\nlast_session: 2026-07-04\n---\n# FM2\n');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.files_total, 3);
+    assert.equal(out.files_with_signal, 2); // fm.md + fm2.md
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: an empty field list is rejected like a missing field', () => {
+  const tmp = makeMixedConventionFixture('  convention: frontmatter\n  field: []');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /freshness\.field must be set/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
