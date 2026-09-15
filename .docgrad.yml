@@ -9,6 +9,10 @@
 # on purpose: this repo's round-over-round trend has a real discontinuity at that release, and a
 # hash that did *not* move would be the bug. See CHANGELOG.md 1.7.0.
 docs_dirs: [docs/, skills/docgrad/reference/]
+# CONTRIBUTING.md / INTEROP.md are real documentation and are graded, but neither is loaded on
+# every task, so they go in docs_files rather than entry_files (see reference/init.md item 3).
+# corpus_hash moves once here, on purpose: the corpus genuinely grew by two files.
+docs_files: [CONTRIBUTING.md, INTEROP.md]
 entry_files: [skills/docgrad/SKILL.md]
 index_file: README.md
 src_dirs: [skills/docgrad/scripts/]
