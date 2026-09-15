@@ -220,7 +220,7 @@ try {
     const note = [];
     if (notLocated) {
       note.push(
-        `${notLocated} of ${entries.length} ledgered claims have no position in this round's corpus: the claim text was edited, its document left the corpus, or it was deleted. claim_hash is content-derived, so an edited claim is a different claim — those ledger rows no longer describe anything that is here, and they are reported rather than dropped.`
+        `${notLocated} of ${entries.length} ledgered claims have no position in this round's corpus: the claim text was edited, its document left the corpus, or it was deleted${include.length ? ', or --include narrowed this run to a slice that does not contain it — a scoped run locates against the scoped corpus, so these counts are not comparable with an unscoped one' : ''}. claim_hash is content-derived, so an edited claim is a different claim — those ledger rows no longer describe anything that is here, and they are reported rather than dropped.`
       );
     }
     if (multiPosition) {
@@ -235,9 +235,10 @@ try {
     }
     return {
       path: locateLedger,
-      // `lines` is the ledger's line count; `distinct` is the number of distinct claim_hash values.
-      // A docgrad ledger is append-only and re-verification appends a new line for a hash already
-      // present, so these two differ on every real ledger. located + not_located === distinct.
+      // `lines` is the ledger's **non-empty** row count (blank lines are skipped, as they are by
+      // --exclude-ledger); `distinct` is the number of distinct claim_hash values. A docgrad ledger
+      // is append-only and re-verification appends a new row for a hash already present, so these
+      // two differ on every real ledger. located + not_located === distinct.
       lines: ledgerRows.length,
       distinct: entries.length,
       located,

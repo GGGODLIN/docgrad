@@ -104,7 +104,9 @@ try {
           ...head,
           src_dirs: [],
           areas: [],
-          note: [scopeNoteText, excludeLedgerNoteText, 'src_dirs is unset, coverage drift cannot be measured'].filter(Boolean).join('; '),
+          note: [scopeNoteText, excludeLedgerNoteText, locateLedgerNoteText, 'src_dirs is unset, coverage drift cannot be measured']
+            .filter(Boolean)
+            .join('; '),
         },
         null,
         2

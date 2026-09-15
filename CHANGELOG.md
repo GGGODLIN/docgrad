@@ -46,8 +46,8 @@ Three properties callers are meant to rely on, each with a test:
   state.
 
 Shape: `locate_ledger: {path, lines, distinct, located, not_located, multi_position, entries, note}`,
-present **only** when the flag is passed. `lines` is the ledger's line count and `distinct` the number
-of distinct `claim_hash` values — a ledger is append-only and re-verification appends a row for a hash
+present **only** when the flag is passed. `lines` is the ledger's **non-empty row** count (blank lines are skipped, as
+`--exclude-ledger` already skips them) and `distinct` the number of distinct `claim_hash` values — a ledger is append-only and re-verification appends a row for a hash
 already present, so the two differ on every real ledger; `located + not_located === distinct`. One
 hash may hold several positions at once (the same claim sentence in two documents is one hash in two
 places, which is a duplication finding rather than an error) and every position is listed. A row's own

@@ -1122,3 +1122,25 @@ test('inventory: an unknown flag is still rejected after --locate-ledger was add
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('inventory: a scoped --locate-ledger run names scope narrowing as a cause of not_located (#63)', () => {
+  const tmp = claimRepo(5);
+  try {
+    const hashes = runInventory(tmp).claim_candidates.map((c) => c.claim_hash);
+    const ledgerPath = writeLocateLedger(tmp, hashes.map((h) => ({ claim_hash: h })));
+    const scoped = runInventory(tmp, '--locate-ledger', ledgerPath, '--include', 'docs/nothing/**');
+    assert.equal(scoped.locate_ledger.located, 0, 'the scoped corpus contains none of them');
+    assert.equal(scoped.locate_ledger.not_located, hashes.length);
+    assert.match(
+      scoped.locate_ledger.note.join(' '),
+      /--include narrowed this run/,
+      'without this, a scoped caller reads "not located" as "the claim was edited or deleted"'
+    );
+    // Unscoped, the same ledger locates everything and the scope clause is absent.
+    const full = runInventory(tmp, '--locate-ledger', ledgerPath);
+    assert.equal(full.locate_ledger.located, hashes.length);
+    assert.equal(full.locate_ledger.note.length, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
