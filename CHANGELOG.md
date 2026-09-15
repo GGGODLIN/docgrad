@@ -3,6 +3,30 @@
 Version authority is `version` in [.claude-plugin/plugin.json](.claude-plugin/plugin.json); this file records changes per version.
 For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](docs/how-to.md) §Cut a release.
 
+## Unreleased
+
+Two measurement gaps closed; **no ★1–★5 threshold moved**, every shipped default is unchanged, and
+no hash moves for a config that does not use the new list form.
+
+- **Fixed: `file://` link targets were always dead.** A `[text](file:///abs/path/doc.md)` link fell
+  through the external-scheme check, was resolved as a *relative* path literally named `file:///…`,
+  and reported dead — on the doc tree this was first measured on, 45 of 45 such targets existed. The
+  URI is now mapped onto the root (both the `--root` as given and its realpath are tried, since an
+  absolute URI is written from whichever the author's shell printed) and then joins the same pipeline
+  as any other link: an existing target is a reachability edge, a missing one inside the root is dead,
+  and one that leaves the root — or carries a host part — lands in `out_of_root_links` and is never
+  stat'ed, exactly as #57 requires. Anchors on a `file://` URI are checked like any other anchor.
+  `links.mjs`; test in `tests/links.test.mjs`.
+- **Added: `freshness.field` and `freshness.heading_field` accept a list.** A corpus that grew under
+  more than one date-line habit (`> Updated:` in one directory, `> Last updated:` in another,
+  `last_session:` vs `last_updated:` in frontmatter) was read as "no signal" for every file written
+  under the habit the config did not name. `heading_field: ["Last updated:", "Updated:"]` names them
+  all; a plain string is deliberately **not** split on commas — a keyword may contain one — so the
+  YAML list is the only way to name several. An empty list is rejected like a missing field. Neither
+  field is part of any hash, so a config that keeps the single-string form measures exactly as before.
+  `lib.mjs › parseFreshnessFields`; `reference/init.md` item 7; tests in `tests/freshness.test.mjs`
+  and `tests/lib.test.mjs`.
+
 ## 1.8.0 — 2026-09-14
 
 Four defects fixed (#54 #56 #57 #55). **No ★1–★5 threshold moved** and every shipped default is
