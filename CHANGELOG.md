@@ -3,9 +3,42 @@
 Version authority is `version` in [.claude-plugin/plugin.json](.claude-plugin/plugin.json); this file records changes per version.
 For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](docs/how-to.md) §Cut a release.
 
-## Unreleased
+## 1.9.0 — 2026-09-16
 
-Two measurement gaps closed. No ★1–★5 threshold moved and no default changed; a repo affected by
+Two measurement gaps closed, one new measurement added, and the skill-level eval suite produces a
+score for the first time. **No ★1–★5 anchor text changed**; `rubric_hash` and `judgement_hash` are
+unmoved. One conditional break: a config whose inline list previously mis-split on a quoted comma
+now selects a different corpus, which moves `corpus_hash` for that config alone (see below).
+
+### The eval suite scores, and says something uncomfortable (#59)
+
+`claude plugin eval` had never produced a number. It does now, and the first `--runs 5` distribution
+is the reason this release exists in the shape it does: **the measurement is reproducible and the
+grading is not.**
+
+The star each case exists to pin was identical in all five runs of all three cases — linkage ★2 ×5,
+consistency ★2 ×5, `clean-baseline` identical cell for cell. Judge votes over those same unchanging
+ratings ran 3/3 ×5, `1/3 3/3 2/3 2/3 3/3`, and `2/3 1/3 3/3 0/3 3/3`. One run scored 0 of 3 while
+carrying the most explicit deduction of the five. Three hypotheses were tested against the
+transcripts and none correlates with the vote (#69).
+
+Two things had to be fixed before any of that could be seen. On macOS `/usr/bin/git` is the `xcrun`
+shim and cannot write its cache inside the sandbox, so every git-derived signal came back `null` and
+freshness rounded down from ★4 to ★3 — correctly, on half an input. `node` was not on the sandbox
+PATH either; an earlier run scored only because the model went looking for an fnm install unaided.
+Both are now resolved at scaffold time into `./bin/`, where they still resolve. And two graders were
+asking judges to verify things a single transcript cannot show: one claimed its fixture was "free of
+any defects" when it genuinely has no build or test documentation, the other asked for consistency
+"across multiple runs". Their numbered criteria were never changed.
+
+`evals/README.md` now carries eight blockers rather than five, a table for telling apart the three
+different failures that all print `score 0`, and three rules for writing a grader. One of those cost
+a diagnosis: a usage limit hit mid-run records `score: 0` and reads exactly like a failed case.
+
+A real discretion gap surfaced too, which is what `--runs 5` is for: completeness split ★1/★2 over
+one fixed fixture (#70).
+
+### Two measurement gaps closed. No ★1–★5 threshold moved and no default changed; a repo affected by
 either gap will measure differently, which is the point.
 
 - **Fixed: `file://` link targets were always dead** (`links.mjs`). They fell through the
