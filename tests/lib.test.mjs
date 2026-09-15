@@ -1165,10 +1165,11 @@ test('loadLedgerClaimHashes: a row without claim_hash fails loudly rather than b
   }
 });
 
-test('lib: parseFreshnessFields — string stays one keyword (never split on commas), list is kept, empty/null -> []', () => {
+test('lib: parseFreshnessFields — keywords are verbatim: a string is one keyword (never split on commas, never trimmed), a list is kept as is, null -> []', () => {
   assert.deepEqual(parseFreshnessFields('Last updated:'), ['Last updated:']);
   assert.deepEqual(parseFreshnessFields('Updated, last:'), ['Updated, last:']);
-  assert.deepEqual(parseFreshnessFields(['Last updated:', ' Updated: ']), ['Last updated:', 'Updated:']);
+  assert.deepEqual(parseFreshnessFields(' Updated:'), [' Updated:']); // a leading space is a word boundary the author chose
+  assert.deepEqual(parseFreshnessFields(['Last updated:', 'Updated:']), ['Last updated:', 'Updated:']);
   assert.deepEqual(parseFreshnessFields(null), []);
   assert.deepEqual(parseFreshnessFields([]), []);
 });
@@ -1178,4 +1179,11 @@ test('lib: extractClaimedDate with list-valued heading_field picks whichever key
   assert.equal(extractClaimedDate('# A\n\n> Updated: 2026-01-02\n', freshness), '2026-01-02');
   assert.equal(extractClaimedDate('# B\n\n> **Last updated:** 2026-01-03\n', freshness), '2026-01-03');
   assert.equal(extractClaimedDate('# C\n\nno date line\n', freshness), null);
+});
+
+test('lib: parseYamlSubset inline list — commas inside quotes do not split the item', () => {
+  const parsed = parseYamlSubset('freshness:\n  heading_field: ["Updated, last:", "Other:", plain]\n');
+  assert.deepEqual(parsed.freshness.heading_field, ['Updated, last:', 'Other:', 'plain']);
+  assert.deepEqual(parseYamlSubset('a: [x, "y,z"]\n').a, ['x', 'y,z']);
+  assert.deepEqual(parseYamlSubset('a: []\n').a, []);
 });

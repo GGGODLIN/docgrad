@@ -35,9 +35,31 @@ function parseScalar(v) {
   return v;
 }
 
+// Items are split on commas outside quotes, so a quoted item may contain one
+// (`["Updated, last:", "Other:"]` is two items). Quotes are otherwise left to parseScalar.
+function splitInlineItems(inner) {
+  const items = [];
+  let cur = '';
+  let quote = null;
+  for (const c of inner) {
+    if (quote) {
+      cur += c;
+      if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      cur += c;
+    } else if (c === ',') {
+      items.push(cur);
+      cur = '';
+    } else cur += c;
+  }
+  items.push(cur);
+  return items;
+}
+
 function parseInlineList(v) {
   const inner = v.slice(1, -1).trim();
-  return inner === '' ? [] : inner.split(',').map((s) => parseScalar(s));
+  return inner === '' ? [] : splitInlineItems(inner).map((s) => parseScalar(s));
 }
 
 export function parseYamlSubset(text) {
@@ -293,6 +315,25 @@ export function validateConfigTypes(config, configFile = CONFIG_FILENAME) {
 export const SHIPPED_TIERS = [20000, 10000, 5000, 3000];
 export const SHIPPED_POLLUTION_MAX = 0.1;
 
+// freshness.field / freshness.heading_field: a keyword string, or a list of them. Both are matched
+// verbatim (a leading space in `" Updated:"` is a deliberate word boundary, not noise), so nothing
+// is trimmed or coerced here: a non-string, an empty string, or an empty list is a config error
+// rather than a keyword that silently matches nothing.
+function validateFreshnessFields(freshness, configFile) {
+  for (const name of ['field', 'heading_field']) {
+    const value = freshness[name];
+    if (value === null || value === undefined) continue;
+    const items = Array.isArray(value) ? value : [value];
+    if (items.length === 0) {
+      throw new Error(`${configFile}: freshness.${name} must name at least one keyword — write freshness.${name}: "Last updated:" or freshness.${name}: ["Last updated:", "Updated:"]`);
+    }
+    const bad = items.findIndex((e) => typeof e !== 'string' || e === '');
+    if (bad !== -1) {
+      throw new Error(`${configFile}: freshness.${name}${Array.isArray(value) ? `[${bad}]` : ''} must be a non-empty keyword string, but got ${describeValue(items[bad])}`);
+    }
+  }
+}
+
 export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILENAME)) {
   if (!fs.existsSync(configFile)) {
     throw new Error(`Could not find ${configFile} (root: ${rootDir}). Run /docgrad init first.`);
@@ -311,6 +352,7 @@ export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILEN
     economy: { ...DEFAULTS.economy, ...(parsed.economy ?? {}) },
   };
   validateConfigTypes(config, configFile);
+  validateFreshnessFields(config.freshness, configFile);
   const needsField = parseFreshnessConventions(config.freshness.convention).some(
     (c) => c === 'frontmatter' || c === 'heading-line'
   );
@@ -847,28 +889,29 @@ export function parseFreshnessConventions(convention) {
     .filter(Boolean);
 }
 
-// field / heading_field accept a single keyword or a YAML list of keywords
-// (`heading_field: ["Last updated:", "Updated:"]`): a corpus that grew under more than one
-// date-line habit is measured as one corpus instead of being read as "no signal" for every file
-// written under the other habit. A plain string is never split — a keyword may legitimately
-// contain a comma — so the list form is the only way to name several.
+// field / heading_field: a keyword or a YAML inline list of keywords naming the same date signal
+// (`heading_field: ["Last updated:", "Updated:"]`). Keywords are used verbatim — validated, not
+// trimmed or coerced, at config load — and a plain string is never split, so the list is the only
+// way to name several.
 export function parseFreshnessFields(value) {
   if (value === null || value === undefined) return [];
-  return (Array.isArray(value) ? value : [value])
-    .map((v) => String(v).trim())
-    .filter(Boolean);
+  return Array.isArray(value) ? value : [value];
 }
 
 function extractClaimedDateOne(text, convention, freshness) {
   if (convention === 'frontmatter') {
     const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!fm) return null;
+    // Document order decides: the first frontmatter line that names one of the fields *and* carries
+    // a date wins, so `last_updated: null` followed by `last_session: 2026-09-04` yields the date
+    // instead of stopping at the first field seen.
     const fields = parseFreshnessFields(freshness.field);
-    const line = fm[1]
-      .split(/\r?\n/)
-      .find((l) => fields.some((field) => l.trimStart().startsWith(`${field}:`)));
-    const m = line && line.match(DATE_RE);
-    return m ? m[1] : null;
+    for (const l of fm[1].split(/\r?\n/)) {
+      if (!fields.some((field) => l.trimStart().startsWith(`${field}:`))) continue;
+      const m = l.match(DATE_RE);
+      if (m) return m[1];
+    }
+    return null;
   }
   if (convention === 'heading-line') {
     // Falls back to field when heading_field is unset (an old config that only sets field but

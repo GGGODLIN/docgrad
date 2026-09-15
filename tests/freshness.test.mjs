@@ -258,7 +258,57 @@ test('freshness: an empty field list is rejected like a missing field', () => {
   try {
     const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /freshness\.field must be set/);
+    assert.match(r.stderr, /freshness\.field must name at least one keyword/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: frontmatter field list — a first field without a date does not stop the search (document order decides)', () => {
+  const tmp = makeMixedConventionFixture('  convention: frontmatter\n  field: [last_updated, last_session]');
+  fs.writeFileSync(path.join(tmp, 'docs', 'fm.md'), '---\nlast_updated: null\nlast_session: 2026-07-04\n---\n# FM\n');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.files_with_signal, 1); // fm.md via last_session; hl.md has no frontmatter
+    assert.equal(out.date_concentration.date, '2026-07-04');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: a quoted keyword containing a comma survives the inline list, end to end through .docgrad.yml', () => {
+  const tmp = makeMixedConventionFixture('  convention: heading-line\n  field: "Last updated:"\n  heading_field: ["Updated, last:", "Other:"]');
+  fs.writeFileSync(path.join(tmp, 'docs', 'hl.md'), '# HL\n\n> Updated, last: 2026-07-05\n');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.files_with_signal, 1);
+    assert.equal(out.date_concentration.date, '2026-07-05');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: an empty heading_field list is a config error even when field is set (it would otherwise match nothing silently)', () => {
+  const tmp = makeMixedConventionFixture('  convention: heading-line\n  field: "Last updated:"\n  heading_field: []');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /freshness\.heading_field must name at least one keyword/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('freshness: a non-string list element is a config error, not a keyword', () => {
+  const tmp = makeMixedConventionFixture('  convention: frontmatter\n  field: [last_updated, 3]');
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /freshness\.field\[1\] must be a non-empty keyword string/);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
