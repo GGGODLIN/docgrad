@@ -1,6 +1,6 @@
 # init — one-time setup
 
-> **Last updated:** 2026-09-13
+> **Last updated:** 2026-09-15
 
 Purpose: scan the target repo → confirm via questionnaire → write `.docgrad.yml` into the target repo's root (under version control, shared by the team).
 When `.docgrad.yml` already exists, rerunning init = rescan, using the existing config as the questionnaire's defaults.
