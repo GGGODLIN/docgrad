@@ -2,7 +2,13 @@
 type: llm
 ---
 
-This fixture is deliberately free of any defects. Mechanical signals:
+This fixture is deliberately free of the defects this case is about — links, dates and claims.
+It is **not** a complete documentation set: three files, no build/test/deploy instructions, so
+**completeness and consistency are expected to rate low and are not part of this case's pass
+condition**. A run that docks them has found something real, not a false positive. Judge only the
+numbered criteria below.
+
+Mechanical signals:
 
 ```
 links: total 3, dead 0, bad_anchors 0, orphans 0, reachable 1.0
