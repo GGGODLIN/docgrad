@@ -189,3 +189,45 @@ test('links: --locate-ledger is a no-op, note explains why, and it need not even
   assert.match(out.note, /--locate-ledger is a no-op for this script/);
   assert.deepEqual(out.orphans, ['docs/orphan.md']); // behaves exactly like the unflagged run otherwise
 });
+
+// #74 — a line-range fragment is not a heading reference, and judging it as one charged a repo
+// linkage for a convention that is not broken. The test pins both directions: the convention is not
+// reported, and a real mistyped anchor still is — a fix that silenced both would be worse than the
+// defect, because bad_anchors is the only thing that reports a broken anchor at all.
+test('links: #L39-L86 is a line-range fragment, not a bad anchor — but a mistyped one still is (#74)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-line-range-'));
+  try {
+    fs.mkdirSync(path.join(tmp, 'docs'));
+    fs.writeFileSync(
+      path.join(tmp, '.docgrad.yml'),
+      'docs_dirs: [docs/]\nentry_files: []\nindex_file: docs/README.md\n'
+    );
+    fs.writeFileSync(
+      path.join(tmp, 'docs', 'README.md'),
+      [
+        '# Index',
+        '',
+        '- [range](guide.md#L39-L86)',
+        '- [single line](guide.md#L7)',
+        '- [real heading](guide.md#heading)',
+        '- [mistyped heading](guide.md#headng)',
+        '- [lower case, not the convention](guide.md#l39-l86)',
+        '',
+      ].join('\n')
+    );
+    fs.writeFileSync(path.join(tmp, 'docs', 'guide.md'), '# Guide\n\n## Heading\n\ntext\n');
+
+    const out = JSON.parse(
+      execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' })
+    );
+    assert.equal(out.total_links, 5, 'every link is still counted; this is not a skip of the link');
+    assert.equal(out.dead_links.length, 0);
+    assert.deepEqual(
+      out.bad_anchors.map((b) => b.anchor).sort(),
+      ['headng', 'l39-l86'],
+      'L-ranges are not judged; a typo and a lower-case near-miss still are'
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

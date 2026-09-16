@@ -5,6 +5,22 @@ For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](doc
 
 ## Unreleased
 
+- **Fixed (#75): a dangling *ancestor* symlink still disclosed whether a directory outside the root
+  exists.** #57 closed this oracle for a link target's final component; the level above stayed open.
+  With `jump -> /outside/dir` and a link `jump/x.md`, `lstat` on the final component throws because
+  its ancestor does not resolve, and that throw is indistinguishable from an ordinary in-root miss —
+  so the link was filed as dead when the outside directory was absent and as out-of-root when it
+  existed. One bit per probe, from a repo docgrad is merely grading. The check now applies to every
+  component, stopping at the first that fails. **What closes it is that both answers now agree**, not
+  that anything stopped looking: an unresolvable component lands out-of-root here, a resolvable one
+  pointing outside lands out-of-root at the containment check.
+- **Fixed (#74): `#L39-L86` is GitHub's line-range convention, not a heading reference.** Every link
+  written that way was reported as a broken anchor, charging a repo linkage for a convention that is
+  not broken. It is now judged as nothing rather than as a heading. A mistyped heading anchor is
+  still reported, and so is a lower-case `#l39-l86`, which is not the convention either. Verifying
+  that a range falls inside the target file — the strictly better answer — adds a measurement signal
+  rather than removing a false one, and is left for the v2 measure/judge split.
+
 - **Fixed: `retrieval.mjs` did not understand `file:` links, so a document could be reachable for
   linkage and unreachable for traceability.** Both scripts build a graph out of the same markdown
   links, from two copies of the same parsing; v1.9.0 taught `links.mjs` about `file:` URIs and left
