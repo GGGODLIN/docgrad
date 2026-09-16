@@ -3,6 +3,25 @@
 Version authority is `version` in [.claude-plugin/plugin.json](.claude-plugin/plugin.json); this file records changes per version.
 For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](docs/how-to.md) §Cut a release.
 
+## 1.9.1 — 2026-09-16
+
+**Documentation only. No script, rubric or config change; every hash is unmoved.**
+
+- **Fixed: `docs/how-to.md` §Cut a release had no step for publishing the GitHub Release.** Steps 1–7
+  end at the git tag. A tag is not a release — it is visible to anyone who goes looking, while a
+  release is what the repository's front page shows, what "Latest" points at, and what notifies
+  people watching. The consequence was measurable: v1.7.0, v1.8.0 and v1.9.0 were all tagged and none
+  was released, so the front page read "Latest: v1.6.0" while the manifest read 1.9.0. Now step 8,
+  with the command.
+- **Fixed: `docgrad--v1.8.0` was never tagged.** Created retroactively at `f36546b`, the merge that
+  carried v1.8.0, with the same `claude plugin tag` that would have created it at the time. The tag
+  sequence v1.0.0 → v1.9.0 now has no gap.
+- Releases for v1.7.0, v1.8.0 and v1.9.0 published from their existing changelog sections.
+
+This is the same shape as the missing `--scaffold` in `evals/README.md`, one release earlier: **a
+documented procedure whose last step was never written down does not get performed**, and nothing
+reports the omission, because nothing knows it is one.
+
 ## 1.9.0 — 2026-09-16
 
 Two measurement gaps closed, one new measurement added, and the skill-level eval suite produces a

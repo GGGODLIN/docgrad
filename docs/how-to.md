@@ -95,6 +95,16 @@ Release steps:
 
    The official tool's format is `docgrad--v<version>` (an annotated tag); it verifies that `plugin.json` and the marketplace entry are consistent before creating it — **this is the authoritative format for release tags**, don't type it by hand.
 
+8. **Publish the GitHub Release.** A tag is not a release: a tag is visible to anyone who looks for it, a release is what shows on the repository's front page, what "Latest" points at, and what notifies whoever is watching.
+
+   ```bash
+   gh release create docgrad--v<version> --title "docgrad v<version>" --notes-file <(sed -n '/^## <version>/,/^## /p' CHANGELOG.md | sed '$d')
+   ```
+
+   The body is that version's CHANGELOG section, unchanged — the changelog is written to be read by a human deciding whether to upgrade, which is exactly what a release body is for, so there is nothing to rewrite.
+
+   > **This step was missing until v1.9.1, and it drifted silently for three versions.** Steps 1–7 were all followed for v1.7.0, v1.8.0 and v1.9.0; every one of them was tagged (v1.8.0 late), and none of them was released. The front page said "Latest: v1.6.0" while the plugin manifest said 1.9.0. Nothing in the process noticed, because the process did not mention it — the same shape as the missing `--scaffold` in `evals/README.md`: a documented procedure whose last step was never written down does not get performed.
+
 > **The old `vX.Y.Z` series**: every version from v0.2.0 to v1.3.0 also has a lightweight tag on the same commit; that was the convention before `claude plugin tag` existed, and they're kept, not deleted (external links may point to them).
 > **New versions only get the official format**, the old format is no longer added — the two sets coexisting only needs to cover existing history, it doesn't need to keep growing.
 
