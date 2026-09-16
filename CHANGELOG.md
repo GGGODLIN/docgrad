@@ -3,6 +3,24 @@
 Version authority is `version` in [.claude-plugin/plugin.json](.claude-plugin/plugin.json); this file records changes per version.
 For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](docs/how-to.md) §Cut a release.
 
+## Unreleased
+
+- **Fixed: `retrieval.mjs` did not understand `file:` links, so a document could be reachable for
+  linkage and unreachable for traceability.** Both scripts build a graph out of the same markdown
+  links, from two copies of the same parsing; v1.9.0 taught `links.mjs` about `file:` URIs and left
+  the copy in `retrieval.mjs` at the pre-1.9.0 behaviour. A tree whose index links that way got
+  `reachable_ratio` counting the edge and `depth_from_index: null` for the same document, which then
+  understated `marginal_tokens`. One `lib.mjs › resolveLinkTarget(root, rel, target)` now serves
+  both. **`links.mjs` output is unchanged** — byte-identical on docgrad itself, both test fixtures
+  and a 46-file external tree.
+  **`retrieval.mjs` changes in two ways, not one.** The `file:` case is the reason for the change;
+  the second is that it now percent-decodes ordinary link targets, which `links.mjs` has always done
+  and it never did. A link to `guide%20one.md` used to build an edge to the literal
+  `docs/guide%20one.md` — matching nothing — and now resolves to `docs/guide one.md`. Both are
+  corrections in the same direction (retrieval now reads a link the way the link checker does), and
+  a repo with percent-encoded link targets will see `depth_from_index` and `marginal_tokens` move
+  without owning a single `file:` link.
+
 ## 1.9.1 — 2026-09-16
 
 **Documentation only. No script, rubric or config change; every hash is unmoved.**
