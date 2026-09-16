@@ -60,6 +60,11 @@ function splitInlineItems(inner) {
       if (c !== ' ' && c !== '\t') atItemStart = false;
     }
   }
+  // An item whose opening quote is never closed used to keep the quote character in its value
+  // (`["docs/a", "\"unclosed"]`), so the entry silently became a different string than the one
+  // written. Other malformed shapes this subset still accepts quietly (a missing closing bracket,
+  // for one) are a separate gap, not fixed here.
+  if (quote) throw new Error(`Unterminated ${quote} in inline list item: ${cur.trim()}`);
   items.push(cur);
   return items;
 }
