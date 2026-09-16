@@ -1,6 +1,6 @@
 # docgrad rubric — star anchors for the six dimensions
 
-> **Last updated:** 2026-09-13
+> **Last updated:** 2026-09-16
 
 > This file is the only basis on which scores from different rounds can be compared. The anchors
 > are frozen; any change to them makes historical scores incomparable, counts as a breaking
@@ -405,6 +405,14 @@ individual dimension did not).
     side of a change to it. Folding it in would draw a whole-round comparability break across all six dimensions — five of
     which cannot have been affected — every time someone applies the fix the tool itself recommends. The narrower, honest
     disclosure is the per-round `claim_population.truncated`, which is emitted whether or not anyone changed the field.
+- **v1.9.0 — an inline-list parser fix can move `corpus_hash` without anyone editing the corpus** (**not an anchor change**):
+  no ★1–★5 threshold moved and no default changed. Inline lists in `.docgrad.yml` are now split on commas **outside quotes**,
+  so `exclude: ["docs/a,b/"]` is one path where it used to be two fragments. Only a config that actually contains such an
+  item is affected — for it, the selected corpus changes and `corpus_hash` moves with it.
+  - **A `corpus_hash` break drawn at this version may therefore be a parser fix rather than a corpus edit**, and `report`
+    cannot tell the two apart: both mean "the set of files measured changed". `git log` on `.docgrad.yml` settles it — no
+    change there, plus a quoted comma in one of the list fields, means the older side of the break was measuring a
+    mis-split corpus and the newer number is the corrected one, not a widened scope to re-baseline against.
 - **v1.8.0 — the rules for applying the anchors are fingerprinted, and the sampling window counts what it can draw**
   (issues #56, #54, #57) (**not an anchor change**): no ★1–★5 threshold moved and every shipped default is unchanged.
   - **New `judgement_hash`**, covering `audit.md` and `placement.md` — the files that decide *how* the anchors are applied

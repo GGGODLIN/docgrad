@@ -43,6 +43,18 @@ For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](doc
   an empty list parse exactly as before, and no fingerprint moves. This is one shape, not a general
   syntax check — a missing closing bracket (`docs_dirs: [docs/`) is still accepted quietly, and is
   left alone here.
+**Documentation only. No script, no config field, no ★1–★5 anchor text changed — but `rubric_hash`
+moves**, because it fingerprints the whole of `reference/rubric.md` and this adds a section to it.
+`judgement_hash`, `thresholds_hash` and `corpus_hash` are unmoved (measured on
+`tests/fixtures/basic`: `21fcfd36` → `1b547920`, the other three byte-identical).
+
+- **Added: a §Version history entry for v1.9.0's inline-list parser fix.** The CHANGELOG already
+  records that a config containing a quoted comma now selects a different corpus; §Version history is
+  where a reader goes to interpret the `report` break that results, and until now it said nothing
+  about this one. The entry states what the break means — **a `corpus_hash` move at v1.9.0 may be a
+  parser fix rather than a corpus edit**, `report` cannot tell the two apart, and `git log` on
+  `.docgrad.yml` settles it — so the newer side is read as the corrected measurement rather than as a
+  scope someone widened on purpose.
 
 ## 1.9.1 — 2026-09-16
 
