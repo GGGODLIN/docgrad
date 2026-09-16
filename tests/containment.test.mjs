@@ -326,3 +326,61 @@ test('#57/F4 links: an in-root symlink pointing out is the same oracle, and is c
     cleanup(base);
   }
 });
+
+// #75 — the oracle one level up: a dangling *ancestor* symlink.
+//
+// `isUnresolvedSymlink` only ever lstat'ed the final component. With `jump -> /outside/dir` and a
+// link `jump/x.md`, that lstat throws because the ancestor does not resolve, and the throw reads as
+// "an ordinary in-root miss"; containment then climbs past the unresolvable ancestor to the root and
+// answers "inside". So the link was filed as dead when the outside directory was absent and as
+// out-of-root when it existed — one bit about the auditor's filesystem per probe.
+//
+// The assertion is not "it is out-of-root". It is that **both spellings give the same answer**: a
+// test that only pinned one of them would still pass while the other told the caller something about
+// a directory it is not allowed to know about.
+test('links: a dangling ancestor symlink is classified the same whether or not the outside directory exists (#75)', () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-outside-75-'));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-repo-75-'));
+  try {
+    fs.mkdirSync(path.join(repo, 'docs'));
+    fs.writeFileSync(
+      path.join(repo, '.docgrad.yml'),
+      'docs_dirs: [docs/]\nentry_files: []\nindex_file: docs/README.md\n'
+    );
+    fs.writeFileSync(
+      path.join(repo, 'docs', 'README.md'),
+      '# Index\n\n- [through a dangling ancestor](../jump/x.md)\n'
+    );
+
+    const classify = () => {
+      const res = run(LINKS, ['--root', repo]);
+      assert.equal(res.status, 0, res.stderr);
+      const out = JSON.parse(res.stdout);
+      return {
+        dead: out.dead_links.map((d) => d.target),
+        outOfRoot: out.out_of_root_links.map((d) => d.target),
+      };
+    };
+
+    // The ancestor points at a directory that does not exist.
+    fs.symlinkSync(path.join(outside, 'absent'), path.join(repo, 'jump'));
+    const whenAbsent = classify();
+
+    // Same link, same (still missing) x.md — only the outside directory now exists.
+    fs.unlinkSync(path.join(repo, 'jump'));
+    fs.mkdirSync(path.join(outside, 'present'));
+    fs.symlinkSync(path.join(outside, 'present'), path.join(repo, 'jump'));
+    const whenPresent = classify();
+
+    assert.deepEqual(
+      whenAbsent,
+      whenPresent,
+      'the bucket must not depend on whether a directory outside the root exists'
+    );
+    assert.deepEqual(whenAbsent.outOfRoot, ['../jump/x.md'], 'fails closed: out-of-root, never dead');
+    assert.deepEqual(whenAbsent.dead, []);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});

@@ -66,10 +66,35 @@ function isUnresolvedSymlink(abs) {
   }
 }
 
+// Branch 3 applied to **every** component, not only the last one (#75).
+//
+// Checking the final component alone left the oracle open one level up: with `jump -> /outside/dir`
+// and a link `jump/x.md`, `lstat` on `jump/x.md` throws because its *ancestor* does not resolve, and
+// that throw is indistinguishable from "an ordinary in-root miss". `realpathDeepest()` then climbs
+// past the unresolvable ancestor to the nearest resolvable parent — the root — and answers "inside",
+// so the link was filed as dead when `/outside/dir` was absent and as out-of-root when it existed.
+// One bit about the auditor's filesystem, per probe, from a repo docgrad is merely grading.
+//
+// **What closes it is that both answers now agree, not that anything stopped looking.** An
+// unresolvable component lands out-of-root here; a resolvable one that points outside lands
+// out-of-root at the `pathInsideRoot` check below. Either way the bucket no longer depends on what
+// exists outside the root. Every path stat'ed is one the repo named inside its own tree, and the
+// walk stops at the first component that fails, so a deep target costs no more than the depth at
+// which it first goes wrong.
+function hasUnresolvedSymlinkComponent(root, resolved) {
+  let abs = root;
+  for (const part of resolved.split('/')) {
+    if (!part || part === '.') continue;
+    abs = path.join(abs, part);
+    if (isUnresolvedSymlink(abs)) return true;
+  }
+  return false;
+}
+
 function targetOutOfRoot(root, resolved) {
   if (escapesLexically(resolved)) return true;
   const abs = path.join(root, resolved);
-  return !pathInsideRoot(root, abs) || isUnresolvedSymlink(abs);
+  return !pathInsideRoot(root, abs) || hasUnresolvedSymlinkComponent(root, resolved);
 }
 
 try {
