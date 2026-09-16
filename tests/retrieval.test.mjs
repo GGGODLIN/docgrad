@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { estimateTokens } from '../skills/docgrad/scripts/lib.mjs';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/retrieval/', import.meta.url));
@@ -42,6 +42,26 @@ function run(root, extraArgs = []) {
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
+
+test('retrieval: a file: link from the index is an edge, so the same document keeps its depth (shared resolver)', () => {
+  const tmp = copyFixture();
+  try {
+    const readme = path.join(tmp, 'docs/README.md');
+    // the same edge, written as an absolute URI — the form a terminal-clickable tree uses. Before
+    // the shared resolver, links.mjs counted it and retrieval.mjs did not, so this document was
+    // reachable for linkage and depth_from_index: null here.
+    fs.writeFileSync(
+      readme,
+      fs.readFileSync(readme, 'utf8').replace('](guide.md)', `](${pathToFileURL(path.join(tmp, 'docs/guide.md')).href})`)
+    );
+    const [scenario] = run(tmp).scenarios;
+    assert.deepEqual(scenario.docs.map((d) => d.doc), ['docs/guide.md']);
+    assert.equal(scenario.docs[0].depth_from_index, 1);
+    assert.equal(scenario.max_depth, 1);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
 
 test('retrieval: scenario hits docs, depth_from_index, marginal_tokens, code_pointer (no git -> churn/hotness are null, no crash)', () => {
   const tmp = copyFixture();

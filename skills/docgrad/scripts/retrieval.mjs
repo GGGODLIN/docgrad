@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { loadConfig, collectFiles, parseArgs, fail, docgradMeta, estimateTokens, extractLinks, extractCodeRefs, resolveInRoot, assertInsideRoot } from './lib.mjs';
+import { loadConfig, collectFiles, parseArgs, fail, docgradMeta, estimateTokens, extractLinks, extractCodeRefs, resolveLinkTarget, resolveInRoot, assertInsideRoot } from './lib.mjs';
 
 const SKIP_DIRS = new Set(['node_modules', '.git']);
 const CHURN_WINDOW_DAYS = 90;
@@ -149,19 +149,15 @@ try {
   // Each doc's code refs are extracted only once, reused by both the scenarios and areas sections.
   const docRefs = docTexts.map((d) => ({ rel: d.rel, refs: extractCodeRefs(d.text, config.src_dirs) }));
 
-  // --- markdown link graph + BFS depth from index_file (reuses links.mjs's link-parsing logic) --------
+  // --- markdown link graph + BFS depth from index_file (shares links.mjs's resolveLinkTarget) --------
   const includedSet = new Set(included);
   const graph = new Map(included.map((p) => [p, new Set()]));
   for (const { rel, text } of docTexts) {
     for (const { target } of extractLinks(text)) {
-      if (/^(https?:|mailto:|tel:|data:)/i.test(target)) continue;
-      const hashIndex = target.indexOf('#');
-      const rawPath = hashIndex === -1 ? target : target.slice(0, hashIndex);
-      if (rawPath === '') continue;
-      const resolved = rawPath.startsWith('/')
-        ? path.posix.normalize(rawPath.slice(1))
-        : path.posix.normalize(path.posix.join(path.posix.dirname(rel), rawPath));
-      if (includedSet.has(resolved)) graph.get(rel).add(resolved);
+      const link = resolveLinkTarget(root, rel, target);
+      // external scheme, a pure `#fragment` (no edge to add), or a target the root cannot contain
+      if (link === null || link.selfAnchor || link.resolved === null) continue;
+      if (includedSet.has(link.resolved)) graph.get(rel).add(link.resolved);
     }
   }
   const depthFromIndex = new Map();

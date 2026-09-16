@@ -896,6 +896,69 @@ export function extractLinks(text) {
   return links;
 }
 
+// --- Link target resolution ------------------------------------------------------
+//
+// One place turns a markdown link target into a root-relative path, because two scripts build a
+// graph out of the same links and had drifted: links.mjs learned `file:` URIs in v1.9.0 while
+// retrieval.mjs kept its own copy of the pre-1.9.0 parsing, so a document reachable through a
+// `file:` link counted for linkage and not for `depth_from_index`.
+//
+// Returns null for an external scheme — there is nothing to resolve and neither caller counts it.
+// Otherwise `{ resolved, anchor, selfAnchor }`:
+//   resolved   root-relative posix path, or null when the target names a place the root cannot
+//              contain (a host other than `localhost`, a URI the URL parser rejects, a path outside
+//              both spellings of the root). **Never stat'ed here** — the caller classifies it, which
+//              is what keeps #57's oracle closed.
+//   anchor     percent-decoded fragment, or null.
+//   selfAnchor a pure `#fragment` link; `resolved` is the document itself. links.mjs checks the
+//              anchor against its own headings; retrieval.mjs skips it rather than add a self-edge.
+// `file:` targets reach the URL parser undecoded, so they are decoded exactly once and `%23` stays
+// a `#` in a filename; every other shape is percent-decoded here as before.
+const EXTERNAL_LINK_RE = /^(https?:|mailto:|tel:|data:)/i;
+const FILE_URI_RE = /^file:/i;
+
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+function fileUriToRel(root, uri) {
+  let abs;
+  try {
+    const url = new URL(uri);
+    if (url.hostname !== '' && url.hostname !== 'localhost') return null;
+    abs = fileURLToPath(url);
+  } catch {
+    return null;
+  }
+  for (const base of [root, rootRealPath(root)]) {
+    if (base === null) continue;
+    const rel = path.relative(base, abs);
+    if (rel === '') return '';
+    if (!path.isAbsolute(rel) && rel.split(path.sep)[0] !== '..') return rel.split(path.sep).join('/');
+  }
+  return null;
+}
+
+export function resolveLinkTarget(root, rel, target) {
+  if (EXTERNAL_LINK_RE.test(target)) return null;
+  const hashIndex = target.indexOf('#');
+  const rawTarget = hashIndex === -1 ? target : target.slice(0, hashIndex);
+  const anchor = hashIndex === -1 ? null : safeDecode(target.slice(hashIndex + 1));
+  if (FILE_URI_RE.test(rawTarget)) {
+    return { resolved: fileUriToRel(root, rawTarget), anchor, selfAnchor: false };
+  }
+  const rawPath = safeDecode(rawTarget);
+  if (rawPath === '') return { resolved: rel, anchor, selfAnchor: true };
+  const resolved = rawPath.startsWith('/')
+    ? path.posix.normalize(rawPath.slice(1))
+    : path.posix.normalize(path.posix.join(path.posix.dirname(rel), rawPath));
+  return { resolved, anchor, selfAnchor: false };
+}
+
 // --- Freshness date extraction --------------------------------------------------
 
 const DATE_RE = /(\d{4}-\d{2}-\d{2})/;

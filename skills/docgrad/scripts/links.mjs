@@ -7,44 +7,13 @@
 // ledger; link checking has nothing to do with it. Accepted and ignored, like --include above.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   loadConfig, collectFiles, parseArgs, fail, docgradMeta,
-  extractHeadings, extractLinks, githubSlug, CJK_RE, pathInsideRoot, rootRealPath,
+  extractHeadings, extractLinks, githubSlug, CJK_RE, pathInsideRoot, resolveLinkTarget,
 } from './lib.mjs';
 
-const EXTERNAL_RE = /^(https?:|mailto:|tel:|data:)/i;
 const MD_TARGET_RE = /\.(md|mdx|markdown)$/i;
-const FILE_URI_RE = /^file:/i;
 
-// --- file: URI link targets -------------------------------------------------------
-//
-// `file:///abs/path/doc.md` is a URI, not an external resource: it is mapped onto a root-relative
-// path and then joins the same pipeline as any other link, containment check (#57) included.
-// Returns a root-relative posix path (`''` for the root itself) or null, which the caller files
-// under out_of_root_links without ever stat'ing the target. null covers: a host other than
-// `localhost` (RFC 8089: empty host and `localhost` are the local machine; nothing else is looked
-// up), a URI the URL parser rejects, and a path outside both spellings of the root — `--root` as
-// given and its realpath, since an absolute URI is written from whichever the author's shell
-// printed. The URL API decodes the target exactly once, so `%23` stays a `#` in the filename and
-// `%2F` is refused. Only the root's realpath is resolved here, never the target.
-function fileUriToRel(root, uri) {
-  let abs;
-  try {
-    const url = new URL(uri);
-    if (url.hostname !== '' && url.hostname !== 'localhost') return null;
-    abs = fileURLToPath(url);
-  } catch {
-    return null;
-  }
-  for (const base of [root, rootRealPath(root)]) {
-    if (base === null) continue;
-    const rel = path.relative(base, abs);
-    if (rel === '') return '';
-    if (!path.isAbsolute(rel) && rel.split(path.sep)[0] !== '..') return rel.split(path.sep).join('/');
-  }
-  return null;
-}
 
 // --- out-of-root link targets (#57) -------------------------------------------------
 //
@@ -103,14 +72,6 @@ function targetOutOfRoot(root, resolved) {
   return !pathInsideRoot(root, abs) || isUnresolvedSymlink(abs);
 }
 
-function safeDecode(s) {
-  try {
-    return decodeURIComponent(s);
-  } catch {
-    return s;
-  }
-}
-
 try {
   const { root, configFile, include, excludeLedger, locateLedger } = parseArgs();
   const scoped = include.length > 0;
@@ -138,23 +99,10 @@ try {
 
   for (const rel of included) {
     for (const { target, line } of extractLinks(readText(rel))) {
-      if (EXTERNAL_RE.test(target)) continue;
+      const link = resolveLinkTarget(root, rel, target);
+      if (link === null) continue; // external scheme
       total_links += 1;
-      const hashIndex = target.indexOf('#');
-      const rawTarget = hashIndex === -1 ? target : target.slice(0, hashIndex);
-      const anchor = hashIndex === -1 ? null : safeDecode(target.slice(hashIndex + 1));
-      // A file: URI is handed to the URL parser undecoded — it decodes once itself; decoding first
-      // would turn a `%23` in the filename into a second `#`.
-      const fileUriRel = FILE_URI_RE.test(rawTarget) ? fileUriToRel(root, rawTarget) : undefined;
-      const rawPath = fileUriRel !== undefined ? null : safeDecode(rawTarget);
-      const resolved =
-        fileUriRel !== undefined
-          ? fileUriRel
-          : rawPath === ''
-            ? rel // a pure anchor link points at itself
-            : rawPath.startsWith('/')
-              ? path.posix.normalize(rawPath.slice(1))
-              : path.posix.normalize(path.posix.join(path.posix.dirname(rel), rawPath));
+      const { resolved, anchor } = link; // a pure anchor link resolves to the document itself
       // Classified before anything is stat'ed, and never counted as dead: "this link leaves the
       // repository" and "this link points at nothing" are different facts, and the second one is
       // the one that would have to be answered by looking outside the root.
