@@ -905,15 +905,19 @@ export function extractLinks(text) {
 //
 // Returns null for an external scheme — there is nothing to resolve and neither caller counts it.
 // Otherwise `{ resolved, anchor, selfAnchor }`:
-//   resolved   root-relative posix path, or null when the target names a place the root cannot
-//              contain (a host other than `localhost`, a URI the URL parser rejects, a path outside
-//              both spellings of the root). **Never stat'ed here** — the caller classifies it, which
-//              is what keeps #57's oracle closed.
+//   resolved   a root-relative posix path **candidate** — not a containment guarantee. It is null
+//              only for a `file:` URI the root cannot contain (a host other than `localhost`, a URI
+//              the URL parser rejects, a path outside both spellings of the root); an ordinary
+//              `../../outside.md` still resolves, to `../outside.md`, and it is the caller that
+//              decides. links.mjs keeps `targetOutOfRoot()`; retrieval.mjs only ever builds edges
+//              into `includedSet`. **Never stat'ed here**, which is what keeps #57's oracle closed.
 //   anchor     percent-decoded fragment, or null.
 //   selfAnchor a pure `#fragment` link; `resolved` is the document itself. links.mjs checks the
 //              anchor against its own headings; retrieval.mjs skips it rather than add a self-edge.
 // `file:` targets reach the URL parser undecoded, so they are decoded exactly once and `%23` stays
-// a `#` in a filename; every other shape is percent-decoded here as before.
+// a `#` in a filename; every other shape is percent-decoded here. That decoding is what links.mjs
+// already did and what retrieval.mjs did **not** — see the CHANGELOG: sharing this function changes
+// retrieval's reading of any percent-encoded target, `file:` or not.
 const EXTERNAL_LINK_RE = /^(https?:|mailto:|tel:|data:)/i;
 const FILE_URI_RE = /^file:/i;
 

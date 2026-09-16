@@ -281,3 +281,20 @@ test('retrieval: --locate-ledger is a no-op, note explains why (#63)', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('retrieval: a percent-encoded link target now resolves like links.mjs reads it — no file: URI involved', () => {
+  const tmp = copyFixture();
+  try {
+    // rename the target to a name that has to be written percent-encoded in a link, and point the
+    // index at it that way. This is the second behaviour change the shared resolver brings: the old
+    // retrieval built an edge to the literal `docs/guide%20one.md`, which matches no file.
+    fs.renameSync(path.join(tmp, 'docs/guide.md'), path.join(tmp, 'docs/guide one.md'));
+    fs.writeFileSync(path.join(tmp, 'docs/README.md'), '# Index\n\n- [Guide](guide%20one.md)\n- [Wide](wide.md)\n');
+    const [scenario] = run(tmp).scenarios;
+    assert.deepEqual(scenario.docs.map((d) => d.doc), ['docs/guide one.md']);
+    assert.equal(scenario.docs[0].depth_from_index, 1); // was null: the edge pointed at a name with %20 in it
+    assert.equal(scenario.max_depth, 1);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
