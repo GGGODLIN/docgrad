@@ -153,6 +153,25 @@ test('loadConfig: a list entry that is not a non-empty string throws, pointing a
   }
 });
 
+test('parseYamlSubset: an unterminated quote in an inline list throws instead of keeping the quote in the value', () => {
+  assert.throws(() => parseYamlSubset('exclude: [docs/a, "unclosed]\n'), /Unterminated " in inline list item: "unclosed/);
+  assert.throws(() => parseYamlSubset("a: [x, 'unclosed]\n"), /Unterminated ' in inline list item: 'unclosed/);
+  // the shapes that already worked keep working: a quoted comma, an apostrophe mid-item, an empty list
+  assert.deepEqual(parseYamlSubset('a: ["q, r", s]\n').a, ['q, r', 's']);
+  assert.deepEqual(parseYamlSubset("exclude: [docs/owner's/, docs/b/]\n").exclude, ["docs/owner's/", 'docs/b/']);
+  assert.deepEqual(parseYamlSubset('a: []\n').a, []);
+});
+
+test('loadConfig: an unterminated quote fails the run rather than producing a path that can never match', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-unterminated-'));
+  try {
+    fs.writeFileSync(path.join(tmp, '.docgrad.yml'), 'docs_dirs: [docs/]\nexclude: [docs/a, "unclosed]\n');
+    assert.throws(() => loadConfig(tmp), /Unterminated " in inline list item/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('loadConfig: a list key left empty throws rather than blowing up later inside collectFiles', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-listempty-'));
   try {

@@ -20,6 +20,12 @@ For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](doc
   corrections in the same direction (retrieval now reads a link the way the link checker does), and
   a repo with percent-encoded link targets will see `depth_from_index` and `marginal_tokens` move
   without owning a single `file:` link.
+- **Fixed: an unterminated quote in an inline list degraded silently.** `exclude: [docs/a, "unclosed]`
+  kept the quote character inside the value (`"unclosed`), producing a path that can never match a
+  file — the one malformed shape on this config surface that did not fail loudly, while every other
+  one throws at load. It now throws too, naming the offending item. **No well-formed config is
+  affected**: a quoted comma (`["a, b", c]`), an apostrophe mid-item (`docs/owner's/`) and an empty
+  list parse exactly as before, and no fingerprint moves.
 
 ## 1.9.1 — 2026-09-16
 

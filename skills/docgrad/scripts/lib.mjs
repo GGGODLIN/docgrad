@@ -60,6 +60,10 @@ function splitInlineItems(inner) {
       if (c !== ' ' && c !== '\t') atItemStart = false;
     }
   }
+  // An item whose opening quote is never closed used to keep the quote character in its value
+  // (`["docs/a", "\"unclosed"]`), producing a path that cannot match anything — the one malformed
+  // shape on this config surface that degraded silently instead of failing.
+  if (quote) throw new Error(`Unterminated ${quote} in inline list item: ${cur.trim()}`);
   items.push(cur);
   return items;
 }
