@@ -14,6 +14,27 @@ import {
 
 const MD_TARGET_RE = /\.(md|mdx|markdown)$/i;
 
+// `#L39-L86` is GitHub's line-range convention, not a heading reference (#74). `extractHeadings`
+// can never match it, so every link written that way was reported as a broken anchor — a permanent
+// linkage deduction for a convention that is not broken. It is now judged as nothing rather than as
+// a heading: docgrad has no concept of a line range, and reporting a defect it cannot define is
+// worse than staying quiet about it.
+//
+// It lives here rather than inside `githubSlug()` because that function answers "what slug does
+// this text produce", which is a different question from "is this text a heading reference at
+// all" — and because the same call site flags `cjk_uncertain`, which must keep applying to real
+// anchors.
+//
+// **Verifying the range** — that it falls inside the target file's line count, so a range pointing
+// past the end of a shrunken file is caught — is the strictly better answer, and is deliberately
+// not this. It adds a measurement signal rather than removing a false one, and linkage becomes a
+// CI gate under the v2 measure/judge split, which is where a check like that belongs.
+//
+// The cost of skipping: a mistyped heading anchor that happens to look like `L12` stops being
+// reported. The shape is narrow — a leading capital `L`, digits only after it — and `#l39-l86` in
+// lower case is still judged, because that is not the convention either.
+const LINE_RANGE_ANCHOR_RE = /^L\d+(-L\d+)?$/;
+
 
 // --- out-of-root link targets (#57) -------------------------------------------------
 //
@@ -140,7 +161,7 @@ try {
         continue;
       }
       if (includedSet.has(resolved)) graph.get(rel).add(resolved);
-      if (anchor && MD_TARGET_RE.test(resolved) && includedSet.has(resolved)) {
+      if (anchor && !LINE_RANGE_ANCHOR_RE.test(anchor) && MD_TARGET_RE.test(resolved) && includedSet.has(resolved)) {
         if (!slugsOf(resolved).has(githubSlug(anchor))) {
           bad_anchors.push({ file: rel, line, target, anchor, cjk_uncertain: CJK_RE.test(anchor) });
         }
