@@ -189,3 +189,79 @@ test('links: --locate-ledger is a no-op, note explains why, and it need not even
   assert.match(out.note, /--locate-ledger is a no-op for this script/);
   assert.deepEqual(out.orphans, ['docs/orphan.md']); // behaves exactly like the unflagged run otherwise
 });
+
+function makeSoftRefFixture(softOn) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'docgrad-softref-'));
+  fs.mkdirSync(path.join(tmp, 'docs'));
+  fs.writeFileSync(
+    path.join(tmp, '.docgrad.yml'),
+    `docs_dirs: [docs/]\nentry_files: []\nindex_file: docs/README.md\nfreshness:\n  convention: none\n${softOn ? 'links:\n  soft_references: true\n' : ''}`
+  );
+  // One document named as a markdown link, one as inline code, and four shapes that must not count.
+  fs.writeFileSync(
+    path.join(tmp, 'docs', 'README.md'),
+    [
+      '# Index',
+      '',
+      '- [linked](guide.md)',
+      '- inline: `docs/inline.md`',
+      '- prose naming `config.freshness` and `docs/` — neither ends in a markdown extension',
+      '- a phrase, not a path: `a note.md`',
+      '- outside the corpus: `docs/nope.md`',
+      '',
+      '```',
+      '`docs/fenced.md`',
+      '```',
+      '',
+    ].join('\n')
+  );
+  for (const name of ['guide', 'inline', 'fenced', 'orphan']) {
+    fs.writeFileSync(path.join(tmp, 'docs', `${name}.md`), `# ${name}\n`);
+  }
+  return tmp;
+}
+
+test('links: soft references are off by default — the output has no soft_references key at all', () => {
+  const tmp = makeSoftRefFixture(false);
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal('soft_references' in out, false);
+    assert.equal(out.reachable_ratio, 0.4); // README + guide of 5
+    assert.deepEqual(out.orphans, ['docs/fenced.md', 'docs/inline.md', 'docs/orphan.md']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('links: with soft references on, inline-code paths add edges alongside — the rated fields do not move', () => {
+  const tmp = makeSoftRefFixture(true);
+  try {
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    // the rated fields are identical to the run above
+    assert.equal(out.reachable_ratio, 0.4);
+    assert.deepEqual(out.orphans, ['docs/fenced.md', 'docs/inline.md', 'docs/orphan.md']);
+    assert.equal(out.total_links, 1); // an inline path is not counted as a link
+    // exactly one soft edge: `docs/inline.md`. The other four shapes are excluded, each for its own
+    // reason: no markdown extension (x2), a space in the span, and not in the corpus; plus one
+    // inside a code fence.
+    assert.equal(out.soft_references.edges, 1);
+    assert.equal(out.soft_references.reachable_ratio, 0.6);
+    assert.deepEqual(out.soft_references.orphans, ['docs/fenced.md', 'docs/orphan.md']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('links: a soft reference relative to the citing document resolves too, and is not double-counted', () => {
+  const tmp = makeSoftRefFixture(true);
+  try {
+    // `inline.md` written from inside docs/, i.e. relative to the citing file, plus the same target
+    // named twice — one edge either way
+    fs.appendFileSync(path.join(tmp, 'docs', 'README.md'), '\n- relative: `inline.md`, again `docs/inline.md`\n');
+    const out = JSON.parse(execFileSync(process.execPath, [SCRIPT, '--root', tmp], { encoding: 'utf8' }));
+    assert.equal(out.soft_references.edges, 1);
+    assert.equal(out.soft_references.reachable_ratio, 0.6);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

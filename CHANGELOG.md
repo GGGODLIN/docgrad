@@ -3,6 +3,22 @@
 Version authority is `version` in [.claude-plugin/plugin.json](.claude-plugin/plugin.json); this file records changes per version.
 For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](docs/how-to.md) §Cut a release.
 
+## Unreleased
+
+- **Added (opt-in, default off): `links.soft_references`.** Some trees index their documents as
+  path-shaped inline code — `` `onboarding/STATE.md` `` — rather than as markdown links: in a
+  terminal that path is already clickable, so the link is redundant. `links.mjs` sees no edges at
+  all in such a tree and reports every document as an orphan. With the flag on it emits a **second,
+  parallel** `soft_references` block (`edges` / `orphans` / `reachable_ratio`) that also walks
+  inline-code paths naming a corpus document. **The rated fields never move**: `orphans` and
+  `reachable_ratio` stay markdown-link-only, `total_links` does not count an inline path, and
+  nothing in `rubric.md` reads the new block — so no score changes and no fingerprint moves. Off,
+  the key is absent and the output is byte-identical. Only a span ending in a markdown extension
+  counts, it must resolve into the corpus (root-relative or relative to the citing document), and
+  code fences are skipped — an unresolvable inline path is never reported, because prose is not a
+  promise the way a link is. Measured on a 46-file instruction-file-driven tree: 32 soft edges,
+  orphans 44 → 14, `reachable_ratio` 0.04 → 0.70, with the rated fields unchanged.
+
 ## 1.9.1 — 2026-09-16
 
 **Documentation only. No script, rubric or config change; every hash is unmoved.**

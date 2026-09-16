@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   loadConfig, collectFiles, parseArgs, fail, docgradMeta,
-  extractHeadings, extractLinks, githubSlug, CJK_RE, pathInsideRoot, rootRealPath,
+  extractHeadings, extractLinks, extractSoftReferences, githubSlug, CJK_RE, pathInsideRoot, rootRealPath,
 } from './lib.mjs';
 
 const EXTERNAL_RE = /^(https?:|mailto:|tel:|data:)/i;
@@ -135,9 +135,31 @@ try {
   const bad_anchors = [];
   const graph = new Map(included.map((p) => [p, new Set()]));
   let total_links = 0;
+  // Opt-in and reported alongside, never instead of: the rated fields below stay markdown-link-only
+  // (see lib.mjs DEFAULTS.links). Under scope, reachability is not computed at all, so neither is this.
+  const softOn = config.links.soft_references === true && !scoped;
+  const softEdges = new Map(included.map((p) => [p, new Set()]));
+  let soft_reference_edges = 0;
 
   for (const rel of included) {
-    for (const { target, line } of extractLinks(readText(rel))) {
+    const text = readText(rel);
+    if (softOn) {
+      // A soft reference counts only when it resolves **into the corpus**, tried root-relative
+      // first and then relative to the citing document — the two ways trees write these. Anything
+      // that resolves nowhere is not reported: an inline path is not a promise the way a link is,
+      // and turning prose into dead links is the failure mode this option exists to avoid.
+      for (const { target } of extractSoftReferences(text)) {
+        const hit = [
+          path.posix.normalize(target),
+          path.posix.normalize(path.posix.join(path.posix.dirname(rel), target)),
+        ].find((c) => includedSet.has(c) && c !== rel);
+        if (hit && !softEdges.get(rel).has(hit)) {
+          softEdges.get(rel).add(hit);
+          soft_reference_edges += 1;
+        }
+      }
+    }
+    for (const { target, line } of extractLinks(text)) {
       if (EXTERNAL_RE.test(target)) continue;
       total_links += 1;
       const hashIndex = target.indexOf('#');
@@ -181,16 +203,25 @@ try {
   const combinedNoteText = [scopeNoteText, excludeLedgerNoteText, locateLedgerNoteText].filter(Boolean).join('; ') || null;
 
   const roots = [config.index_file, ...config.entry_files].filter((p) => p && includedSet.has(p));
-  const reachable = new Set(roots);
-  const queue = [...roots];
-  while (queue.length) {
-    for (const next of graph.get(queue.shift()) ?? []) {
-      if (!reachable.has(next)) {
-        reachable.add(next);
-        queue.push(next);
+  const reachableFrom = (edges) => {
+    const seen = new Set(roots);
+    const queue = [...roots];
+    while (queue.length) {
+      for (const next of edges.get(queue.shift()) ?? []) {
+        if (!seen.has(next)) {
+          seen.add(next);
+          queue.push(next);
+        }
       }
     }
-  }
+    return seen;
+  };
+  const reachable = reachableFrom(graph);
+  // The soft pass walks hard edges *and* soft ones — a document reached through a link may go on to
+  // name the next one as inline code, and vice versa, so the two notations form one graph.
+  const reachableSoft = softOn
+    ? reachableFrom(new Map(included.map((p) => [p, new Set([...graph.get(p), ...softEdges.get(p)])])))
+    : null;
 
   process.stdout.write(
     `${JSON.stringify(
@@ -220,6 +251,21 @@ try {
           !scoped && config.index_file && included.length > 0
             ? Number((reachable.size / included.length).toFixed(4))
             : null,
+        // Opt-in second opinion, absent entirely unless links.soft_references is true. It answers a
+        // different question from the rated fields above — "is this document reachable by any
+        // notation this tree uses" rather than "by a markdown link" — and the gap between the two
+        // ratios is the measurement: a large one means the index works for a reader and not for a
+        // link checker. Nothing in rubric.md reads these.
+        ...(softOn && config.index_file
+          ? {
+              soft_references: {
+                edges: soft_reference_edges,
+                orphans: included.filter((p) => !reachableSoft.has(p)),
+                reachable_ratio:
+                  included.length > 0 ? Number((reachableSoft.size / included.length).toFixed(4)) : null,
+              },
+            }
+          : {}),
       },
       null,
       2

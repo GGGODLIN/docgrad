@@ -173,6 +173,12 @@ const DEFAULTS = {
   scenario: null,
   scenarios: [], // used by retrieval.mjs: list of representative code paths (files or dirs), report-only
   rules: { pattern: '**MUST' }, // used by inventory.mjs structure.rules: the string that marks a rule line
+  // links.soft_references: opt-in, default false (= today's behaviour exactly). When true,
+  // links.mjs reports a **second, parallel** set of reachability numbers that also counts
+  // path-shaped inline code naming a corpus document (`onboarding/STATE.md`) as an edge. The rated
+  // fields never move: `orphans` and `reachable_ratio` stay markdown-link-only, and the linkage
+  // anchors in rubric.md read those. See links.mjs's soft_references block.
+  links: { soft_references: false },
   language: 'zh-TW',
 };
 
@@ -358,6 +364,7 @@ export function loadConfig(rootDir, configFile = path.join(rootDir, CONFIG_FILEN
     coverage: { ...DEFAULTS.coverage, ...(parsed.coverage ?? {}) },
     targets: { ...DEFAULTS.targets, ...(parsed.targets ?? {}) },
     rules: { ...DEFAULTS.rules, ...(parsed.rules ?? {}) },
+    links: { ...DEFAULTS.links, ...(parsed.links ?? {}) },
     // economy was the only nested map without this, so `economy: { pollution_max: 0.2 }` used to
     // leave entry_cost_tiers undefined rather than at its default. Nothing noticed because nothing
     // read the field; now that inventory.mjs does, a partial economy block would have crashed it.
@@ -894,6 +901,40 @@ export function extractLinks(text) {
     for (const m of line.matchAll(LINK_RE)) links.push({ target: m[1], line: i + 1 });
   });
   return links;
+}
+
+// --- soft references (opt-in) -----------------------------------------------------
+//
+// Some trees index their documents as path-shaped inline code — `onboarding/STATE.md` — rather than
+// as markdown links. In a terminal that path is already clickable, so the link is redundant, and an
+// instruction file written that way can name twenty documents while `links.mjs` sees zero edges and
+// reports every one of them as an orphan. The documents are reachable; the notation is not one the
+// link parser knows.
+//
+// Only a span that ends in a markdown extension counts, and the caller additionally requires the
+// resolved path to be **in the corpus** — two conditions that together keep ordinary prose out
+// (`config.freshness` and `docs/` are not documents; `a note.md` has a space and is not a path).
+// This is deliberately narrower than extractCodeRefs, which answers a different question (does this
+// claim carry a code coordinate) and is allowed to match non-markdown paths and API shapes.
+const SOFT_REF_RE = /`([^`\n]+)`/g;
+const MD_EXT_RE = /\.(md|mdx|markdown)$/i;
+
+export function extractSoftReferences(text) {
+  const refs = [];
+  let inFence = false;
+  text.split(/\r?\n/).forEach((line, i) => {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      return;
+    }
+    if (inFence) return;
+    for (const m of line.matchAll(SOFT_REF_RE)) {
+      const target = m[1].trim();
+      if (!MD_EXT_RE.test(target) || /\s/.test(target)) continue;
+      refs.push({ target, line: i + 1 });
+    }
+  });
+  return refs;
 }
 
 // --- Freshness date extraction --------------------------------------------------

@@ -130,7 +130,13 @@ When `.docgrad.yml` already exists, rerunning init = rescan, using the existing 
     `apps/api/src/contract/contract-approval.service.ts`, `apps/api/src/timesheet`) — retrieval.mjs uses them to mechanically
     compute marginal cost and traceability (see [rubric.md](rubric.md) §Token economy report / Traceability); leaving it empty
     falls back to LLM simulation from `scenario`, which still produces areas/index_hotness
-13. `rules.pattern`: the rule-line detection string, default `**MUST` (reuse whatever rule-marking convention the repo already
+13. `links.soft_references` (yes/no; **default `false` = today's behaviour**). Ask it only when the scan found an index that
+    names documents as inline code rather than as markdown links — the giveaway is a high orphan count on a tree whose index
+    plainly lists everything. On, `links.mjs` reports a second `soft_references` block beside the rated fields, counting
+    path-shaped inline code (`` `docs/guide.md` ``) that resolves into the corpus as an edge. It changes **no** rating: the
+    linkage anchors read `orphans`/`reachable_ratio`, which stay markdown-link-only. The gap between the two ratios is the
+    finding — a large one means the index works for a reader and not for a link checker.
+14. `rules.pattern`: the rule-line detection string, default `**MUST` (reuse whatever rule-marking convention the repo already
     has; usually no need to change it)
 
 ## 3. Write the file
@@ -170,6 +176,8 @@ correctness_sample: 8
 claim_candidates_cap: 60   # how many ranked claim candidates inventory.mjs emits; without --exclude-ledger (#54) this is the ceiling cumulative coverage can reach. Leave at 60 until claim_population.truncated is true and the ledger has nearly filled the window
 scenario: "add a typical new feature to <some module>"   # LLM-simulation fallback when scenarios is absent
 scenarios: [src/foo/bar.ts, src/foo]      # used by retrieval.mjs to mechanically simulate marginal cost + traceability; optional
+links:
+  soft_references: false   # true = also report reachability counting inline-code paths as edges, in a separate block; never changes a rating
 rules:
   pattern: "**MUST"   # rule-line detection string (used by inventory.mjs structure.rules), this is the default
 language: zh-TW
