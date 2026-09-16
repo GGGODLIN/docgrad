@@ -407,7 +407,7 @@ individual dimension did not).
     disclosure is the per-round `claim_population.truncated`, which is emitted whether or not anyone changed the field.
 - **v1.9.0 — a `corpus_hash` move here may be a parser fix rather than a corpus edit** (**not an anchor change**): inline
   lists are now split on commas **outside quotes**, so a config containing `["docs/a,b/"]` selects a different corpus than
-  it used to. `git log` on `.docgrad.yml` separates the two, and the newer side is the corrected measurement.
+  it used to. Compare the tool version against the config actually in use; the config's own history usually tells them apart.
 - **v1.8.0 — the rules for applying the anchors are fingerprinted, and the sampling window counts what it can draw**
   (issues #56, #54, #57) (**not an anchor change**): no ★1–★5 threshold moved and every shipped default is unchanged.
   - **New `judgement_hash`**, covering `audit.md` and `placement.md` — the files that decide *how* the anchors are applied

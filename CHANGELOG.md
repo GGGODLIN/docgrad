@@ -57,7 +57,7 @@ moves**, because it fingerprints the whole of `reference/rubric.md` and this add
   scope someone widened on purpose.
 - **Docs: §Version history now covers v1.9.0's conditional `corpus_hash` move** — a break drawn there
   may be the inline-list parser fix rather than a corpus edit, and `git log` on `.docgrad.yml`
-  separates them. Documentation only; `rubric_hash` moves with it (`21fcfd36` → `12a63a5c`, measured
+  separates them. Documentation only; `rubric_hash` moves with it (`21fcfd36` → `1bd26aa6`, measured
   on `tests/fixtures/basic`), no other fingerprint does.
 
 ## 1.9.1 — 2026-09-16
