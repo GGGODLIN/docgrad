@@ -5,6 +5,16 @@ For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](doc
 
 ## Unreleased
 
+Four measurement fixes and one documentation entry. No ★1–★5 anchor text changed and no default
+moved — **but `rubric_hash` moves**, from `21fcfd36` to `1bd26aa6` (measured on
+`tests/fixtures/basic`), because it fingerprints the whole of `reference/rubric.md` and the last item
+below adds a section to it. `judgement_hash`, `thresholds_hash` and `corpus_hash` are unmoved.
+
+That is a ruler fingerprint moving in a patch release, which normally would not happen. It is
+deliberate here: the section being added is the one a reader consults **to interpret a break**, and
+holding it back so the hash stays still would have left everyone who sees a v1.9.0 `corpus_hash` move
+without the note that explains it. The hash moved; no anchor did.
+
 - **Fixed (#75): a dangling *ancestor* symlink still disclosed whether a directory outside the root
   exists.** #57 closed this oracle for a link target's final component; the level above stayed open.
   With `jump -> /outside/dir` and a link `jump/x.md`, `lstat` on the final component throws because
@@ -43,11 +53,6 @@ For version-number semantics (semver, docgrad-specific) see [docs/how-to.md](doc
   an empty list parse exactly as before, and no fingerprint moves. This is one shape, not a general
   syntax check — a missing closing bracket (`docs_dirs: [docs/`) is still accepted quietly, and is
   left alone here.
-**Documentation only. No script, no config field, no ★1–★5 anchor text changed — but `rubric_hash`
-moves**, because it fingerprints the whole of `reference/rubric.md` and this adds a section to it.
-`judgement_hash`, `thresholds_hash` and `corpus_hash` are unmoved (measured on
-`tests/fixtures/basic`: `21fcfd36` → `1b547920`, the other three byte-identical).
-
 - **Added: a §Version history entry for v1.9.0's inline-list parser fix.** The CHANGELOG already
   records that a config containing a quoted comma now selects a different corpus; §Version history is
   where a reader goes to interpret the `report` break that results, and until now it said nothing
@@ -55,10 +60,6 @@ moves**, because it fingerprints the whole of `reference/rubric.md` and this add
   parser fix rather than a corpus edit**, `report` cannot tell the two apart, and `git log` on
   `.docgrad.yml` settles it — so the newer side is read as the corrected measurement rather than as a
   scope someone widened on purpose.
-- **Docs: §Version history now covers v1.9.0's conditional `corpus_hash` move** — a break drawn there
-  may be the inline-list parser fix rather than a corpus edit, and `git log` on `.docgrad.yml`
-  separates them. Documentation only; `rubric_hash` moves with it (`21fcfd36` → `1bd26aa6`, measured
-  on `tests/fixtures/basic`), no other fingerprint does.
 
 ## 1.9.1 — 2026-09-16
 
